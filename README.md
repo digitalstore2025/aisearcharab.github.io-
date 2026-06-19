@@ -39,14 +39,14 @@ hugo --minify --gc
 ## المعمارية
 
 ```text
-content/          # التحقيقات والأدلة والسياسات
- data/             # المصادر والادعاءات والكيانات
- schemas/          # عقود JSON المرجعية
- layouts/          # قوالب Hugo وSchema.org وSearch JSON
- static/           # CSS وCNAME
- scripts/          # التحقق من البيانات
- tests/            # اختبارات المستودع
- .github/workflows # CI/CD
+content/           # التحقيقات والأدلة والسياسات
+data/              # المصادر والادعاءات والكيانات
+schemas/           # عقود JSON المرجعية
+layouts/           # قوالب Hugo وSchema.org وSearch JSON
+static/            # CSS وCNAME
+scripts/           # التحقق من البيانات
+tests/             # اختبارات المستودع
+.github/workflows/ # CI/CD
 ```
 
 ## قواعد النشر
