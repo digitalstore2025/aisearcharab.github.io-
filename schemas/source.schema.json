@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "SourceRecord",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "title", "publisher", "url", "accessed_at", "source_type", "language", "reliability"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "title": {"type": "string", "minLength": 3},
+    "publisher": {"type": "string", "minLength": 2},
+    "url": {"type": "string", "format": "uri"},
+    "archive_url": {"type": ["string", "null"]},
+    "published_at": {"type": ["string", "null"]},
+    "accessed_at": {"type": "string"},
+    "source_type": {"enum": ["official-document", "dataset", "webpage", "social-post", "interview", "media-report", "academic-paper", "legal-record", "other"]},
+    "language": {"type": "string", "minLength": 2, "maxLength": 8},
+    "reliability": {"enum": ["primary", "secondary", "tertiary", "unverified"]},
+    "integrity": {"type": "object"},
+    "notes": {"type": ["string", "null"]}
+  }
+}
