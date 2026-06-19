@@ -1,0 +1,14 @@
+{
+  "id": "example-source",
+  "title": "Example primary source",
+  "publisher": "Example publisher",
+  "url": "https://example.com/source",
+  "archive_url": null,
+  "published_at": "2026-06-19T00:00:00Z",
+  "accessed_at": "2026-06-19T08:00:00+03:00",
+  "source_type": "official-document",
+  "language": "ar",
+  "reliability": "primary",
+  "integrity": {"sha256": null, "local_copy": false},
+  "notes": "Template record; replace before use in published reporting."
+}
