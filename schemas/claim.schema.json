@@ -1,0 +1,18 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ClaimRecord",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "text", "claim_type", "confidence", "sources", "review_status", "verified_at"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "text": {"type": "string", "minLength": 10},
+    "claim_type": {"enum": ["verified-fact", "estimate", "inference", "third-party-claim"]},
+    "confidence": {"enum": ["high", "medium", "low", "unverified"]},
+    "sources": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},
+    "review_status": {"enum": ["draft", "reviewed", "published", "rejected"]},
+    "verified_at": {"type": "string"},
+    "reviewer": {"type": ["string", "null"]},
+    "notes": {"type": ["string", "null"]}
+  }
+}
