@@ -1,0 +1,27 @@
+name: Validate site
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m unittest discover -s tests -v
+      - run: python scripts/validate_data.py
+      - uses: peaceiris/actions-hugo@v3
+        with:
+          hugo-version: "0.147.9"
+          extended: true
+      - run: hugo --minify --gc
+      - name: Verify generated assets
+        run: |
+          test -f public/index.html
+          test -f public/index.json
+          test -f public/robots.txt
+          test -f public/CNAME

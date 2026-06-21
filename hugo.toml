@@ -1,0 +1,26 @@
+baseURL = "https://aisearcharab.com/"
+languageCode = "ar"
+defaultContentLanguage = "ar"
+title = "AI Search Arab"
+enableRobotsTXT = true
+enableGitInfo = true
+
+[pagination]
+  pagerSize = 12
+
+[params]
+  description = "منصة عربية للتحقيق الرقمي وOSINT والتحقق وتحليل البيانات"
+  author = "AI Search Arab"
+  locale = "ar_AR"
+
+[markup.goldmark.renderer]
+  unsafe = false
+
+[outputs]
+  home = ["HTML", "RSS", "JSON"]
+
+[security]
+  enableInlineShortcodes = false
+
+[minify]
+  minifyOutput = true

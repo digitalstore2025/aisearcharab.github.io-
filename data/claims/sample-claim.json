@@ -1,0 +1,11 @@
+{
+  "id": "sample-claim",
+  "text": "هذا سجل تعليمي يوضح بنية الادعاء ولا يمثل نتيجة صحفية منشورة.",
+  "claim_type": "third-party-claim",
+  "confidence": "unverified",
+  "sources": ["example-source"],
+  "review_status": "draft",
+  "verified_at": "2026-06-19T08:00:00+03:00",
+  "reviewer": null,
+  "notes": "يجب استبداله ببيانات حقيقية قبل النشر."
+}

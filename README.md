@@ -1,70 +1,22 @@
-# aisearcharab.com — The 2026 Investigative Hub
+# aisearcharab.com
 
-منصة عربية متخصصة في الصحافة الاستقصائية الرقمية، التحقق، OSINT، تحليل البيانات، وهندسة أدوات البحث المدعومة بالذكاء الاصطناعي.
+Arabic-first investigative journalism, OSINT, fact-checking, and data-analysis platform.
 
-## الرؤية
+## Implemented
 
-بناء مرجع عربي موثوق للباحثين والصحفيين عبر الجمع بين:
+- Hugo static site with RTL layouts.
+- Investigations, toolkits, methodology, and corrections sections.
+- Structured source, claim, and entity records.
+- JSON schemas and Python validation tests.
+- Static JSON search index and Schema.org metadata.
+- Privacy, terms, security, CODEOWNERS, Dependabot, CI, and custom domain configuration.
 
-- الدقة الصحفية والتحقق متعدد المراحل.
-- الشفافية الكاملة في المصادر ومسار الأدلة.
-- أدوات OSINT قابلة للتكرار والتدقيق.
-- تحليل البيانات والذكاء الاصطناعي المسؤول.
-- بنية Static-First سريعة، منخفضة التكلفة، ومحدودة السطح الهجومي.
+## Local checks
 
-## المرجع التنفيذي
-
-الوثيقة المعتمدة للمشروع:
-
-- [`docs/EXECUTIVE_BLUEPRINT.md`](docs/EXECUTIVE_BLUEPRINT.md)
-- [`AGENTS.md`](AGENTS.md) لتعليمات الوكلاء والمساعدين البرمجيين.
-- [`.github/copilot-instructions.md`](.github/copilot-instructions.md) لقواعد التطوير داخل GitHub Copilot.
-
-## المعمارية المستهدفة
-
-```text
-Hugo Static Site
-├── content/          # التحقيقات، الأدلة، الأدوات، والمنهجيات
-├── data/             # JSON/YAML: المصادر، الكيانات، وسجلات التحقق
-├── layouts/          # قوالب العرض وبيانات Schema.org
-├── assets/           # CSS/JS/Images optimized at build time
-├── static/           # ملفات ثابتة منشورة كما هي
-├── scripts/          # أدوات التحقق والتحويل والفحص
-├── agents/           # وكلاء البحث والتحليل المحليون
-├── tests/            # اختبارات المحتوى، الروابط، Schema، والأمان
-└── .github/workflows # CI/CD وفحوص الجودة والنشر
+```bash
+python -m unittest discover -s tests -v
+python scripts/validate_data.py
+hugo --minify --gc
 ```
 
-## مبادئ غير قابلة للتفاوض
-
-1. **لا معلومة بلا مصدر قابل للفحص.**
-2. **لا استنتاج يُقدَّم كحقيقة.**
-3. **لا نشر لبيانات شخصية حساسة دون ضرورة ومصلحة عامة واضحة.**
-4. **لا كود مولّد آلياً يدخل الإنتاج دون مراجعة واختبارات.**
-5. **لا تحليل تنبؤي بلا توضيح البيانات والافتراضات وحدود الثقة.**
-6. **الأمان عملية مستمرة، وليس ادعاءً مطلقاً.**
-7. **الأداء يُقاس ميدانياً ولا يُضمن بشعار تسويقي.**
-
-## نموذج المحتوى
-
-كل مادة استقصائية يجب أن تتضمن — بحسب طبيعتها — العناصر الآتية:
-
-- السؤال الاستقصائي.
-- فرضية العمل.
-- سجل المصادر والأدلة.
-- منهجية الجمع والتحقق.
-- خط زمني.
-- الكيانات والعلاقات.
-- النتائج المؤكدة.
-- الاستنتاجات المرجحة مع درجة الثقة.
-- القيود والثغرات المعرفية.
-- حق الرد والتحديثات والتصحيحات.
-- أدوات أو خطوات قابلة لإعادة التطبيق.
-
-## الحالة الحالية
-
-المستودع في مرحلة التأسيس. الخطوة التالية هي توليد Skeleton لمشروع Hugo، إعداد CI/CD، ثم بناء نموذج المحتوى ونظام Provenance Tracking قبل إطلاق الواجهة العامة.
-
-## الترخيص
-
-يُحدد الترخيص قبل أول إصدار عام. لا تفترض أن المحتوى أو البيانات متاحة لإعادة الاستخدام ما لم يوضَّح ذلك صراحةً داخل المستودع.
+See `docs/EXECUTIVE_BLUEPRINT.md` and `AGENTS.md` for project governance.

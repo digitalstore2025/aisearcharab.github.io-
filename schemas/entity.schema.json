@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EntityRecord",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "entity_type", "status", "aliases"],
+  "properties": {
+    "id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
+    "name": {"type": "string", "minLength": 2},
+    "entity_type": {"enum": ["person", "organization", "company", "government", "location", "project", "other"]},
+    "status": {"enum": ["active", "inactive", "unknown"]},
+    "aliases": {"type": "array", "items": {"type": "string"}, "uniqueItems": true},
+    "description": {"type": ["string", "null"]},
+    "source_ids": {"type": "array", "items": {"type": "string"}, "uniqueItems": true}
+  }
+}

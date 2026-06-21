@@ -1,0 +1,9 @@
+{
+  "id": "aisearcharab",
+  "name": "AI Search Arab",
+  "entity_type": "project",
+  "status": "active",
+  "aliases": ["aisearcharab.com"],
+  "description": "منصة عربية للتحقيق الرقمي والتحقق وOSINT.",
+  "source_ids": []
+}
