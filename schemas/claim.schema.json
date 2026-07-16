@@ -5,14 +5,50 @@
   "additionalProperties": false,
   "required": ["id", "text", "claim_type", "confidence", "sources", "review_status", "verified_at"],
   "properties": {
-    "id": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"},
-    "text": {"type": "string", "minLength": 10},
-    "claim_type": {"enum": ["verified-fact", "estimate", "inference", "third-party-claim"]},
-    "confidence": {"enum": ["high", "medium", "low", "unverified"]},
-    "sources": {"type": "array", "items": {"type": "string"}, "minItems": 1, "uniqueItems": true},
-    "review_status": {"enum": ["draft", "reviewed", "published", "rejected"]},
-    "verified_at": {"type": "string"},
-    "reviewer": {"type": ["string", "null"]},
-    "notes": {"type": ["string", "null"]}
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+      "description": "معرف مستقر وحيد، بصيغة kebab-case صغيرة"
+    },
+    "text": {
+      "type": "string",
+      "minLength": 10,
+      "description": "نص الادعاء الأساسي"
+    },
+    "claim_type": {
+      "enum": ["verified-fact", "estimate", "inference", "third-party-claim"],
+      "description": "نوع الادعاء: verified-fact (حقيقة موثقة)، estimate (تقدير)، inference (استنتاج)، third-party-claim (ادعاء طرف ثالث)"
+    },
+    "confidence": {
+      "enum": ["high", "medium", "low", "unverified"],
+      "description": "درجة ثقة الفريق في صحة هذا الادعاء بناءً على الأدلة المتاحة"
+    },
+    "sources": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*$"
+      },
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "قائمة معرفات المصادر التي تدعم هذا الادعاء"
+    },
+    "review_status": {
+      "enum": ["draft", "reviewed", "published", "rejected"],
+      "description": "حالة المراجعة: draft (مسودة)، reviewed (تمت مراجعتها)، published (منشورة)، rejected (مرفوضة)"
+    },
+    "verified_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "تاريخ آخر تحقق من الادعاء بصيغة ISO 8601"
+    },
+    "reviewer": {
+      "type": ["string", "null"],
+      "description": "معرف أو اسم المراجع الذي تحقق من الادعاء"
+    },
+    "notes": {
+      "type": ["string", "null"],
+      "description": "ملاحظات إضافية عن الادعاء أو حدوده أو تعارضات"
+    }
   }
 }
