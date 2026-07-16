@@ -1,0 +1,11 @@
+{
+  "id": "example-claim-001",
+  "text": "The organization reported a 15% increase in operational efficiency during the fourth quarter of 2025.",
+  "claim_type": "verified-fact",
+  "confidence": "high",
+  "sources": ["example-source-001"],
+  "review_status": "published",
+  "verified_at": "2026-01-15T11:00:00Z",
+  "reviewer": "editor-001",
+  "notes": "Verified against official reports and media coverage"
+}

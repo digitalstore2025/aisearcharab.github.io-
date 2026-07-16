@@ -1,0 +1,11 @@
+{
+  "id": "example-claim-002",
+  "text": "The population in the region is estimated to be around 2.5 million as of early 2026.",
+  "claim_type": "estimate",
+  "confidence": "medium",
+  "sources": ["example-source-002"],
+  "review_status": "reviewed",
+  "verified_at": "2026-01-14T09:30:00Z",
+  "reviewer": "researcher-002",
+  "notes": "Based on government census data; actual figures may vary by methodology"
+}

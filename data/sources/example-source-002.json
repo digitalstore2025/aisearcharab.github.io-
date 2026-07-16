@@ -1,0 +1,17 @@
+{
+  "id": "example-source-002",
+  "title": "Official Government Report",
+  "publisher": "Ministry of Communications",
+  "url": "https://example-gov.org/reports/2026-01.pdf",
+  "archive_url": null,
+  "published_at": "2026-01-12T00:00:00Z",
+  "accessed_at": "2026-01-14T10:15:00+03:00",
+  "source_type": "official-document",
+  "language": "ar",
+  "reliability": "primary",
+  "integrity": {
+    "sha256": "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789",
+    "local_copy": true
+  },
+  "notes": "Official document - original language Arabic"
+}

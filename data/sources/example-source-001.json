@@ -1,0 +1,17 @@
+{
+  "id": "example-source-001",
+  "title": "BBC News Article",
+  "publisher": "BBC",
+  "url": "https://www.bbc.com/news/world",
+  "archive_url": "https://web.archive.org/web/20260115/https://www.bbc.com/news/world",
+  "published_at": "2026-01-10T09:00:00Z",
+  "accessed_at": "2026-01-15T14:30:00+03:00",
+  "source_type": "media-report",
+  "language": "en",
+  "reliability": "primary",
+  "integrity": {
+    "sha256": null,
+    "local_copy": false
+  },
+  "notes": "Verified news source with editorial standards"
+}

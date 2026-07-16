@@ -1,0 +1,9 @@
+{
+  "id": "example-entity-002",
+  "name": "John Smith",
+  "entity_type": "person",
+  "status": "active",
+  "aliases": ["J. Smith", "John S."],
+  "description": "Executive director of Example Organization since 2024",
+  "source_ids": ["example-source-001"]
+}

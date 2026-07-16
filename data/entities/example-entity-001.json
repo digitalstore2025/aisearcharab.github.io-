@@ -1,0 +1,9 @@
+{
+  "id": "example-entity-001",
+  "name": "Example Organization",
+  "entity_type": "organization",
+  "status": "active",
+  "aliases": ["EO", "The Organization"],
+  "description": "A fictional organization used for testing and documentation purposes",
+  "source_ids": ["example-source-001"]
+}

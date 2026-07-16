@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Disallow: /draft/
+Disallow: /.git/
+Disallow: /scripts/
+Disallow: /tests/
+
+Sitemap: https://aisearcharab.com/sitemap.xml
+Sitemap: https://aisearcharab.com/sitemap.xml.gz
