@@ -64,3 +64,11 @@ jobs:
           test -f public/favicon.svg
           test -f public/site.webmanifest
           test -f public/.well-known/security.txt
+
+      - name: Upload validated preview artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: validated-public-site
+          path: public
+          if-no-files-found: error
+          retention-days: 7
