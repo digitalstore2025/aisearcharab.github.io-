@@ -22,17 +22,33 @@ from .repository import get_published_content, list_indexed_content
 from .routes_admin import router as admin_router
 from .routes_admin_detail import router as admin_detail_router
 from .routes_auth import router as auth_router
-from .schemas import CapabilitiesResponse, ClaimSummary, ContentDetail, HealthResponse, SearchResponse, SearchResult
+from .schemas import CapabilitiesResponse, HealthResponse, PublicClaimSummary, PublicContentDetail, SearchResponse, SearchResult, SourceSummary
 from .search import rank_items
 
 ADMIN_STATIC = Path(__file__).resolve().parent / "admin_static"
 _PUBLIC_CLAIM_STATES = {"reviewed", "published"}
 
 
-def _public_content(item) -> ContentDetail:
-    detail = ContentDetail.model_validate(item)
-    public_claims = [ClaimSummary.model_validate(claim) for claim in item.claims if claim.review_status in _PUBLIC_CLAIM_STATES]
-    return detail.model_copy(update={"claims": public_claims})
+def _public_content(item) -> PublicContentDetail:
+    return PublicContentDetail.model_validate(
+        {
+            "slug": item.slug,
+            "url_path": item.url_path,
+            "title": item.title,
+            "summary": item.summary,
+            "body": item.body,
+            "section": item.section,
+            "language": item.language,
+            "published_at": item.published_at,
+            "updated_at": item.updated_at,
+            "sources": [SourceSummary.model_validate(source) for source in item.sources],
+            "claims": [
+                PublicClaimSummary.model_validate(claim)
+                for claim in item.claims
+                if claim.review_status in _PUBLIC_CLAIM_STATES
+            ],
+        }
+    )
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -77,8 +93,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def capabilities() -> CapabilitiesResponse:
         return CapabilitiesResponse(api_version=__version__)
 
-    @app.get(f"{runtime_settings.api_prefix}/content/{{slug}}", response_model=ContentDetail, tags=["content"])
-    def content_detail(slug: str, session: Session = Depends(get_db)) -> ContentDetail:
+    @app.get(f"{runtime_settings.api_prefix}/content/{{slug}}", response_model=PublicContentDetail, tags=["content"])
+    def content_detail(slug: str, session: Session = Depends(get_db)) -> PublicContentDetail:
         if len(slug) > 180:
             raise HTTPException(status_code=400, detail="invalid slug")
         item = get_published_content(session, slug)

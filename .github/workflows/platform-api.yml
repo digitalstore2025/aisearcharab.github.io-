@@ -57,15 +57,8 @@ jobs:
       - name: Generate OpenAPI contract
         run: python scripts/export_openapi.py --output ../../contracts/openapi.generated.json
 
-      - name: Validate and pin OpenAPI contract
-        shell: bash
-        run: |
-          set -euo pipefail
-          python -m json.tool ../../contracts/openapi.generated.json > /dev/null
-          expected="$(tr -d '[:space:]' < ../../contracts/openapi.sha256)"
-          actual="$(sha256sum ../../contracts/openapi.generated.json | awk '{print $1}')"
-          test -n "$expected"
-          test "$actual" = "$expected"
+      - name: Validate generated OpenAPI JSON
+        run: python -m json.tool ../../contracts/openapi.generated.json > /dev/null
 
       - name: Upload generated OpenAPI contract
         uses: actions/upload-artifact@v4
@@ -74,6 +67,15 @@ jobs:
           path: platform/contracts/openapi.generated.json
           if-no-files-found: error
           retention-days: 7
+
+      - name: Verify pinned OpenAPI digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$(tr -d '[:space:]' < ../../contracts/openapi.sha256)"
+          actual="$(sha256sum ../../contracts/openapi.generated.json | awk '{print $1}')"
+          test -n "$expected"
+          test "$actual" = "$expected"
 
       - name: Verify database migration
         env:

@@ -47,6 +47,16 @@ class ClaimSummary(BaseModel):
     verified_at: datetime | None = None
 
 
+class PublicClaimSummary(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    claim_key: str
+    text: str
+    claim_type: str
+    confidence: str
+    verified_at: datetime | None = None
+
+
 class ContentDetail(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -64,6 +74,22 @@ class ContentDetail(BaseModel):
     updated_at: datetime
     sources: list[SourceSummary] = Field(default_factory=list)
     claims: list[ClaimSummary] = Field(default_factory=list)
+
+
+class PublicContentDetail(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    slug: str
+    url_path: str
+    title: str
+    summary: str
+    body: str
+    section: str
+    language: str
+    published_at: datetime
+    updated_at: datetime
+    sources: list[SourceSummary] = Field(default_factory=list)
+    claims: list[PublicClaimSummary] = Field(default_factory=list)
 
 
 class SearchResult(BaseModel):

@@ -4,13 +4,17 @@ from fastapi.testclient import TestClient
 from aisearcharab_api.models import Claim, ContentItem
 
 
-def test_content_detail_includes_approved_provenance(client: TestClient) -> None:
+def test_content_detail_includes_only_public_provenance(client: TestClient) -> None:
     response = client.get("/v1/content/gpt-5-arabic-analysis")
     assert response.status_code == 200
     payload = response.json()
     assert payload["sources"][0]["source_key"] == "official-model-documentation"
     assert payload["claims"][0]["claim_key"] == "retrieval-only-contract"
-    assert payload["is_indexed"] is True
+    assert "id" not in payload
+    assert "status" not in payload
+    assert "is_indexed" not in payload
+    assert "id" not in payload["claims"][0]
+    assert "review_status" not in payload["claims"][0]
 
 
 def test_public_content_hides_draft_and_rejected_claims(
