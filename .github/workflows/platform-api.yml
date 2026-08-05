@@ -43,7 +43,7 @@ jobs:
         run: python -m compileall -q src tests scripts alembic
 
       - name: Run API tests
-        run: pytest
+        run: python -m pytest
 
       - name: Evaluate lexical search
         run: python scripts/evaluate_search.py

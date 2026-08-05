@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
+
+API_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(API_ROOT / "src"))
 
 from aisearcharab_api.config import Settings
 from aisearcharab_api.main import create_app

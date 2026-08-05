@@ -29,4 +29,4 @@ where = ["src"]
 [tool.pytest.ini_options]
 addopts = "-q --strict-markers --disable-warnings"
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
