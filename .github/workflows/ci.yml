@@ -29,7 +29,9 @@ jobs:
         run: python -m unittest discover -s tests -v
 
       - name: Validate structured data
-        run: python scripts/validate_data.py
+        run: |
+          python scripts/validate_data.py
+          python scripts/validate_production_integrity.py
 
       - uses: peaceiris/actions-hugo@v3
         with:
