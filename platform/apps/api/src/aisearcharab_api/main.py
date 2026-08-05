@@ -22,10 +22,17 @@ from .repository import get_published_content, list_indexed_content
 from .routes_admin import router as admin_router
 from .routes_admin_detail import router as admin_detail_router
 from .routes_auth import router as auth_router
-from .schemas import CapabilitiesResponse, ContentDetail, HealthResponse, SearchResponse, SearchResult
+from .schemas import CapabilitiesResponse, ClaimSummary, ContentDetail, HealthResponse, SearchResponse, SearchResult
 from .search import rank_items
 
 ADMIN_STATIC = Path(__file__).resolve().parent / "admin_static"
+_PUBLIC_CLAIM_STATES = {"reviewed", "published"}
+
+
+def _public_content(item) -> ContentDetail:
+    detail = ContentDetail.model_validate(item)
+    public_claims = [ClaimSummary.model_validate(claim) for claim in item.claims if claim.review_status in _PUBLIC_CLAIM_STATES]
+    return detail.model_copy(update={"claims": public_claims})
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -77,7 +84,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         item = get_published_content(session, slug)
         if item is None:
             raise HTTPException(status_code=404, detail="content not found")
-        return ContentDetail.model_validate(item)
+        return _public_content(item)
 
     @app.get(f"{runtime_settings.api_prefix}/search", response_model=SearchResponse, tags=["search"])
     def search_content(

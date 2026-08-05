@@ -52,6 +52,10 @@ def _clear_auth_cookies(response: Response, request: Request) -> None:
     response.delete_cookie(settings.csrf_cookie_name, path="/", secure=settings.secure_cookies, samesite="strict")
 
 
+def _aware(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
 @router.post("/login", response_model=LoginResponse)
 def login(
     payload: LoginRequest,
@@ -69,13 +73,17 @@ def login(
 
     user = db.scalar(select(User).where(User.email == email))
     now = datetime.now(timezone.utc)
-    locked = user is not None and user.locked_until is not None and (user.locked_until if user.locked_until.tzinfo else user.locked_until.replace(tzinfo=timezone.utc)) > now
-    valid = user is not None and user.is_active and not locked and verify_password(payload.password, user.password_hash)
+    if user is None:
+        perform_dummy_password_check(payload.password)
+        password_matches = False
+        locked = False
+    else:
+        password_matches = verify_password(payload.password, user.password_hash)
+        locked = user.locked_until is not None and _aware(user.locked_until) > now
 
+    valid = user is not None and user.is_active and not locked and password_matches
     if not valid:
-        if user is None:
-            perform_dummy_password_check(payload.password)
-        elif not locked:
+        if user is not None and not locked:
             user.failed_login_count += 1
             if user.failed_login_count >= settings.login_max_failures:
                 user.locked_until = now + timedelta(minutes=settings.login_lock_minutes)

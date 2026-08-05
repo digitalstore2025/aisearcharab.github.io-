@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timezone
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
@@ -18,6 +18,7 @@ from .schemas import (
     AuditEventPublic,
     ClaimCreate,
     ClaimReviewRequest,
+    ClaimSummary,
     ContentAdminSummary,
     ContentCreate,
     ContentDetail,
@@ -31,6 +32,8 @@ from .schemas import (
 from .security import PasswordPolicyError, hash_password, normalize_email
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+_EDITABLE_STATES = {"draft", "reviewed"}
+_PUBLISHABLE_CLAIM_STATES = {"reviewed", "published"}
 
 
 def _request_id(request: Request) -> str | None:
@@ -69,6 +72,19 @@ def _get_content(db: Session, content_id: str) -> ContentItem:
     return item
 
 
+def _assert_editable(item: ContentItem) -> None:
+    if item.status not in _EDITABLE_STATES:
+        raise HTTPException(status_code=409, detail="published or archived content must return to draft before editing")
+
+
+def _demote_reviewed(item: ContentItem) -> bool:
+    if item.status != "reviewed":
+        return False
+    item.status = "draft"
+    item.is_indexed = False
+    return True
+
+
 def _revoke_user_sessions(db: Session, user_id: str) -> None:
     db.execute(
         update(AdminSession)
@@ -102,17 +118,18 @@ def create_user(
 
     user = User(email=email, display_name=payload.display_name.strip(), role=payload.role, password_hash=encoded)
     db.add(user)
-    record_audit(
-        db,
-        action="user.create",
-        outcome="success",
-        actor_user_id=principal.user.id,
-        target_type="user",
-        target_id=user.id,
-        request_id=_request_id(request),
-        metadata={"role": payload.role},
-    )
     try:
+        db.flush()
+        record_audit(
+            db,
+            action="user.create",
+            outcome="success",
+            actor_user_id=principal.user.id,
+            target_type="user",
+            target_id=user.id,
+            request_id=_request_id(request),
+            metadata={"role": payload.role},
+        )
         db.commit()
     except IntegrityError as exc:
         db.rollback()
@@ -129,6 +146,9 @@ def update_user(
     principal: Annotated[Principal, Depends(require_mutation("users:manage"))],
     db: Annotated[Session, Depends(get_db)],
 ) -> UserPublic:
+    changes = payload.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(status_code=400, detail="no changes supplied")
     user = db.get(User, user_id)
     if user is None:
         raise HTTPException(status_code=404, detail="user not found")
@@ -212,17 +232,18 @@ def create_content(
         source_authority=payload.source_authority,
     )
     db.add(item)
-    record_audit(
-        db,
-        action="content.create",
-        outcome="success",
-        actor_user_id=principal.user.id,
-        target_type="content",
-        target_id=item.id,
-        request_id=_request_id(request),
-        metadata={"slug": item.slug, "status": item.status},
-    )
     try:
+        db.flush()
+        record_audit(
+            db,
+            action="content.create",
+            outcome="success",
+            actor_user_id=principal.user.id,
+            target_type="content",
+            target_id=item.id,
+            request_id=_request_id(request),
+            metadata={"slug": item.slug, "status": item.status},
+        )
         db.commit()
     except IntegrityError as exc:
         db.rollback()
@@ -239,11 +260,15 @@ def update_content(
     principal: Annotated[Principal, Depends(require_mutation("content:write"))],
     db: Annotated[Session, Depends(get_db)],
 ) -> ContentDetail:
+    changes = payload.model_dump(exclude_unset=True)
+    if not changes:
+        raise HTTPException(status_code=400, detail="no changes supplied")
     item = _get_content(db, content_id)
-    if item.status == "published" and "content:publish" not in principal.permissions:
-        raise HTTPException(status_code=403, detail="published content requires publisher permission")
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    _assert_editable(item)
+    previous_status = item.status
+    for field, value in changes.items():
         setattr(item, field, value.strip() if isinstance(value, str) else value)
+    demoted = _demote_reviewed(item)
     record_audit(
         db,
         action="content.update",
@@ -252,7 +277,7 @@ def update_content(
         target_type="content",
         target_id=item.id,
         request_id=_request_id(request),
-        metadata={"status": item.status},
+        metadata={"from_status": previous_status, "to_status": item.status, "review_invalidated": demoted},
     )
     db.commit()
     item = _get_content(db, item.id)
@@ -285,14 +310,16 @@ def transition_content(
     }[payload.status]
     if required_permission not in principal.permissions:
         raise HTTPException(status_code=403, detail="insufficient permissions for transition")
+    if payload.status == "reviewed" and not item.sources:
+        raise HTTPException(status_code=409, detail="at least one source is required before review approval")
     if payload.status == "published":
         if not item.sources:
             raise HTTPException(status_code=409, detail="at least one source is required before publishing")
-        if any(claim.review_status == "draft" for claim in item.claims):
-            raise HTTPException(status_code=409, detail="all claims must be reviewed before publishing")
+        if any(claim.review_status not in _PUBLISHABLE_CLAIM_STATES for claim in item.claims):
+            raise HTTPException(status_code=409, detail="all claims must be approved before publishing")
         item.published_at = item.published_at or datetime.now(timezone.utc)
         item.is_indexed = True
-    elif payload.status in {"draft", "archived"}:
+    elif payload.status in {"draft", "reviewed", "archived"}:
         item.is_indexed = False
 
     previous = item.status
@@ -321,20 +348,27 @@ def add_source(
     db: Annotated[Session, Depends(get_db)],
 ) -> ContentDetail:
     item = _get_content(db, content_id)
+    _assert_editable(item)
     source = db.scalar(select(Source).where(Source.source_key == payload.source_key))
+    source_url = str(payload.url)
     if source is None:
         source = Source(
             source_key=payload.source_key,
             title=payload.title.strip(),
             publisher=payload.publisher.strip(),
-            url=str(payload.url),
+            url=source_url,
             archive_url=str(payload.archive_url) if payload.archive_url else None,
             source_type=payload.source_type,
             language=payload.language,
             reliability=payload.reliability,
         )
-    if source not in item.sources:
-        item.sources.append(source)
+    elif source.url != source_url or source.title != payload.title.strip() or source.publisher != payload.publisher.strip():
+        raise HTTPException(status_code=409, detail="source key already represents different source metadata")
+    if source in item.sources:
+        raise HTTPException(status_code=409, detail="source is already attached")
+    item.sources.append(source)
+    previous_status = item.status
+    demoted = _demote_reviewed(item)
     record_audit(
         db,
         action="content.source.attach",
@@ -343,7 +377,7 @@ def add_source(
         target_type="content",
         target_id=item.id,
         request_id=_request_id(request),
-        metadata={"source_key": payload.source_key, "reliability": payload.reliability},
+        metadata={"source_key": payload.source_key, "reliability": payload.reliability, "from_status": previous_status, "review_invalidated": demoted},
     )
     try:
         db.commit()
@@ -363,26 +397,29 @@ def add_claim(
     db: Annotated[Session, Depends(get_db)],
 ) -> ContentDetail:
     item = _get_content(db, content_id)
-    item.claims.append(
-        Claim(
-            claim_key=payload.claim_key,
-            text=payload.text.strip(),
-            claim_type=payload.claim_type,
-            confidence=payload.confidence,
-            review_status="draft",
-        )
+    _assert_editable(item)
+    claim = Claim(
+        claim_key=payload.claim_key,
+        text=payload.text.strip(),
+        claim_type=payload.claim_type,
+        confidence=payload.confidence,
+        review_status="draft",
     )
-    record_audit(
-        db,
-        action="content.claim.create",
-        outcome="success",
-        actor_user_id=principal.user.id,
-        target_type="content",
-        target_id=item.id,
-        request_id=_request_id(request),
-        metadata={"claim_key": payload.claim_key, "claim_type": payload.claim_type},
-    )
+    item.claims.append(claim)
+    previous_status = item.status
+    demoted = _demote_reviewed(item)
     try:
+        db.flush()
+        record_audit(
+            db,
+            action="content.claim.create",
+            outcome="success",
+            actor_user_id=principal.user.id,
+            target_type="claim",
+            target_id=claim.id,
+            request_id=_request_id(request),
+            metadata={"content_id": item.id, "claim_key": payload.claim_key, "claim_type": payload.claim_type, "from_status": previous_status, "review_invalidated": demoted},
+        )
         db.commit()
     except IntegrityError as exc:
         db.rollback()
@@ -391,20 +428,22 @@ def add_claim(
     return ContentDetail.model_validate(item)
 
 
-@router.patch("/claims/{claim_id}", response_model=ClaimCreate)
+@router.patch("/claims/{claim_id}", response_model=ClaimSummary)
 def review_claim(
     claim_id: str,
     payload: ClaimReviewRequest,
     request: Request,
     principal: Annotated[Principal, Depends(require_mutation("claims:review"))],
     db: Annotated[Session, Depends(get_db)],
-):
-    claim = db.get(Claim, claim_id)
+) -> ClaimSummary:
+    claim = db.scalar(select(Claim).where(Claim.id == claim_id).options(selectinload(Claim.content_item)))
     if claim is None:
         raise HTTPException(status_code=404, detail="claim not found")
+    if claim.content_item.status not in _EDITABLE_STATES:
+        raise HTTPException(status_code=409, detail="claims on published or archived content cannot be changed")
     claim.review_status = payload.review_status
     claim.confidence = payload.confidence
-    claim.verified_at = datetime.now(timezone.utc) if payload.review_status in {"reviewed", "published"} else None
+    claim.verified_at = datetime.now(timezone.utc) if payload.review_status in _PUBLISHABLE_CLAIM_STATES else None
     record_audit(
         db,
         action="claim.review",
@@ -413,15 +452,11 @@ def review_claim(
         target_type="claim",
         target_id=claim.id,
         request_id=_request_id(request),
-        metadata={"review_status": payload.review_status, "confidence": payload.confidence},
+        metadata={"content_id": claim.content_id, "review_status": payload.review_status, "confidence": payload.confidence},
     )
     db.commit()
-    return ClaimCreate(
-        claim_key=claim.claim_key,
-        text=claim.text,
-        claim_type=claim.claim_type,
-        confidence=claim.confidence,
-    )
+    db.refresh(claim)
+    return ClaimSummary.model_validate(claim)
 
 
 @router.get("/audit", response_model=list[AuditEventPublic])

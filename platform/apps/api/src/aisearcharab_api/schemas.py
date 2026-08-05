@@ -59,6 +59,7 @@ class ContentDetail(BaseModel):
     section: str
     language: str
     status: str
+    is_indexed: bool
     published_at: datetime | None = None
     updated_at: datetime
     sources: list[SourceSummary] = Field(default_factory=list)
