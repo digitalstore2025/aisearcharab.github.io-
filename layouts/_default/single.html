@@ -1,1 +1,25 @@
-{{ define "main" }}<article class="content"><p class="meta">{{ .Section }} · {{ .Lastmod.Format "2006-01-02" }}</p><h1>{{ .Title }}</h1>{{ with .Params.confidence }}<span class="badge">درجة الثقة: {{ . }}</span>{{ end }}{{ .Content }}{{ with .Params.limitations }}<h2>القيود</h2><p>{{ . }}</p>{{ end }}{{ with .Params.sources }}<h2>المصادر</h2><ul>{{ range . }}<li><code>{{ . }}</code></li>{{ end }}</ul>{{ end }}</article>{{ end }}
+{{ define "main" }}
+<article class="content" itemscope itemtype="https://schema.org/Article">
+  <header class="article-header">
+    <p class="eyebrow">{{ .Section | default "مادة تحريرية" }}</p>
+    <h1 itemprop="headline">{{ .Title }}</h1>
+    <div class="article-meta">
+      <span>نُشرت: <time itemprop="datePublished" datetime="{{ .Date.Format "2006-01-02" }}">{{ .Date.Format "2006-01-02" }}</time></span>
+      <span>آخر تحديث: <time itemprop="dateModified" datetime="{{ .Lastmod.Format "2006-01-02" }}">{{ .Lastmod.Format "2006-01-02" }}</time></span>
+      {{ with .Params.authors }}<span>إعداد: {{ delimit . "، " }}</span>{{ end }}
+      {{ with .Params.confidence }}<span class="badge badge--{{ . }}">درجة الثقة: {{ . }}</span>{{ end }}
+    </div>
+  </header>
+  <div itemprop="articleBody">{{ .Content }}</div>
+  {{ with .Params.limitations }}<aside class="evidence" aria-labelledby="limitations-title"><h2 id="limitations-title">القيود</h2><p>{{ . }}</p></aside>{{ end }}
+  {{ with .Params.sources }}
+  <section aria-labelledby="sources-title">
+    <h2 id="sources-title">المصادر المرتبطة</h2>
+    <ul class="sources-list">{{ range . }}
+      {{- $source := index site.Data.sources . -}}
+      <li>{{ if $source }}{{ with $source.url }}<a href="{{ . }}" rel="noopener noreferrer">{{ $source.title | default $source.id }}</a>{{ else }}{{ $source.title | default $source.id }}{{ end }}{{ with $source.publisher }} <span class="meta">— {{ . }}</span>{{ end }}{{ else }}<code>{{ . }}</code> <span class="meta">سجل المصدر غير متاح</span>{{ end }}</li>
+    {{ end }}</ul>
+  </section>
+  {{ end }}
+</article>
+{{ end }}
