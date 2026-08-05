@@ -1,5 +1,51 @@
 {{ define "main" }}
-<section class="hero"><div class="shell"><p class="meta">التحقيق الرقمي · OSINT · التحقق · تحليل البيانات</p><h1>نحو صحافة عربية<br>تقودها الأدلة</h1><p>منصة بحثية تحول المصادر المفتوحة إلى تحقيقات قابلة للتدقيق، وأدوات قابلة لإعادة الاستخدام، وسجلات واضحة للادعاءات والأدلة.</p><a class="btn" href="/methodology/">اقرأ منهجية العمل</a></div></section>
-<section class="section"><div class="shell"><h2>مسارات المنصة</h2><div class="grid"><article class="card"><h3>تحقيقات</h3><p>ملفات موثقة تفصل بين الوقائع والادعاءات والاستنتاجات.</p><a href="/investigations/">فتح التحقيقات</a></article><article class="card"><h3>أدوات OSINT</h3><p>أدلة عملية لجمع البيانات والتحقق منها وتحليلها بصورة قانونية وأخلاقية.</p><a href="/toolkits/">فتح الأدوات</a></article><article class="card"><h3>منهجية وشفافية</h3><p>كيف نتحقق، نصنف الثقة، نوثق المصادر، وندير التصحيحات.</p><a href="/methodology/">فتح المنهجية</a></article></div></div></section>
-<section class="section"><div class="shell"><h2>أحدث المواد</h2><div class="grid">{{ range first 6 (where site.RegularPages "Section" "in" (slice "investigations" "toolkits")) }}<article class="card"><span class="badge">{{ .Section }}</span><h3><a href="{{ .RelPermalink }}">{{ .Title }}</a></h3><p class="meta">{{ .Date.Format "2006-01-02" }}</p><p>{{ .Summary }}</p></article>{{ else }}<article class="card"><h3>المستودع قيد البناء</h3><p>أضف أول تحقيق أو دليل أداة ليظهر هنا تلقائياً.</p></article>{{ end }}</div></div></section>
+<section class="hero" aria-labelledby="hero-title">
+  <div class="shell hero-grid">
+    <div class="hero-copy">
+      <p class="eyebrow">منصة عربية للبحث والرصد والتحليل في الذكاء الاصطناعي</p>
+      <h1 id="hero-title">ابحث في عالم الذكاء الاصطناعي<br><span>من مصادر منظمة وواضحة</span></h1>
+      <p class="hero-intro">اكتشف التحقيقات والأدوات والمنهجيات والمواد البحثية عبر تجربة عربية تفصل بين الوقائع والادعاءات والاستنتاجات.</p>
+      <form class="hero-search" role="search" action="{{ "/search/" | relURL }}" method="get">
+        <label class="sr-only" for="hero-search-input">ابحث داخل مرصد الذكاء الاصطناعي العربي</label>
+        <input id="hero-search-input" name="q" type="search" minlength="2" placeholder="ابحث عن أداة، موضوع، تحقيق أو منهجية..." autocomplete="off">
+        <button type="submit">بحث</button>
+      </form>
+      <ul class="trust-list" aria-label="مؤشرات الموثوقية">
+        <li>مصادر واضحة</li>
+        <li>تحديث مستمر</li>
+        <li>منهجية تحرير معلنة</li>
+      </ul>
+    </div>
+    <aside class="hero-panel" aria-label="ما الذي يقدمه المرصد؟">
+      <p class="panel-label">مسار المعرفة</p>
+      <ol>
+        <li><strong>اكتشاف</strong><span>الوصول إلى المادة المناسبة بسرعة.</span></li>
+        <li><strong>تحقق</strong><span>فهم المصادر والقيود ودرجة الثقة.</span></li>
+        <li><strong>تطبيق</strong><span>استخدام الأدوات والمنهجيات بصورة قابلة للتدقيق.</span></li>
+      </ol>
+    </aside>
+  </div>
+</section>
+<section class="section" aria-labelledby="paths-title">
+  <div class="shell">
+    <div class="section-heading"><div><p class="eyebrow">استكشف المنصة</p><h2 id="paths-title">مسارات المحتوى</h2></div><a class="text-link" href="{{ "/search/" | relURL }}">عرض فهرس البحث</a></div>
+    <div class="grid feature-grid">
+      <article class="card"><span class="card-index" aria-hidden="true">01</span><h3>تحقيقات موثقة</h3><p>مواد تفصل بين الوقائع والادعاءات والتقديرات، وتعرض القيود ومسار الأدلة.</p><a href="{{ "/investigations/" | relURL }}">فتح التحقيقات</a></article>
+      <article class="card"><span class="card-index" aria-hidden="true">02</span><h3>أدوات ومنهجيات</h3><p>أدلة عملية للبحث المفتوح والتحقق وتحليل البيانات ضمن حدود قانونية وأخلاقية.</p><a href="{{ "/toolkits/" | relURL }}">فتح الأدوات</a></article>
+      <article class="card"><span class="card-index" aria-hidden="true">03</span><h3>شفافية وتصحيحات</h3><p>منهجية معلنة، درجات ثقة، وسجل للتغييرات الجوهرية والتصحيحات.</p><a href="{{ "/methodology/" | relURL }}">قراءة المنهجية</a></article>
+    </div>
+  </div>
+</section>
+<section class="section section-muted" aria-labelledby="latest-title">
+  <div class="shell">
+    <div class="section-heading"><div><p class="eyebrow">المحتوى المنشور</p><h2 id="latest-title">أحدث المواد</h2></div></div>
+    <div class="grid latest-grid">{{ range first 6 (where site.RegularPages "Section" "in" (slice "investigations" "toolkits" "methodology")) }}
+      <article class="card content-card"><p class="meta"><span class="badge">{{ .Section }}</span> <time datetime="{{ .Date.Format "2006-01-02" }}">{{ .Date.Format "2006-01-02" }}</time></p><h3><a href="{{ .RelPermalink }}">{{ .Title }}</a></h3><p>{{ .Summary | plainify | truncate 180 }}</p><a class="text-link" href="{{ .RelPermalink }}">قراءة المادة</a></article>
+      {{ else }}<article class="card"><h3>لا توجد مواد منشورة بعد</h3><p>سيظهر المحتوى هنا بعد اجتياز المراجعة والتحقق.</p></article>{{ end }}
+    </div>
+  </div>
+</section>
+<section class="section newsletter" aria-labelledby="method-title">
+  <div class="shell newsletter-inner"><div><p class="eyebrow">قبل أن تثق بالنتيجة</p><h2 id="method-title">اقرأ كيف نجمع الأدلة ونراجعها</h2><p>المنهجية تشرح التصنيف، التحقق، حدود استخدام الذكاء الاصطناعي، وإدارة التصحيحات.</p></div><a class="btn" href="{{ "/methodology/" | relURL }}">استكشف المنهجية</a></div>
+</section>
 {{ end }}
