@@ -1,22 +1,72 @@
-# aisearcharab.com
+# AISearcharab.com — مرصد الذكاء الاصطناعي العربي
 
-Arabic-first investigative journalism, OSINT, fact-checking, and data-analysis platform.
+منصة عربية **Static-First** للبحث والرصد والتحليل في الذكاء الاصطناعي، مع محتوى تحريري قابل للتدقيق، وسجل واضح للمصادر والادعاءات والقيود والتصحيحات.
 
-## Implemented
+## الحالة الحالية
 
-- Hugo static site with RTL layouts.
-- Investigations, toolkits, methodology, and corrections sections.
-- Structured source, claim, and entity records.
-- JSON schemas and Python validation tests.
-- Static JSON search index and Schema.org metadata.
-- Privacy, terms, security, CODEOWNERS, Dependabot, CI, and custom domain configuration.
+المستودع ينفذ الأساس العام منخفض السطح الهجومي:
 
-## Local checks
+- موقع Hugo ثابت، عربي وRTL افتراضياً.
+- تحقيقات وأدلة أدوات ومنهجية وتصحيحات.
+- سجلات منظمة للمصادر والادعاءات والكيانات.
+- بحث محلي ثابت يدعم تطبيعاً عربياً أساسياً وترتيباً بسيطاً.
+- بيانات Schema.org خاصة بنوع الصفحة.
+- أساسيات SEO: canonical، sitemap، robots، RSS وبيانات المشاركة.
+- هوية مرئية مؤسسية عربية قابلة للاستجابة.
+- اختبارات Python، تحقق من البيانات والمخرجات، وميزانيات أداء ثابتة.
+- GitHub Actions وGitHub Pages ونطاق مخصص.
+- سياسة إفصاح أمني وقناة خاصة للبلاغات.
+
+## ما لم يُنفذ بعد
+
+لا يحتوي هذا المستودع حالياً على:
+
+- Backend أو قاعدة بيانات إنتاجية.
+- لوحة إدارة ديناميكية أو مصادقة مستخدمين.
+- مدفوعات أو اشتراكات.
+- بحث متجهي أو RAG أو إجابات مولدة.
+- زاحف ويب عام.
+- تحليلات ميدانية أو تكامل Search Console داخل المستودع.
+
+لا تُعرض هذه القدرات على أنها مكتملة قبل وجود تنفيذ واختبارات وأدلة مستقلة.
+
+## التحقق المحلي
+
+يتطلب Hugo بالإصدار المعتمد في CI وPython 3.12:
 
 ```bash
+python -m compileall -q scripts tests
 python -m unittest discover -s tests -v
 python scripts/validate_data.py
 hugo --minify --gc
+python scripts/validate_build.py
 ```
 
-See `docs/EXECUTIVE_BLUEPRINT.md` and `AGENTS.md` for project governance.
+## بنية أساسية
+
+```text
+content/          المحتوى التحريري
+ data/            المصادر والادعاءات والكيانات العامة
+layouts/          قوالب Hugo وSchema.org
+static/           CSS وJavaScript والأصول العامة
+scripts/          أدوات التحقق
+schemas/          JSON Schema
+ tests/            اختبارات Python
+.github/workflows CI والنشر
+ docs/             المعمارية والحوكمة والتدقيق
+```
+
+## سلامة البيانات
+
+- لا تُنشر قيمة اختبار أو ادعاء مختلق في `data/`.
+- لا تُحفظ بيانات حساسة أو هويات مصادر بشرية في المستودع العام.
+- لا تُعامل مخرجات الذكاء الاصطناعي كدليل.
+- كل ادعاء منشور يحتاج إلى مصدر قابل للفحص وحالة مراجعة واضحة.
+
+راجع:
+
+- `docs/EXECUTIVE_BLUEPRINT.md`
+- `docs/ADR-001-PRODUCT-AND-ARCHITECTURE.md`
+- `docs/AUDIT-2026-08-05.md`
+- `AGENTS.md`
+- `SECURITY.md`
