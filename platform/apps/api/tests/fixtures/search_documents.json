@@ -1,0 +1,74 @@
+[
+  {
+    "slug": "gpt-5-arabic-analysis",
+    "title": "تحليل GPT-5 واستخداماته العربية",
+    "summary": "دليل تحريري يشرح قدرات GPT-5 وحدوده عند التعامل مع المحتوى العربي.",
+    "body": "يتناول الدليل الاستدلال والتحقق ومخاطر الاعتماد على مخرجات النموذج دون مصادر.",
+    "section": "models",
+    "language": "ar",
+    "status": "published",
+    "is_indexed": true,
+    "source_authority": 9.0,
+    "published_at": "2026-07-20T09:00:00+00:00"
+  },
+  {
+    "slug": "model-comparison-gemini-claude",
+    "title": "مقارنة Gemini 2.5 وClaude ونماذج اللغة الكبيرة",
+    "summary": "مقارنة منظمة بين النماذج في السياق العربي من حيث الدقة والسياق والمصادر.",
+    "body": "توضح المادة الفروق بين Gemini 2.5 وClaude وLlama ونماذج اللغة الكبيرة.",
+    "section": "comparisons",
+    "language": "ar",
+    "status": "published",
+    "is_indexed": true,
+    "source_authority": 8.0,
+    "published_at": "2026-07-18T09:00:00+00:00"
+  },
+  {
+    "slug": "openai-api-arabic-guide",
+    "title": "دليل OpenAI API للمطور العربي",
+    "summary": "شرح موثق لبناء تطبيقات عربية باستخدام OpenAI API مع حماية المفاتيح والحدود المالية.",
+    "body": "يتضمن أمثلة Python وJavaScript وسياسات التعامل مع الأسرار ومراقبة التكلفة.",
+    "section": "guides",
+    "language": "ar",
+    "status": "published",
+    "is_indexed": true,
+    "source_authority": 9.5,
+    "published_at": "2026-07-22T09:00:00+00:00"
+  },
+  {
+    "slug": "osint-image-verification",
+    "title": "التحقق من الصور باستخدام أدوات OSINT",
+    "summary": "منهج عملي للتحقق من الصور والسياق والمكان والتاريخ دون تجاوز الحماية.",
+    "body": "يعرض البحث العكسي وتحليل البيانات الوصفية ومقارنة المعالم مع مصادر مفتوحة.",
+    "section": "toolkits",
+    "language": "ar",
+    "status": "published",
+    "is_indexed": true,
+    "source_authority": 8.5,
+    "published_at": "2026-06-30T09:00:00+00:00"
+  },
+  {
+    "slug": "ai-children-safety",
+    "title": "الذكاء الاصطناعي للأطفال: الاستخدام الآمن والواعي",
+    "summary": "إرشادات عربية للأهل والمعلمين حول الخصوصية والتحقق وحدود أدوات الذكاء الاصطناعي.",
+    "body": "تشرح المادة حماية بيانات الطفل وتجنب رفع الصور والمعلومات الشخصية.",
+    "section": "learning",
+    "language": "ar",
+    "status": "published",
+    "is_indexed": true,
+    "source_authority": 8.0,
+    "published_at": "2026-07-05T09:00:00+00:00"
+  },
+  {
+    "slug": "draft-hidden-item",
+    "title": "مسودة غير منشورة",
+    "summary": "يجب ألا تظهر هذه المادة في البحث.",
+    "body": "fixture only",
+    "section": "drafts",
+    "language": "ar",
+    "status": "draft",
+    "is_indexed": false,
+    "source_authority": 0.0,
+    "published_at": null
+  }
+]

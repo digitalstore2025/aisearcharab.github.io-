@@ -1,0 +1,9 @@
+[
+  {"query": "GPT-5", "expected_slug": "gpt-5-arabic-analysis"},
+  {"query": "نماذج اللغة الكبيرة", "expected_slug": "model-comparison-gemini-claude"},
+  {"query": "مقارنة Gemini 2.5 وClaude", "expected_slug": "model-comparison-gemini-claude"},
+  {"query": "OpenAI API", "expected_slug": "openai-api-arabic-guide"},
+  {"query": "Python JavaScript", "expected_slug": "openai-api-arabic-guide"},
+  {"query": "التحقق من الصور", "expected_slug": "osint-image-verification"},
+  {"query": "الذكاء الاصطناعي للاطفال", "expected_slug": "ai-children-safety"}
+]
