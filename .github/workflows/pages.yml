@@ -1,34 +1,54 @@
 name: Deploy site
+
 on:
   push:
     branches: [main]
   workflow_dispatch:
+
 permissions:
   contents: read
   pages: write
   id-token: write
+
 concurrency:
   group: pages
   cancel-in-progress: true
+
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
+
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: python -m unittest discover -s tests -v
-      - run: python scripts/validate_data.py
+
+      - name: Compile Python
+        run: python -m compileall -q scripts tests
+
+      - name: Run tests and data validation
+        run: |
+          python -m unittest discover -s tests -v
+          python scripts/validate_data.py
+
       - uses: peaceiris/actions-hugo@v3
         with:
           hugo-version: "0.147.9"
           extended: true
-      - run: hugo --minify --gc
+
+      - name: Build and validate site
+        run: |
+          hugo --minify --gc
+          python scripts/validate_build.py
+
       - uses: actions/configure-pages@v5
+
       - uses: actions/upload-pages-artifact@v3
         with:
           path: public
+
   deploy:
     needs: build
     runs-on: ubuntu-latest
