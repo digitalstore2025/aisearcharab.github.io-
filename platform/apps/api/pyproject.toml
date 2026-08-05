@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aisearcharab-api"
-version = "0.1.0"
-description = "Phase 2 retrieval API for AISearcharab.com"
+version = "0.2.0"
+description = "Governed retrieval and editorial API for AISearcharab.com"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -25,6 +25,9 @@ dev = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+aisearcharab_api = ["admin_static/*"]
 
 [tool.pytest.ini_options]
 addopts = "-q --strict-markers --disable-warnings"

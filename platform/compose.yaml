@@ -20,11 +20,15 @@ services:
     environment:
       APP_ENV: ${APP_ENV:-development}
       DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://aisearcharab:${POSTGRES_PASSWORD}@postgres:5432/aisearcharab}
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8000}
       API_PREFIX: ${API_PREFIX:-/v1}
       MAX_SEARCH_LIMIT: ${MAX_SEARCH_LIMIT:-20}
       LOG_SEARCH_QUERIES: ${LOG_SEARCH_QUERIES:-false}
       QUERY_HASH_KEY: ${QUERY_HASH_KEY:-}
+      SESSION_TTL_MINUTES: ${SESSION_TTL_MINUTES:-720}
+      LOGIN_MAX_FAILURES: ${LOGIN_MAX_FAILURES:-5}
+      LOGIN_LOCK_MINUTES: ${LOGIN_LOCK_MINUTES:-15}
+      PASSWORD_MIN_LENGTH: ${PASSWORD_MIN_LENGTH:-14}
     depends_on:
       postgres:
         condition: service_healthy

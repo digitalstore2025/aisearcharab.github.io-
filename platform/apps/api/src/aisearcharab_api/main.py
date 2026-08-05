@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -16,8 +19,13 @@ from .middleware import SecurityHeadersMiddleware
 from .models import SearchQueryEvent
 from .privacy import hash_query
 from .repository import get_published_content, list_indexed_content
+from .routes_admin import router as admin_router
+from .routes_admin_detail import router as admin_detail_router
+from .routes_auth import router as auth_router
 from .schemas import CapabilitiesResponse, ContentDetail, HealthResponse, SearchResponse, SearchResult
 from .search import rank_items
+
+ADMIN_STATIC = Path(__file__).resolve().parent / "admin_static"
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -25,7 +33,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title="AISearcharab API",
         version=__version__,
-        description="Arabic-first retrieval API. Phase 2 is retrieval-only and does not generate answers.",
+        description="Arabic-first retrieval and governed editorial API. Generated answers and payments are not enabled.",
         docs_url="/docs" if not runtime_settings.is_production else None,
         redoc_url=None,
         openapi_url="/openapi.json" if not runtime_settings.is_production else None,
@@ -35,12 +43,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(runtime_settings.allowed_origins),
-        allow_credentials=False,
-        allow_methods=["GET"],
-        allow_headers=["Accept", "Content-Type", "X-Request-ID"],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+        allow_headers=["Accept", "Content-Type", "X-Request-ID", "X-CSRF-Token"],
         expose_headers=["X-Request-ID"],
         max_age=600,
     )
+
+    app.include_router(auth_router, prefix=runtime_settings.api_prefix)
+    app.include_router(admin_router, prefix=runtime_settings.api_prefix)
+    app.include_router(admin_detail_router, prefix=runtime_settings.api_prefix)
 
     @app.get("/health/live", response_model=HealthResponse, tags=["health"])
     def liveness() -> HealthResponse:
@@ -109,6 +121,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             results=[
                 SearchResult(
                     slug=result.item.slug,
+                    url=result.item.url_path,
                     title=result.item.title,
                     summary=result.item.summary,
                     section=result.item.section,
@@ -122,6 +135,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ],
         )
 
+    @app.get("/admin", include_in_schema=False)
+    def admin_redirect() -> RedirectResponse:
+        return RedirectResponse(url="/admin/", status_code=307)
+
+    app.mount("/admin", StaticFiles(directory=ADMIN_STATIC, html=True), name="admin-console")
     return app
 
 
