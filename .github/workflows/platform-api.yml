@@ -54,17 +54,24 @@ jobs:
       - name: Evaluate lexical search
         run: python scripts/evaluate_search.py
 
-      - name: Generate OpenAPI contract artifact
-        run: python scripts/export_openapi.py
+      - name: Generate OpenAPI contract
+        run: python scripts/export_openapi.py --output ../../contracts/openapi.generated.json
 
-      - name: Validate generated OpenAPI JSON
-        run: python -m json.tool ../../contracts/openapi.json > /dev/null
+      - name: Validate and pin OpenAPI contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m json.tool ../../contracts/openapi.generated.json > /dev/null
+          expected="$(tr -d '[:space:]' < ../../contracts/openapi.sha256)"
+          actual="$(sha256sum ../../contracts/openapi.generated.json | awk '{print $1}')"
+          test -n "$expected"
+          test "$actual" = "$expected"
 
       - name: Upload generated OpenAPI contract
         uses: actions/upload-artifact@v4
         with:
           name: phase3-openapi-contract
-          path: platform/contracts/openapi.json
+          path: platform/contracts/openapi.generated.json
           if-no-files-found: error
           retention-days: 7
 
