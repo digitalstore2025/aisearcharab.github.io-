@@ -8,10 +8,11 @@ import re
 import secrets
 
 PASSWORD_VERSION = "scrypt-v1"
-SCRYPT_N = 2**14
+SCRYPT_N = 2**15
 SCRYPT_R = 8
-SCRYPT_P = 1
+SCRYPT_P = 2
 SCRYPT_DKLEN = 32
+SCRYPT_MAXMEM = 64 * 1024 * 1024
 COMMON_PASSWORDS = {
     "password",
     "password123",
@@ -55,6 +56,7 @@ def hash_password(password: str, *, minimum_length: int = 14, salt: bytes | None
         r=SCRYPT_R,
         p=SCRYPT_P,
         dklen=SCRYPT_DKLEN,
+        maxmem=SCRYPT_MAXMEM,
     )
     return "$".join(
         [
@@ -68,24 +70,55 @@ def hash_password(password: str, *, minimum_length: int = 14, salt: bytes | None
     )
 
 
-def verify_password(password: str, encoded: str) -> bool:
+def _decode_hash(encoded: str) -> tuple[str, int, int, int, bytes, bytes] | None:
     try:
         version, n, r, p, salt_b64, digest_b64 = encoded.split("$", 5)
-        if version != PASSWORD_VERSION:
-            return False
-        salt = base64.urlsafe_b64decode(salt_b64.encode("ascii"))
-        expected = base64.urlsafe_b64decode(digest_b64.encode("ascii"))
+        return (
+            version,
+            int(n),
+            int(r),
+            int(p),
+            base64.urlsafe_b64decode(salt_b64.encode("ascii")),
+            base64.urlsafe_b64decode(digest_b64.encode("ascii")),
+        )
+    except (ValueError, TypeError):
+        return None
+
+
+def verify_password(password: str, encoded: str) -> bool:
+    decoded = _decode_hash(encoded)
+    if decoded is None:
+        return False
+    version, n, r, p, salt, expected = decoded
+    if version != PASSWORD_VERSION or not expected:
+        return False
+    try:
         actual = hashlib.scrypt(
             password.encode("utf-8"),
             salt=salt,
-            n=int(n),
-            r=int(r),
-            p=int(p),
+            n=n,
+            r=r,
+            p=p,
             dklen=len(expected),
+            maxmem=max(SCRYPT_MAXMEM, 128 * r * n + 1024 * 1024),
         )
     except (ValueError, TypeError):
         return False
     return hmac.compare_digest(actual, expected)
+
+
+def needs_password_rehash(encoded: str) -> bool:
+    decoded = _decode_hash(encoded)
+    if decoded is None:
+        return True
+    version, n, r, p, _salt, digest = decoded
+    return (
+        version != PASSWORD_VERSION
+        or n != SCRYPT_N
+        or r != SCRYPT_R
+        or p != SCRYPT_P
+        or len(digest) != SCRYPT_DKLEN
+    )
 
 
 def new_secret() -> str:
