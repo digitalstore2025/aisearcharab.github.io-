@@ -17,11 +17,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.12"
 
@@ -37,7 +37,7 @@ jobs:
           python scripts/validate_data.py
           python scripts/validate_production_integrity.py
 
-      - uses: peaceiris/actions-hugo@v3
+      - uses: peaceiris/actions-hugo@2752ce1d29631191ea3f27c23495fa06139a5b78 # v3
         with:
           hugo-version: "0.147.9"
           extended: true
@@ -47,6 +47,8 @@ jobs:
           hugo --minify --gc
           python scripts/validate_build.py
 
+      # Remaining Pages actions are intentionally left at maintained major tags until
+      # their exact reviewed SHAs are captured from a successful manual release run.
       - uses: actions/configure-pages@v5
         if: github.event_name == 'workflow_dispatch'
 
