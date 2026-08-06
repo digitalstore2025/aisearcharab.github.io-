@@ -45,10 +45,13 @@ class Settings:
     max_search_limit: int
     log_queries: bool
     query_hash_key: str | None = None
+    search_candidate_limit: int = 300
     session_ttl_minutes: int = 720
+    session_idle_minutes: int = 30
     login_max_failures: int = 5
     login_lock_minutes: int = 15
     password_min_length: int = 14
+    enforce_separation_of_duties: bool = False
 
     @property
     def is_production(self) -> bool:
@@ -75,8 +78,14 @@ class Settings:
             raise ConfigurationError("API_PREFIX must start with '/' and include a version segment")
         if not 1 <= self.max_search_limit <= 100:
             raise ConfigurationError("MAX_SEARCH_LIMIT must be between 1 and 100")
+        if not self.max_search_limit <= self.search_candidate_limit <= 2_000:
+            raise ConfigurationError("SEARCH_CANDIDATE_LIMIT must be between MAX_SEARCH_LIMIT and 2000")
         if not 15 <= self.session_ttl_minutes <= 1440:
             raise ConfigurationError("SESSION_TTL_MINUTES must be between 15 and 1440")
+        if not 5 <= self.session_idle_minutes <= 240:
+            raise ConfigurationError("SESSION_IDLE_MINUTES must be between 5 and 240")
+        if self.session_idle_minutes >= self.session_ttl_minutes:
+            raise ConfigurationError("SESSION_IDLE_MINUTES must be lower than SESSION_TTL_MINUTES")
         if not 3 <= self.login_max_failures <= 20:
             raise ConfigurationError("LOGIN_MAX_FAILURES must be between 3 and 20")
         if not 1 <= self.login_lock_minutes <= 1440:
@@ -96,6 +105,8 @@ class Settings:
                 raise ConfigurationError("Wildcard CORS origins are not allowed in production")
             if "change-me" in self.database_url.lower():
                 raise ConfigurationError("DATABASE_URL contains a placeholder credential")
+            if not self.enforce_separation_of_duties:
+                raise ConfigurationError("ENFORCE_SEPARATION_OF_DUTIES must be enabled in production")
 
 
 @lru_cache(maxsize=1)
@@ -108,10 +119,13 @@ def get_settings() -> Settings:
         max_search_limit=_int("MAX_SEARCH_LIMIT", os.getenv("MAX_SEARCH_LIMIT", "20")),
         log_queries=_bool(os.getenv("LOG_SEARCH_QUERIES", "false")),
         query_hash_key=os.getenv("QUERY_HASH_KEY") or None,
+        search_candidate_limit=_int("SEARCH_CANDIDATE_LIMIT", os.getenv("SEARCH_CANDIDATE_LIMIT", "300")),
         session_ttl_minutes=_int("SESSION_TTL_MINUTES", os.getenv("SESSION_TTL_MINUTES", "720")),
+        session_idle_minutes=_int("SESSION_IDLE_MINUTES", os.getenv("SESSION_IDLE_MINUTES", "30")),
         login_max_failures=_int("LOGIN_MAX_FAILURES", os.getenv("LOGIN_MAX_FAILURES", "5")),
         login_lock_minutes=_int("LOGIN_LOCK_MINUTES", os.getenv("LOGIN_LOCK_MINUTES", "15")),
         password_min_length=_int("PASSWORD_MIN_LENGTH", os.getenv("PASSWORD_MIN_LENGTH", "14")),
+        enforce_separation_of_duties=_bool(os.getenv("ENFORCE_SEPARATION_OF_DUTIES", "false")),
     )
     settings.validate()
     return settings
