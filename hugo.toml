@@ -3,7 +3,7 @@ languageCode = "ar"
 defaultContentLanguage = "ar"
 title = "AI Search Arab"
 enableRobotsTXT = true
-enableGitInfo = true
+enableGitInfo = false
 
 [pagination]
   pagerSize = 12
