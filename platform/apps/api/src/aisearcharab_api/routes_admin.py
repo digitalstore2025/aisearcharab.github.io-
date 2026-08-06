@@ -326,10 +326,13 @@ def review_claim(
     principal: Annotated[Principal, Depends(require_mutation("claims:review"))],
     db: Annotated[Session, Depends(get_db)],
 ) -> ClaimSummary:
-    claim = db.scalar(select(Claim).where(Claim.id == claim_id).with_for_update())
+    content_id = db.scalar(select(Claim.content_id).where(Claim.id == claim_id))
+    if content_id is None:
+        raise HTTPException(status_code=404, detail="claim not found")
+    item = _content(db, content_id, lock=True)
+    claim = db.scalar(select(Claim).where(Claim.id == claim_id, Claim.content_id == content_id).with_for_update())
     if claim is None:
         raise HTTPException(status_code=404, detail="claim not found")
-    item = _content(db, claim.content_id, lock=True)
     if item.status not in _EDITABLE_STATES:
         raise HTTPException(status_code=409, detail="claims on published or archived content cannot be changed")
     _sod(request, principal.user.id, claim.created_by_user_id)
