@@ -113,7 +113,8 @@ def login(
     user.failed_login_count = 0
     user.locked_until = None
     user.last_login_at = now
-    if needs_password_rehash(user.password_hash):
+    password_rehashed = needs_password_rehash(user.password_hash)
+    if password_rehashed:
         user.password_hash = hash_password(payload.password, minimum_length=settings.password_min_length)
         user.password_changed_at = now
 
@@ -137,7 +138,7 @@ def login(
         target_type="user",
         target_id=user.id,
         request_id=getattr(request.state, "request_id", None),
-        metadata={"password_rehashed": needs_password_rehash(user.password_hash)},
+        metadata={"password_rehashed": password_rehashed},
     )
     db.commit()
     _set_auth_cookies(response, request, session_token, csrf_token, settings.session_ttl_minutes * 60)
