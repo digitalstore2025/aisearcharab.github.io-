@@ -27,6 +27,7 @@ class ContentItem(Base):
         Index("ix_content_items_status_indexed", "status", "is_indexed"),
         CheckConstraint("status IN ('draft','reviewed','published','archived')", name="ck_content_status"),
         CheckConstraint("source_authority >= 0 AND source_authority <= 10", name="ck_content_authority"),
+        CheckConstraint("revision >= 1", name="ck_content_revision"),
     )
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
@@ -40,9 +41,15 @@ class ContentItem(Base):
     status: Mapped[str] = mapped_column(String(24), nullable=False, default="draft")
     is_indexed: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     source_authority: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_by_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_by_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    published_by_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+
+    __mapper_args__ = {"version_id_col": revision}
 
     sources: Mapped[list[Source]] = relationship(
         secondary=content_sources,
@@ -94,6 +101,8 @@ class Claim(Base):
     claim_type: Mapped[str] = mapped_column(String(40), nullable=False)
     confidence: Mapped[str] = mapped_column(String(24), nullable=False)
     review_status: Mapped[str] = mapped_column(String(24), nullable=False, default="draft")
+    created_by_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reviewed_by_user_id: Mapped[str | None] = mapped_column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     content_item: Mapped[ContentItem] = relationship(back_populates="claims")
