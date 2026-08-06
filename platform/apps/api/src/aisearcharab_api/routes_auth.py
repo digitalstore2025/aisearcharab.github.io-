@@ -14,7 +14,15 @@ from .database import get_db
 from .models import AdminSession, User
 from .rbac import permissions_for_role
 from .schemas import LoginRequest, LoginResponse, UserPublic
-from .security import new_secret, normalize_email, perform_dummy_password_check, secret_digest, verify_password
+from .security import (
+    hash_password,
+    needs_password_rehash,
+    new_secret,
+    normalize_email,
+    perform_dummy_password_check,
+    secret_digest,
+    verify_password,
+)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -105,6 +113,10 @@ def login(
     user.failed_login_count = 0
     user.locked_until = None
     user.last_login_at = now
+    if needs_password_rehash(user.password_hash):
+        user.password_hash = hash_password(payload.password, minimum_length=settings.password_min_length)
+        user.password_changed_at = now
+
     session_token = new_secret()
     csrf_token = new_secret()
     expires_at = now + timedelta(minutes=settings.session_ttl_minutes)
@@ -114,6 +126,7 @@ def login(
             token_hash=secret_digest(session_token),
             csrf_hash=secret_digest(csrf_token),
             expires_at=expires_at,
+            last_seen_at=now,
         )
     )
     record_audit(
@@ -124,6 +137,7 @@ def login(
         target_type="user",
         target_id=user.id,
         request_id=getattr(request.state, "request_id", None),
+        metadata={"password_rehashed": needs_password_rehash(user.password_hash)},
     )
     db.commit()
     _set_auth_cookies(response, request, session_token, csrf_token, settings.session_ttl_minutes * 60)
