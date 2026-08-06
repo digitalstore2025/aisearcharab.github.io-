@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import hmac
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, Request, status
@@ -39,8 +39,23 @@ def get_principal(request: Request, db: Annotated[Session, Depends(get_db)]) -> 
     )
     admin_session = db.scalar(statement)
     now = datetime.now(timezone.utc)
-    if admin_session is None or _aware(admin_session.expires_at) <= now or not admin_session.user.is_active:
+    if admin_session is None or not admin_session.user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+    if _aware(admin_session.expires_at) <= now:
+        admin_session.revoked_at = now
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+
+    idle_deadline = _aware(admin_session.last_seen_at) + timedelta(minutes=settings.session_idle_minutes)
+    if idle_deadline <= now:
+        admin_session.revoked_at = now
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+
+    # Avoid a write on every request while still enforcing a server-side idle window.
+    if _aware(admin_session.last_seen_at) + timedelta(minutes=5) <= now:
+        admin_session.last_seen_at = now
+        db.commit()
 
     return Principal(
         user=admin_session.user,
