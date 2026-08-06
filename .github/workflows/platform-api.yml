@@ -26,7 +26,21 @@ concurrency:
 jobs:
   api-quality:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17.5-alpine
+        env:
+          POSTGRES_DB: aisearcharab_ci
+          POSTGRES_USER: aisearcharab_ci
+          POSTGRES_PASSWORD: ci-only-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aisearcharab_ci -d aisearcharab_ci"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
     defaults:
       run:
         working-directory: platform/apps/api
@@ -77,14 +91,30 @@ jobs:
           test -n "$expected"
           test "$actual" = "$expected"
 
-      - name: Verify database migration
+      - name: Verify migrations on PostgreSQL
+        env:
+          APP_ENV: test
+          DATABASE_URL: postgresql+psycopg://aisearcharab_ci:ci-only-password@127.0.0.1:5432/aisearcharab_ci
+          ALLOWED_ORIGINS: http://localhost:8000
+        run: |
+          alembic upgrade head
+          alembic current | grep 20260807_0003
+          python - <<'PY'
+          from sqlalchemy import create_engine, text
+          engine = create_engine("postgresql+psycopg://aisearcharab_ci:ci-only-password@127.0.0.1:5432/aisearcharab_ci")
+          with engine.connect() as connection:
+              assert connection.scalar(text("select version_num from alembic_version")) == "20260807_0003"
+              assert connection.scalar(text("select to_regclass('public.ix_content_items_search_fts')")) == "ix_content_items_search_fts"
+          PY
+
+      - name: Verify schema drift with SQLite compatibility path
         env:
           APP_ENV: test
           DATABASE_URL: sqlite+pysqlite:////tmp/aisearcharab-platform-ci.db
+          ALLOWED_ORIGINS: http://localhost:8000
         run: |
           rm -f /tmp/aisearcharab-platform-ci.db
           alembic upgrade head
-          alembic current | grep 20260805_0002
           alembic check
 
       - name: Validate Docker Compose configuration
@@ -92,3 +122,38 @@ jobs:
         env:
           POSTGRES_PASSWORD: ci-only-password
         run: docker compose config -q
+
+  container-smoke:
+    needs: api-quality
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build and start hardened stack
+        working-directory: platform
+        env:
+          POSTGRES_PASSWORD: ci-only-password
+          APP_ENV: staging
+          ALLOWED_ORIGINS: https://preview.example
+          ENFORCE_SEPARATION_OF_DUTIES: "true"
+        run: |
+          docker compose build
+          docker compose up -d --wait
+
+      - name: Smoke test liveness, migration-aware readiness and capabilities
+        run: |
+          set -euo pipefail
+          curl --fail --silent --show-error http://127.0.0.1:8000/health/live
+          curl --fail --silent --show-error http://127.0.0.1:8000/health/ready
+          curl --fail --silent --show-error http://127.0.0.1:8000/v1/meta/capabilities
+
+      - name: Capture container logs on failure
+        if: failure()
+        working-directory: platform
+        run: docker compose logs --no-color
+
+      - name: Tear down stack
+        if: always()
+        working-directory: platform
+        run: docker compose down -v --remove-orphans
