@@ -46,6 +46,8 @@ jobs:
         working-directory: platform/apps/api
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@v6
         with:
@@ -127,16 +129,18 @@ jobs:
     needs: api-quality
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      POSTGRES_PASSWORD: ci-only-password
+      APP_ENV: staging
+      ALLOWED_ORIGINS: https://preview.example
+      ENFORCE_SEPARATION_OF_DUTIES: "true"
     steps:
       - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - name: Build and start hardened stack
         working-directory: platform
-        env:
-          POSTGRES_PASSWORD: ci-only-password
-          APP_ENV: staging
-          ALLOWED_ORIGINS: https://preview.example
-          ENFORCE_SEPARATION_OF_DUTIES: "true"
         run: |
           docker compose build
           docker compose up -d --wait
@@ -144,9 +148,9 @@ jobs:
       - name: Smoke test liveness, migration-aware readiness and capabilities
         run: |
           set -euo pipefail
-          curl --fail --silent --show-error http://127.0.0.1:8000/health/live
-          curl --fail --silent --show-error http://127.0.0.1:8000/health/ready
-          curl --fail --silent --show-error http://127.0.0.1:8000/v1/meta/capabilities
+          curl --retry 8 --retry-connrefused --retry-delay 1 --fail --silent --show-error http://127.0.0.1:8000/health/live
+          curl --retry 8 --retry-connrefused --retry-delay 1 --fail --silent --show-error http://127.0.0.1:8000/health/ready
+          curl --retry 8 --retry-connrefused --retry-delay 1 --fail --silent --show-error http://127.0.0.1:8000/v1/meta/capabilities
 
       - name: Capture container logs on failure
         if: failure()
