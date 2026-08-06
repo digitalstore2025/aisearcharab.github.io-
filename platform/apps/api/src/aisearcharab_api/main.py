@@ -27,6 +27,7 @@ from .search import rank_items
 
 ADMIN_STATIC = Path(__file__).resolve().parent / "admin_static"
 _PUBLIC_CLAIM_STATES = {"reviewed", "published"}
+EXPECTED_ALEMBIC_REVISION = "20260807_0003"
 
 
 def _public_content(item) -> PublicContentDetail:
@@ -85,6 +86,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def readiness(session: Session = Depends(get_db)) -> HealthResponse:
         try:
             session.execute(text("SELECT 1"))
+            if runtime_settings.environment in {"staging", "production"}:
+                revision = session.scalar(text("SELECT version_num FROM alembic_version"))
+                if revision != EXPECTED_ALEMBIC_REVISION:
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="database schema revision mismatch",
+                    )
+        except HTTPException:
+            raise
         except SQLAlchemyError as exc:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="database unavailable") from exc
         return HealthResponse(status="ready", version=__version__)
@@ -116,7 +126,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if len(normalized_query) < 2:
             raise HTTPException(status_code=422, detail="query is too short after normalization")
 
-        ranked = rank_items(q, list_indexed_content(session))
+        candidates = list_indexed_content(session, q, candidate_limit=runtime_settings.search_candidate_limit)
+        ranked = rank_items(q, candidates)
         total = len(ranked)
         page = ranked[offset : offset + limit]
         took_ms = round((time.perf_counter() - started) * 1000, 3)
