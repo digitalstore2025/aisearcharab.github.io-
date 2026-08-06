@@ -1,3 +1,19 @@
+x-api-environment: &api-environment
+  APP_ENV: ${APP_ENV:-development}
+  DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://aisearcharab:${POSTGRES_PASSWORD}@postgres:5432/aisearcharab}
+  ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8000}
+  API_PREFIX: ${API_PREFIX:-/v1}
+  MAX_SEARCH_LIMIT: ${MAX_SEARCH_LIMIT:-20}
+  SEARCH_CANDIDATE_LIMIT: ${SEARCH_CANDIDATE_LIMIT:-300}
+  LOG_SEARCH_QUERIES: ${LOG_SEARCH_QUERIES:-false}
+  QUERY_HASH_KEY: ${QUERY_HASH_KEY:-}
+  SESSION_TTL_MINUTES: ${SESSION_TTL_MINUTES:-720}
+  SESSION_IDLE_MINUTES: ${SESSION_IDLE_MINUTES:-30}
+  LOGIN_MAX_FAILURES: ${LOGIN_MAX_FAILURES:-5}
+  LOGIN_LOCK_MINUTES: ${LOGIN_LOCK_MINUTES:-15}
+  PASSWORD_MIN_LENGTH: ${PASSWORD_MIN_LENGTH:-14}
+  ENFORCE_SEPARATION_OF_DUTIES: ${ENFORCE_SEPARATION_OF_DUTIES:-false}
+
 services:
   postgres:
     image: postgres:17.5-alpine
@@ -14,25 +30,27 @@ services:
       - postgres-data:/var/lib/postgresql/data
     restart: unless-stopped
 
-  api:
+  migrate:
     build:
       context: ./apps/api
-    environment:
-      APP_ENV: ${APP_ENV:-development}
-      DATABASE_URL: ${DATABASE_URL:-postgresql+psycopg://aisearcharab:${POSTGRES_PASSWORD}@postgres:5432/aisearcharab}
-      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:8000}
-      API_PREFIX: ${API_PREFIX:-/v1}
-      MAX_SEARCH_LIMIT: ${MAX_SEARCH_LIMIT:-20}
-      LOG_SEARCH_QUERIES: ${LOG_SEARCH_QUERIES:-false}
-      QUERY_HASH_KEY: ${QUERY_HASH_KEY:-}
-      SESSION_TTL_MINUTES: ${SESSION_TTL_MINUTES:-720}
-      LOGIN_MAX_FAILURES: ${LOGIN_MAX_FAILURES:-5}
-      LOGIN_LOCK_MINUTES: ${LOGIN_LOCK_MINUTES:-15}
-      PASSWORD_MIN_LENGTH: ${PASSWORD_MIN_LENGTH:-14}
+    environment: *api-environment
     depends_on:
       postgres:
         condition: service_healthy
-    command: ["sh", "-c", "alembic upgrade head && uvicorn aisearcharab_api.main:app --host 0.0.0.0 --port 8000"]
+    command: ["alembic", "upgrade", "head"]
+    read_only: true
+    tmpfs:
+      - /tmp
+    restart: "no"
+
+  api:
+    build:
+      context: ./apps/api
+    environment: *api-environment
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: ["uvicorn", "aisearcharab_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
     ports:
       - "8000:8000"
     read_only: true
