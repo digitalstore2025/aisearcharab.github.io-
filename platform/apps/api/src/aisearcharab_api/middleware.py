@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import json
+import logging
 import re
+import time
 from uuid import uuid4
 
 from fastapi import Request
@@ -10,10 +13,31 @@ from starlette.responses import JSONResponse, Response
 REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
 ADMIN_CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
 API_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+REQUEST_LOGGER = logging.getLogger("aisearcharab.request")
+
+
+def _log_request(*, request_id: str, method: str, path: str, status_code: int, duration_ms: float) -> None:
+    # Deliberately omit query strings, request/response bodies, cookies, authorization
+    # headers and client identifiers. Edge tooling can add privacy-reviewed network data.
+    REQUEST_LOGGER.info(
+        json.dumps(
+            {
+                "event": "http_request",
+                "request_id": request_id,
+                "method": method,
+                "path": path,
+                "status_code": status_code,
+                "duration_ms": round(duration_ms, 3),
+            },
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+    )
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
+        started = time.perf_counter()
         supplied = request.headers.get("x-request-id", "")
         request_id = supplied if REQUEST_ID_PATTERN.fullmatch(supplied) else str(uuid4())
         request.state.request_id = request_id
@@ -46,4 +70,12 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Content-Security-Policy"] = ADMIN_CSP if request.url.path.startswith("/admin") else API_CSP
         if request.app.state.settings.secure_cookies:
             response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+
+        _log_request(
+            request_id=request_id,
+            method=request.method,
+            path=request.url.path,
+            status_code=response.status_code,
+            duration_ms=(time.perf_counter() - started) * 1000,
+        )
         return response
