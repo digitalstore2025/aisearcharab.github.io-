@@ -28,7 +28,7 @@ from .mfa import (
     recovery_code_digest,
     verify_totp,
 )
-from .models import MfaRecoveryCode
+from .models import AdminSession, MfaRecoveryCode, User
 from .security import verify_password
 
 router = APIRouter(prefix="/auth/mfa", tags=["auth", "mfa"])
@@ -77,6 +77,10 @@ def _request_id(request: Request) -> str | None:
     return getattr(request.state, "request_id", None)
 
 
+def _aware(value: datetime) -> datetime:
+    return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
+
+
 def _master_key(request: Request) -> str:
     key = request.app.state.settings.mfa_encryption_key
     if not key:
@@ -84,23 +88,67 @@ def _master_key(request: Request) -> str:
     return key
 
 
-def _record_failed_factor(db: Session, request: Request, principal: Principal, action: str) -> None:
+def _lock_user(db: Session, user_id: str) -> User:
+    user = db.scalar(
+        select(User)
+        .where(User.id == user_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if user is None or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+    return user
+
+
+def _lock_session(db: Session, session_id: str) -> AdminSession:
+    admin_session = db.scalar(
+        select(AdminSession)
+        .where(AdminSession.id == session_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    now = datetime.now(timezone.utc)
+    if (
+        admin_session is None
+        or admin_session.revoked_at is not None
+        or _aware(admin_session.expires_at) <= now
+    ):
+        if admin_session is not None and admin_session.revoked_at is None:
+            admin_session.revoked_at = now
+            db.commit()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+    return admin_session
+
+
+def _require_locked_step_up(admin_session: AdminSession) -> None:
+    elevated_until = admin_session.elevated_until
+    if elevated_until is None or _aware(elevated_until) <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="step-up authentication required")
+
+
+def _record_failed_factor(
+    db: Session,
+    request: Request,
+    user: User,
+    admin_session: AdminSession,
+    action: str,
+) -> None:
     settings = request.app.state.settings
     now = datetime.now(timezone.utc)
-    principal.user.failed_login_count += 1
+    user.failed_login_count += 1
     revoked = False
-    if principal.user.failed_login_count >= settings.login_max_failures:
-        principal.user.locked_until = now + timedelta(minutes=settings.login_lock_minutes)
-        principal.user.failed_login_count = 0
-        principal.session.revoked_at = now
+    if user.failed_login_count >= settings.login_max_failures:
+        user.locked_until = now + timedelta(minutes=settings.login_lock_minutes)
+        user.failed_login_count = 0
+        admin_session.revoked_at = now
         revoked = True
     record_audit(
         db,
         action=action,
         outcome="failure",
-        actor_user_id=principal.user.id,
+        actor_user_id=user.id,
         target_type="session",
-        target_id=principal.session.id,
+        target_id=admin_session.id,
         request_id=_request_id(request),
         metadata={"reason": "invalid_factor", "session_revoked": revoked},
     )
@@ -108,11 +156,11 @@ def _record_failed_factor(db: Session, request: Request, principal: Principal, a
     time.sleep(0.08)
 
 
-def _replace_recovery_codes(db: Session, principal: Principal) -> list[str]:
-    db.execute(delete(MfaRecoveryCode).where(MfaRecoveryCode.user_id == principal.user.id))
+def _replace_recovery_codes(db: Session, user_id: str) -> list[str]:
+    db.execute(delete(MfaRecoveryCode).where(MfaRecoveryCode.user_id == user_id))
     codes = new_recovery_codes(count=10)
     for code in codes:
-        db.add(MfaRecoveryCode(user_id=principal.user.id, code_hash=recovery_code_digest(code)))
+        db.add(MfaRecoveryCode(user_id=user_id, code_hash=recovery_code_digest(code)))
     return codes
 
 
@@ -142,32 +190,34 @@ def start_enrollment(
     principal: Annotated[Principal, Depends(require_base_csrf)],
     db: Annotated[Session, Depends(get_db)],
 ) -> MfaEnrollmentStartResponse:
-    if principal.user.mfa_enabled_at is not None:
+    user = _lock_user(db, principal.user.id)
+    admin_session = _lock_session(db, principal.session.id)
+    if user.mfa_enabled_at is not None:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="MFA is already enrolled")
-    if not verify_password(payload.password, principal.user.password_hash):
-        _record_failed_factor(db, request, principal, "auth.mfa.enroll_start")
+    if not verify_password(payload.password, user.password_hash):
+        _record_failed_factor(db, request, user, admin_session, "auth.mfa.enroll_start")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
 
     now = datetime.now(timezone.utc)
     settings = request.app.state.settings
     secret = new_totp_secret()
     expires_at = now + timedelta(minutes=settings.mfa_enrollment_ttl_minutes)
-    principal.user.mfa_pending_secret_encrypted = encrypt_totp_secret(secret, _master_key(request))
-    principal.user.mfa_pending_expires_at = expires_at
+    user.mfa_pending_secret_encrypted = encrypt_totp_secret(secret, _master_key(request))
+    user.mfa_pending_expires_at = expires_at
     record_audit(
         db,
         action="auth.mfa.enroll_start",
         outcome="success",
-        actor_user_id=principal.user.id,
+        actor_user_id=user.id,
         target_type="user",
-        target_id=principal.user.id,
+        target_id=user.id,
         request_id=_request_id(request),
         metadata={"expires_in_minutes": settings.mfa_enrollment_ttl_minutes},
     )
     db.commit()
     return MfaEnrollmentStartResponse(
         secret=secret,
-        otpauth_uri=build_otpauth_uri(secret, account_name=principal.user.email, issuer=settings.mfa_issuer),
+        otpauth_uri=build_otpauth_uri(secret, account_name=user.email, issuer=settings.mfa_issuer),
         expires_at=expires_at,
     )
 
@@ -179,15 +229,16 @@ def confirm_enrollment(
     principal: Annotated[Principal, Depends(require_base_csrf)],
     db: Annotated[Session, Depends(get_db)],
 ) -> MfaEnrollmentConfirmResponse:
+    user = _lock_user(db, principal.user.id)
+    admin_session = _lock_session(db, principal.session.id)
     now = datetime.now(timezone.utc)
-    pending = principal.user.mfa_pending_secret_encrypted
-    pending_expires = principal.user.mfa_pending_expires_at
+    pending = user.mfa_pending_secret_encrypted
+    pending_expires = user.mfa_pending_expires_at
     if not pending or not pending_expires:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="MFA enrollment has not been started")
-    aware_expiry = pending_expires if pending_expires.tzinfo else pending_expires.replace(tzinfo=timezone.utc)
-    if aware_expiry <= now:
-        principal.user.mfa_pending_secret_encrypted = None
-        principal.user.mfa_pending_expires_at = None
+    if _aware(pending_expires) <= now:
+        user.mfa_pending_secret_encrypted = None
+        user.mfa_pending_expires_at = None
         db.commit()
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="MFA enrollment has expired")
 
@@ -197,25 +248,25 @@ def confirm_enrollment(
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="MFA service is unavailable") from exc
     counter = verify_totp(secret, payload.code, last_counter=-1, now=now)
     if counter is None:
-        _record_failed_factor(db, request, principal, "auth.mfa.enroll_confirm")
+        _record_failed_factor(db, request, user, admin_session, "auth.mfa.enroll_confirm")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid authentication code")
 
-    recovery_codes = _replace_recovery_codes(db, principal)
-    principal.user.mfa_secret_encrypted = pending
-    principal.user.mfa_pending_secret_encrypted = None
-    principal.user.mfa_pending_expires_at = None
-    principal.user.mfa_enabled_at = now
-    principal.user.mfa_last_counter = counter
-    principal.user.failed_login_count = 0
-    principal.user.locked_until = None
-    principal.session.mfa_verified_at = now
+    recovery_codes = _replace_recovery_codes(db, user.id)
+    user.mfa_secret_encrypted = pending
+    user.mfa_pending_secret_encrypted = None
+    user.mfa_pending_expires_at = None
+    user.mfa_enabled_at = now
+    user.mfa_last_counter = counter
+    user.failed_login_count = 0
+    user.locked_until = None
+    admin_session.mfa_verified_at = now
     record_audit(
         db,
         action="auth.mfa.enroll_confirm",
         outcome="success",
-        actor_user_id=principal.user.id,
+        actor_user_id=user.id,
         target_type="user",
-        target_id=principal.user.id,
+        target_id=user.id,
         request_id=_request_id(request),
         metadata={"recovery_code_count": len(recovery_codes)},
     )
@@ -230,20 +281,24 @@ def verify_factor(
     principal: Annotated[Principal, Depends(require_base_csrf)],
     db: Annotated[Session, Depends(get_db)],
 ) -> MfaVerifyResponse:
-    if principal.user.mfa_enabled_at is None or not principal.user.mfa_secret_encrypted:
+    # The user lock serialises counter checks and recovery-code consumption for one
+    # account across replicas backed by PostgreSQL. This closes same-code replay races.
+    user = _lock_user(db, principal.user.id)
+    admin_session = _lock_session(db, principal.session.id)
+    if user.mfa_enabled_at is None or not user.mfa_secret_encrypted:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="MFA is not enrolled")
 
     now = datetime.now(timezone.utc)
     recovery_used = False
     valid = False
     try:
-        secret = decrypt_totp_secret(principal.user.mfa_secret_encrypted, _master_key(request))
+        secret = decrypt_totp_secret(user.mfa_secret_encrypted, _master_key(request))
     except MfaSecretError as exc:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="MFA service is unavailable") from exc
 
-    counter = verify_totp(secret, payload.code, last_counter=principal.user.mfa_last_counter, now=now)
+    counter = verify_totp(secret, payload.code, last_counter=user.mfa_last_counter, now=now)
     if counter is not None:
-        principal.user.mfa_last_counter = counter
+        user.mfa_last_counter = counter
         valid = True
     else:
         try:
@@ -252,11 +307,13 @@ def verify_factor(
             digest = None
         if digest:
             recovery = db.scalar(
-                select(MfaRecoveryCode).where(
-                    MfaRecoveryCode.user_id == principal.user.id,
+                select(MfaRecoveryCode)
+                .where(
+                    MfaRecoveryCode.user_id == user.id,
                     MfaRecoveryCode.code_hash == digest,
                     MfaRecoveryCode.used_at.is_(None),
                 )
+                .with_for_update()
             )
             if recovery is not None:
                 recovery.used_at = now
@@ -264,19 +321,19 @@ def verify_factor(
                 valid = True
 
     if not valid:
-        _record_failed_factor(db, request, principal, "auth.mfa.verify")
+        _record_failed_factor(db, request, user, admin_session, "auth.mfa.verify")
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid authentication code")
 
-    principal.user.failed_login_count = 0
-    principal.user.locked_until = None
-    principal.session.mfa_verified_at = now
+    user.failed_login_count = 0
+    user.locked_until = None
+    admin_session.mfa_verified_at = now
     record_audit(
         db,
         action="auth.mfa.verify",
         outcome="success",
-        actor_user_id=principal.user.id,
+        actor_user_id=user.id,
         target_type="session",
-        target_id=principal.session.id,
+        target_id=admin_session.id,
         request_id=_request_id(request),
         metadata={"recovery_code_used": recovery_used},
     )
@@ -290,16 +347,19 @@ def regenerate_recovery_codes(
     principal: Annotated[Principal, Depends(require_sensitive_mutation())],
     db: Annotated[Session, Depends(get_db)],
 ) -> RecoveryCodesResponse:
-    if principal.user.mfa_enabled_at is None:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="MFA is not enrolled")
-    codes = _replace_recovery_codes(db, principal)
+    user = _lock_user(db, principal.user.id)
+    admin_session = _lock_session(db, principal.session.id)
+    _require_locked_step_up(admin_session)
+    if admin_session.mfa_verified_at is None or user.mfa_enabled_at is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="multi-factor authentication required")
+    codes = _replace_recovery_codes(db, user.id)
     record_audit(
         db,
         action="auth.mfa.recovery_regenerate",
         outcome="success",
-        actor_user_id=principal.user.id,
+        actor_user_id=user.id,
         target_type="user",
-        target_id=principal.user.id,
+        target_id=user.id,
         request_id=_request_id(request),
         metadata={"recovery_code_count": len(codes)},
     )
@@ -315,22 +375,27 @@ def disable_mfa(
     db: Annotated[Session, Depends(get_db)],
 ) -> Response:
     settings = request.app.state.settings
-    if settings.require_mfa_for_privileged and principal.user.role in PRIVILEGED_MFA_ROLES:
+    user = _lock_user(db, principal.user.id)
+    admin_session = _lock_session(db, principal.session.id)
+    _require_locked_step_up(admin_session)
+    if admin_session.mfa_verified_at is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="multi-factor authentication required")
+    if settings.require_mfa_for_privileged and user.role in PRIVILEGED_MFA_ROLES:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="MFA is mandatory for this role")
-    db.execute(delete(MfaRecoveryCode).where(MfaRecoveryCode.user_id == principal.user.id))
-    principal.user.mfa_secret_encrypted = None
-    principal.user.mfa_pending_secret_encrypted = None
-    principal.user.mfa_pending_expires_at = None
-    principal.user.mfa_enabled_at = None
-    principal.user.mfa_last_counter = -1
-    principal.session.mfa_verified_at = None
+    db.execute(delete(MfaRecoveryCode).where(MfaRecoveryCode.user_id == user.id))
+    user.mfa_secret_encrypted = None
+    user.mfa_pending_secret_encrypted = None
+    user.mfa_pending_expires_at = None
+    user.mfa_enabled_at = None
+    user.mfa_last_counter = -1
+    admin_session.mfa_verified_at = None
     record_audit(
         db,
         action="auth.mfa.disable",
         outcome="success",
-        actor_user_id=principal.user.id,
+        actor_user_id=user.id,
         target_type="user",
-        target_id=principal.user.id,
+        target_id=user.id,
         request_id=_request_id(request),
     )
     db.commit()
@@ -345,15 +410,16 @@ def cancel_pending_session(
     principal: Annotated[Principal, Depends(require_base_csrf)],
     db: Annotated[Session, Depends(get_db)],
 ) -> Response:
+    admin_session = _lock_session(db, principal.session.id)
     now = datetime.now(timezone.utc)
-    principal.session.revoked_at = now
+    admin_session.revoked_at = now
     record_audit(
         db,
         action="auth.mfa.cancel_session",
         outcome="success",
         actor_user_id=principal.user.id,
         target_type="session",
-        target_id=principal.session.id,
+        target_id=admin_session.id,
         request_id=_request_id(request),
     )
     db.commit()
