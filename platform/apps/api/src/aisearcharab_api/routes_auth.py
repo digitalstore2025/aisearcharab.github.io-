@@ -64,6 +64,30 @@ def _aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
+def _lock_user(db: Session, user_id: str) -> User:
+    user = db.scalar(
+        select(User)
+        .where(User.id == user_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+    return user
+
+
+def _lock_session(db: Session, session_id: str) -> AdminSession:
+    admin_session = db.scalar(
+        select(AdminSession)
+        .where(AdminSession.id == session_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if admin_session is None or admin_session.revoked_at is not None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+    return admin_session
+
+
 @router.post("/login", response_model=LoginResponse)
 def login(
     payload: LoginRequest,
@@ -79,7 +103,9 @@ def login(
         time.sleep(0.08)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
 
-    user = db.scalar(select(User).where(User.email == email))
+    # Serialise per-account login state in PostgreSQL so concurrent failures cannot
+    # lose increments or bypass the configured lock threshold.
+    user = db.scalar(select(User).where(User.email == email).with_for_update())
     now = datetime.now(timezone.utc)
     if user is None:
         perform_dummy_password_check(payload.password)
@@ -159,22 +185,29 @@ def step_up(
 ) -> StepUpResponse:
     settings = request.app.state.settings
     now = datetime.now(timezone.utc)
-    password_matches = verify_password(payload.password, principal.user.password_hash)
+    user = _lock_user(db, principal.user.id)
+    admin_session = _lock_session(db, principal.session.id)
+    if not user.is_active or _aware(admin_session.expires_at) <= now:
+        admin_session.revoked_at = now
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+
+    password_matches = verify_password(payload.password, user.password_hash)
     if not password_matches:
-        principal.user.failed_login_count += 1
+        user.failed_login_count += 1
         revoked = False
-        if principal.user.failed_login_count >= settings.login_max_failures:
-            principal.user.locked_until = now + timedelta(minutes=settings.login_lock_minutes)
-            principal.user.failed_login_count = 0
-            principal.session.revoked_at = now
+        if user.failed_login_count >= settings.login_max_failures:
+            user.locked_until = now + timedelta(minutes=settings.login_lock_minutes)
+            user.failed_login_count = 0
+            admin_session.revoked_at = now
             revoked = True
         record_audit(
             db,
             action="auth.step_up",
             outcome="failure",
-            actor_user_id=principal.user.id,
+            actor_user_id=user.id,
             target_type="session",
-            target_id=principal.session.id,
+            target_id=admin_session.id,
             request_id=getattr(request.state, "request_id", None),
             metadata={"reason": "invalid_credentials", "session_revoked": revoked},
         )
@@ -182,20 +215,20 @@ def step_up(
         time.sleep(0.08)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
 
-    principal.user.failed_login_count = 0
-    principal.user.locked_until = None
+    user.failed_login_count = 0
+    user.locked_until = None
     elevated_until = min(
         now + timedelta(minutes=settings.step_up_ttl_minutes),
-        _aware(principal.session.expires_at),
+        _aware(admin_session.expires_at),
     )
-    principal.session.elevated_until = elevated_until
+    admin_session.elevated_until = elevated_until
     record_audit(
         db,
         action="auth.step_up",
         outcome="success",
-        actor_user_id=principal.user.id,
+        actor_user_id=user.id,
         target_type="session",
-        target_id=principal.session.id,
+        target_id=admin_session.id,
         request_id=getattr(request.state, "request_id", None),
         metadata={"ttl_minutes": settings.step_up_ttl_minutes},
     )
@@ -210,14 +243,15 @@ def logout(
     principal: Annotated[Principal, Depends(require_csrf)],
     db: Annotated[Session, Depends(get_db)],
 ) -> Response:
-    principal.session.revoked_at = datetime.now(timezone.utc)
+    admin_session = _lock_session(db, principal.session.id)
+    admin_session.revoked_at = datetime.now(timezone.utc)
     record_audit(
         db,
         action="auth.logout",
         outcome="success",
         actor_user_id=principal.user.id,
         target_type="session",
-        target_id=principal.session.id,
+        target_id=admin_session.id,
         request_id=getattr(request.state, "request_id", None),
     )
     db.commit()
