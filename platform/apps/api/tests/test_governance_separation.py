@@ -26,6 +26,11 @@ def _login(client: TestClient, email: str, password: str) -> dict[str, str]:
     return {"X-CSRF-Token": csrf_from_client(client)}
 
 
+def _step_up(client: TestClient, password: str, headers: dict[str, str]) -> None:
+    response = client.post("/v1/auth/step-up", headers=headers, json={"password": password})
+    assert response.status_code == 200
+
+
 def _logout(client: TestClient, headers: dict[str, str]) -> None:
     assert client.post("/v1/auth/logout", headers=headers).status_code == 204
 
@@ -67,6 +72,7 @@ def test_creator_latest_editor_reviewer_and_publisher_duties_are_separated(
         log_queries=False,
         session_ttl_minutes=60,
         session_idle_minutes=30,
+        step_up_ttl_minutes=10,
         enforce_separation_of_duties=True,
     )
     app = create_app(settings)
@@ -163,6 +169,15 @@ def test_creator_latest_editor_reviewer_and_publisher_duties_are_separated(
         _logout(client, reviewer_headers)
 
         publisher_headers = _login(client, PUBLISHER_EMAIL, PUBLISHER_PASSWORD)
+        denied_without_step_up = client.post(
+            f"/v1/admin/content/{content_id}/transition",
+            headers=publisher_headers,
+            json={"status": "published"},
+        )
+        assert denied_without_step_up.status_code == 403
+        assert denied_without_step_up.json()["detail"] == "step-up authentication required"
+
+        _step_up(client, PUBLISHER_PASSWORD, publisher_headers)
         published = client.post(
             f"/v1/admin/content/{content_id}/transition",
             headers=publisher_headers,
