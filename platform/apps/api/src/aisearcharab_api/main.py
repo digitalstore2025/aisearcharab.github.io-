@@ -19,7 +19,7 @@ from .database import get_db
 from .middleware import SecurityHeadersMiddleware
 from .models import SearchQueryEvent
 from .privacy import hash_query
-from .repository import get_published_content, list_indexed_content
+from .repository import count_indexed_matches, get_published_content, list_indexed_content
 from .routes_admin import router as admin_router
 from .routes_admin_detail import router as admin_detail_router
 from .routes_auth import router as auth_router
@@ -123,6 +123,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> SearchResponse:
         if limit > runtime_settings.max_search_limit:
             raise HTTPException(status_code=400, detail=f"limit must not exceed {runtime_settings.max_search_limit}")
+        if offset + limit > runtime_settings.search_candidate_limit:
+            raise HTTPException(
+                status_code=400,
+                detail=f"offset + limit must not exceed the ranked candidate window ({runtime_settings.search_candidate_limit})",
+            )
         started = time.perf_counter()
         normalized_query = normalize_text(q)
         if len(normalized_query) < 2:
@@ -130,7 +135,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
         candidates = list_indexed_content(session, q, candidate_limit=runtime_settings.search_candidate_limit)
         ranked = rank_items(q, candidates)
-        total = len(ranked)
+        database_total = count_indexed_matches(session, q)
+        total = database_total if database_total is not None else len(ranked)
         page = ranked[offset : offset + limit]
         took_ms = round((time.perf_counter() - started) * 1000, 3)
 
