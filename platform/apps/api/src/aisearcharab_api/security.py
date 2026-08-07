@@ -13,6 +13,9 @@ SCRYPT_R = 8
 SCRYPT_P = 2
 SCRYPT_DKLEN = 32
 SCRYPT_MAXMEM = 64 * 1024 * 1024
+SCRYPT_VERIFY_MAX_N = 2**16
+SCRYPT_VERIFY_MAX_R = 8
+SCRYPT_VERIFY_MAX_P = 4
 COMMON_PASSWORDS = {
     "password",
     "password123",
@@ -73,7 +76,7 @@ def hash_password(password: str, *, minimum_length: int = 14, salt: bytes | None
 def _decode_hash(encoded: str) -> tuple[str, int, int, int, bytes, bytes] | None:
     try:
         version, n, r, p, salt_b64, digest_b64 = encoded.split("$", 5)
-        return (
+        decoded = (
             version,
             int(n),
             int(r),
@@ -83,6 +86,14 @@ def _decode_hash(encoded: str) -> tuple[str, int, int, int, bytes, bytes] | None
         )
     except (ValueError, TypeError):
         return None
+    _version, n_value, r_value, p_value, salt, digest = decoded
+    if n_value < 2**14 or n_value > SCRYPT_VERIFY_MAX_N or n_value & (n_value - 1):
+        return None
+    if not 1 <= r_value <= SCRYPT_VERIFY_MAX_R or not 1 <= p_value <= SCRYPT_VERIFY_MAX_P:
+        return None
+    if not 8 <= len(salt) <= 64 or len(digest) != SCRYPT_DKLEN:
+        return None
+    return decoded
 
 
 def verify_password(password: str, encoded: str) -> bool:
@@ -90,7 +101,7 @@ def verify_password(password: str, encoded: str) -> bool:
     if decoded is None:
         return False
     version, n, r, p, salt, expected = decoded
-    if version != PASSWORD_VERSION or not expected:
+    if version != PASSWORD_VERSION:
         return False
     try:
         actual = hashlib.scrypt(
