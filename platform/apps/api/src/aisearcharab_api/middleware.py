@@ -5,7 +5,7 @@ from uuid import uuid4
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
 ADMIN_CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
@@ -18,7 +18,21 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         request_id = supplied if REQUEST_ID_PATTERN.fullmatch(supplied) else str(uuid4())
         request.state.request_id = request_id
 
-        response = await call_next(request)
+        content_length = request.headers.get("content-length")
+        if content_length:
+            try:
+                declared_size = int(content_length)
+            except ValueError:
+                declared_size = -1
+            if declared_size < 0:
+                response: Response = JSONResponse({"detail": "invalid content length"}, status_code=400)
+            elif declared_size > request.app.state.settings.max_request_body_bytes:
+                response = JSONResponse({"detail": "request body too large"}, status_code=413)
+            else:
+                response = await call_next(request)
+        else:
+            response = await call_next(request)
+
         response.headers["X-Request-ID"] = request_id
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
