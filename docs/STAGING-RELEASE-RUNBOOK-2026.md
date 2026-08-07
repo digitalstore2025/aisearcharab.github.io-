@@ -32,6 +32,7 @@ SEARCH_CANDIDATE_LIMIT=300
 LOG_SEARCH_QUERIES=false
 SESSION_TTL_MINUTES=720
 SESSION_IDLE_MINUTES=30
+STEP_UP_TTL_MINUTES=10
 LOGIN_MAX_FAILURES=5
 LOGIN_LOCK_MINUTES=15
 PASSWORD_MIN_LENGTH=14
@@ -40,6 +41,8 @@ ENFORCE_SEPARATION_OF_DUTIES=true
 ```
 
 If query logging is explicitly enabled for a reviewed test, provide a random `QUERY_HASH_KEY` of at least 32 bytes and define retention/access rules before enabling it.
+
+`STEP_UP_TTL_MINUTES` controls the short-lived current-password re-authentication window for privileged mutations. Keep it between 2 and 30 minutes and shorter than the absolute session TTL. It is not a replacement for production MFA/WebAuthn.
 
 ## 3. Pre-deployment gate
 
@@ -69,10 +72,11 @@ alembic current
 4. The expected revision for this release line is:
 
 ```text
-20260807_0003
+20260807_0004
 ```
 
-5. Do not start accepting Staging traffic if `/health/ready` reports a schema revision mismatch.
+5. Verify `admin_sessions.elevated_until` exists after migration.
+6. Do not start accepting Staging traffic if `/health/ready` reports a schema revision mismatch.
 
 ## 5. API deployment verification
 
@@ -106,7 +110,7 @@ Check representative API/admin responses. At minimum validate:
 
 Do not put authentication cookies, tokens, raw search queries or request/response bodies into release evidence.
 
-## 7. Editorial governance smoke test
+## 7. Editorial governance and privileged-auth smoke test
 
 Use three non-production identities representing creator, reviewer and publisher. Verify:
 
@@ -114,12 +118,16 @@ Use three non-production identities representing creator, reviewer and publisher
 2. creator cannot approve their own review when separation of duties is enabled;
 3. reviewer approves claim and content;
 4. reviewer cannot perform the final publication if they are already the reviewer;
-5. publisher publishes;
-6. published item becomes searchable;
-7. a reviewed item edited before publication is demoted and requires review again;
-8. audit entries preserve actor/request correlation without sensitive fields.
+5. publisher login alone is denied when attempting final publication with `step-up authentication required`;
+6. publisher performs `POST /v1/auth/step-up` with a valid CSRF token and their current password, then publication succeeds inside the configured window;
+7. after `elevated_until` expires, another privileged operation is denied until re-authentication occurs again;
+8. invalid step-up passwords return generic invalid-credentials behavior and contribute to the existing account lockout policy;
+9. owner user-management mutations similarly require step-up;
+10. published item becomes searchable;
+11. a reviewed item edited before publication is demoted and requires review again;
+12. audit entries contain `auth.step_up` success/failure records plus actor/request correlation without password, token or cookie values.
 
-Delete or archive test content after evidence is captured.
+Delete or archive test content after evidence is captured. Do not capture the entered password in screenshots, logs or release records.
 
 ## 8. Search quality and load evidence
 
@@ -175,4 +183,4 @@ A production approval requires an actual rollback/restore drill, not only this w
 
 Use the project status vocabulary exactly. Staging deployment alone is not `PRODUCTION_READY`.
 
-Promotion beyond `TESTED_IN_STAGING` requires independent security/accessibility evidence, real search-quality evidence, managed backup/restore evidence, distributed rate limiting/WAF, privileged-account MFA/step-up, external observability, DNS/TLS/live-header verification and explicit human release approval.
+Promotion beyond `TESTED_IN_STAGING` requires independent security/accessibility evidence, real search-quality evidence, managed backup/restore evidence, distributed rate limiting/WAF, production-grade privileged-account MFA/WebAuthn or another independently reviewed second factor, external observability, DNS/TLS/live-header verification and explicit human release approval. The implemented password step-up is a defense-in-depth control and must not be represented as MFA.
