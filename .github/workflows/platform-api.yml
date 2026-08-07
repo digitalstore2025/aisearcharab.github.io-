@@ -135,7 +135,7 @@ jobs:
           test -n "$expected"
           test "$actual" = "$expected"
 
-      - name: Verify migrations and Arabic-normalized FTS on PostgreSQL
+      - name: Verify migrations, Arabic FTS and MFA concurrency on PostgreSQL
         env:
           APP_ENV: test
           DATABASE_URL: postgresql+psycopg://aisearcharab_ci:ci-only-password@127.0.0.1:5432/aisearcharab_ci
@@ -152,6 +152,7 @@ jobs:
               assert connection.scalar(text("select to_regclass('public.mfa_recovery_codes')")) == "mfa_recovery_codes"
           PY
           python scripts/verify_postgres_search.py
+          python scripts/verify_postgres_mfa_concurrency.py
 
       - name: Verify schema drift with SQLite compatibility path
         env:
