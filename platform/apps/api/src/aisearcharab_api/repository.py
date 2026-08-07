@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from sqlalchemy import func, select
+from sqlalchemy import func, literal_column, select
 from sqlalchemy.orm import Session, selectinload
 
 from .arabic import normalize_text
@@ -17,6 +17,9 @@ _POSTGRES_TRANSLATE_FROM = (
     + "".join(chr(codepoint) for codepoint in range(0x06D6, 0x06EE))
 )
 _POSTGRES_TRANSLATE_TO = "اااايوي"
+_SIMPLE_REGCONFIG = literal_column("'simple'::regconfig")
+_TRANSLATE_FROM_SQL = literal_column("'" + _POSTGRES_TRANSLATE_FROM.replace("'", "''") + "'")
+_TRANSLATE_TO_SQL = literal_column("'" + _POSTGRES_TRANSLATE_TO.replace("'", "''") + "'")
 
 
 def _postgres_search_document():
@@ -29,10 +32,25 @@ def _postgres_search_document():
         + " "
         + func.coalesce(ContentItem.section, "")
     )
-    return func.to_tsvector(
-        "simple",
-        func.translate(func.lower(combined), _POSTGRES_TRANSLATE_FROM, _POSTGRES_TRANSLATE_TO),
+    normalized = func.translate(func.lower(combined), _TRANSLATE_FROM_SQL, _TRANSLATE_TO_SQL)
+    return func.to_tsvector(_SIMPLE_REGCONFIG, normalized)
+
+
+def _postgres_tsquery(query: str):
+    return func.websearch_to_tsquery(_SIMPLE_REGCONFIG, normalize_text(query))
+
+
+def count_indexed_matches(session: Session, query: str) -> int | None:
+    if session.get_bind().dialect.name != "postgresql":
+        return None
+    document = _postgres_search_document()
+    tsquery = _postgres_tsquery(query)
+    statement = select(func.count()).select_from(ContentItem).where(
+        ContentItem.status == "published",
+        ContentItem.is_indexed.is_(True),
+        document.op("@@")(tsquery),
     )
+    return int(session.scalar(statement) or 0)
 
 
 def list_indexed_content(session: Session, query: str | None = None, *, candidate_limit: int = 300) -> list[ContentItem]:
@@ -44,7 +62,7 @@ def list_indexed_content(session: Session, query: str | None = None, *, candidat
     bind = session.get_bind()
     if query and bind.dialect.name == "postgresql":
         document = _postgres_search_document()
-        tsquery = func.websearch_to_tsquery("simple", normalize_text(query))
+        tsquery = _postgres_tsquery(query)
         statement = (
             statement.where(document.op("@@")(tsquery))
             .order_by(func.ts_rank_cd(document, tsquery).desc(), ContentItem.published_at.desc().nullslast(), ContentItem.slug.asc())
