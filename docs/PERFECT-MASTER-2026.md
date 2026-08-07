@@ -39,7 +39,7 @@ The public API remains retrieval-only.
 
 ### Candidate retrieval
 
-Production PostgreSQL uses a GIN-backed `to_tsvector('simple', ...)` index to select a bounded candidate set before application ranking. `SEARCH_CANDIDATE_LIMIT` is bounded and defaults to 300.
+Production PostgreSQL uses a GIN-backed Arabic-normalized `to_tsvector('simple', ...)` index to select a bounded candidate set before application ranking. `SEARCH_CANDIDATE_LIMIT` is bounded and defaults to 300. CI seeds an Arabic document with hamza/diacritic variants and verifies both application retrieval and index integrity against PostgreSQL.
 
 ### Ranking
 
@@ -76,38 +76,56 @@ A perfect score on a small fixture must never be marketed as evidence of product
 - Readiness checks the expected Alembic revision in staging/production.
 - PostgreSQL integration runs in CI.
 - Container smoke tests run migrations, start the stack and query liveness/readiness/capabilities.
+- PostgreSQL service images used by CI/local stack are pinned to an immutable image digest.
 
 Production infrastructure must additionally provide TLS, least-privilege database roles, connection limits, PITR/backups and a documented restore drill.
 
-## 5. CI/CD gates
+## 5. CI/CD and software-supply-chain gates
 
-A candidate release is blocked when any required check fails. The target gate set is:
+A candidate release is blocked when any required check fails. The implemented gate set includes:
 
-- Python compile and tests;
+- Python compile and API tests;
 - Hugo/data/integrity validation;
-- search benchmark;
-- OpenAPI contract verification;
-- PostgreSQL migration verification;
-- Docker/Compose build and smoke test;
-- secret scanning;
-- dependency/SAST/container scanning;
-- accessibility/manual UI review;
-- preview deployment smoke tests.
+- synthetic search evaluation with explicit non-production disclaimer;
+- OpenAPI contract generation and pinned digest verification;
+- PostgreSQL migration and Arabic FTS integration verification;
+- SQLite compatibility/schema-drift verification;
+- Docker/Compose build and hardened-stack smoke test;
+- working-tree and reachable-history secret scanning;
+- immutable SHA pinning for active GitHub Actions;
+- hashed runtime dependency graph generation;
+- a reviewed SHA-256 pin that fails CI when the generated runtime dependency graph drifts;
+- `pip-audit --require-hashes --strict` against that generated runtime graph;
+- CycloneDX runtime dependency SBOM artifact generation.
 
-Third-party GitHub Actions should ultimately be pinned to immutable commit SHAs. Workflow tokens should use least privilege. `main` must have required checks and independent review for security-critical paths.
+The API Dockerfile uses a multi-stage build. Build tooling is explicitly versioned and kept out of the final image. Runtime dependencies are regenerated from the project metadata, checked against the pinned dependency-graph digest, materialized as wheels using hash verification, and installed into the final image without an external package index. The application wheel is built separately with no dependency resolution in the final stage.
+
+`main` still requires repository-level branch protection/required checks and independent review for security-critical paths. CI success alone does not establish production approval.
 
 ## 6. Runtime observability
 
-Production approval requires:
+The application now emits privacy-minimized structured JSON request events containing:
 
-- structured JSON logs;
-- request/trace correlation IDs;
-- redaction of secrets, raw passwords and sensitive query data;
+- request correlation ID;
+- environment;
+- HTTP method;
+- resolved route template rather than raw user-controlled URL path;
+- status code;
+- request duration.
+
+The request telemetry deliberately excludes query strings, raw URL paths, request/response bodies, cookies, authorization values and client/network identifiers. Pre-router rejections use a neutral `__unmatched__` route value. Tests assert that representative query/token/cookie/path secrets are not emitted.
+
+External production observability remains required for:
+
+- aggregation, retention and access control for structured logs;
 - API/search latency and error-rate metrics;
 - DB pool metrics;
 - authentication failure/rate-limit metrics;
+- distributed tracing where justified;
 - alert routing and runbooks;
 - independent uptime checks.
+
+Structured application logs are therefore an implemented telemetry primitive, not a substitute for a production monitoring stack.
 
 ## 7. Privacy and auditability
 
@@ -117,27 +135,29 @@ Audit events sanitize sensitive metadata, but the current relational audit table
 
 ## 8. Web security
 
-The API/admin CSP is same-origin and restrictive. Any edge/CDN policy must preserve or strengthen `no-store` for admin/auth/API responses; it must not replace those headers with shared-public caching.
+The API/admin CSP is same-origin and restrictive. Trusted-host validation is enabled, request bodies have a configured maximum declared size, and security headers are applied to normal API/admin responses. Any edge/CDN policy must preserve or strengthen `no-store` for admin/auth/API responses; it must not replace those headers with shared-public caching.
 
 External source URLs are currently stored, not fetched. Before any crawler/fetch feature is introduced, SSRF controls must reject private/link-local destinations, unsafe redirects and DNS-rebinding paths.
 
 ## 9. Hosting and release topology
 
-Use one declared public frontend/CDN path and one declared API runtime. Avoid simultaneously treating GitHub Pages, Vercel, Netlify and ad-hoc Cloudflare Workers as independent production authorities.
+Use one declared public frontend/CDN path and one declared API runtime. Avoid simultaneously treating GitHub Pages, Vercel, Netlify and ad-hoc edge workers as independent production authorities.
 
 Recommended responsibility split:
 
 - Static frontend/CDN: one chosen provider.
 - API: container-capable managed runtime.
 - Database: managed PostgreSQL.
-- Edge: DNS/WAF/rate limiting.
+- Edge: DNS/WAF/distributed rate limiting.
 - Observability: independent monitoring/error tracking.
+
+Staging must exercise the same routing, database migration discipline, trusted-host/CORS policy, secrets delivery model and rollback path intended for production.
 
 ## 10. AI roadmap after the retrieval foundation is proven
 
 Do not add semantic/vector retrieval merely because it is fashionable. The 2026 expansion sequence is:
 
-1. Real lexical benchmark and production telemetry.
+1. Real lexical benchmark and production-like telemetry.
 2. PostgreSQL/lexical candidate retrieval at scale.
 3. Embedding experiment on the same benchmark.
 4. Hybrid fusion (for example reciprocal-rank fusion) only when it beats the lexical baseline by predeclared metrics.
@@ -151,20 +171,21 @@ No AI-generated answer may be represented as verified merely because the retriev
 
 `PRODUCTION_READY` is forbidden until all of the following are independently evidenced:
 
-- required CI checks green;
+- required CI checks green on the final merge base;
 - no known Critical security finding;
 - no real secret in repository/history/release artifacts;
 - separation-of-duties production configuration enabled;
 - PostgreSQL migration/integration checks green;
 - backup restore successfully tested;
-- distributed rate limiting active;
+- distributed rate limiting/WAF active;
 - MFA/step-up active for privileged production accounts;
 - real Arabic search benchmark meets approved targets;
 - preview/manual accessibility/RTL/mobile review complete;
-- observability and alerting active;
+- external observability and alerting active;
 - production rollback tested;
 - live DNS/TLS/headers/sitemap/robots/canonical verification complete;
-- human approval to release.
+- independent security/accessibility review completed as required;
+- explicit human approval to release.
 
 ## Status vocabulary
 
@@ -179,4 +200,4 @@ Use only these states in project reporting:
 - `BLOCKED`
 - `PRODUCTION_READY`
 
-The current branch is an implementation candidate and must not be called `PRODUCTION_READY` until the external and staging gates above are closed.
+The current branch has passed repository CI/integration gates but has not passed an external staging environment or independent review. It must not be called `PRODUCTION_READY` until the external and staging gates above are closed.
