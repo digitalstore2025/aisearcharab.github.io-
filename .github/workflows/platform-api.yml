@@ -142,12 +142,12 @@ jobs:
           ALLOWED_ORIGINS: http://localhost:8000
         run: |
           alembic upgrade head
-          alembic current | grep 20260807_0003
+          alembic current | grep 20260807_0004
           python - <<'PY'
           from sqlalchemy import create_engine, text
           engine = create_engine("postgresql+psycopg://aisearcharab_ci:ci-only-password@127.0.0.1:5432/aisearcharab_ci")
           with engine.connect() as connection:
-              assert connection.scalar(text("select version_num from alembic_version")) == "20260807_0003"
+              assert connection.scalar(text("select version_num from alembic_version")) == "20260807_0004"
               assert connection.scalar(text("select to_regclass('public.ix_content_items_search_fts')")) == "ix_content_items_search_fts"
           PY
           python scripts/verify_postgres_search.py
