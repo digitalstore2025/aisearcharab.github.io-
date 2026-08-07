@@ -3,27 +3,48 @@ from __future__ import annotations
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, selectinload
 
+from .arabic import normalize_text
 from .models import ContentItem
+
+# Keep PostgreSQL candidate selection aligned with the Python Arabic normalizer.
+# translate() maps the first seven characters and deletes tatweel/diacritics that
+# have no corresponding replacement character.
+_POSTGRES_TRANSLATE_FROM = (
+    "إأآٱىؤئـ"
+    + "".join(chr(codepoint) for codepoint in range(0x0610, 0x061B))
+    + "".join(chr(codepoint) for codepoint in range(0x064B, 0x0660))
+    + "\u0670"
+    + "".join(chr(codepoint) for codepoint in range(0x06D6, 0x06EE))
+)
+_POSTGRES_TRANSLATE_TO = "اااايوي"
+
+
+def _postgres_search_document():
+    combined = (
+        func.coalesce(ContentItem.title, "")
+        + " "
+        + func.coalesce(ContentItem.summary, "")
+        + " "
+        + func.coalesce(ContentItem.body, "")
+        + " "
+        + func.coalesce(ContentItem.section, "")
+    )
+    return func.to_tsvector(
+        "simple",
+        func.translate(func.lower(combined), _POSTGRES_TRANSLATE_FROM, _POSTGRES_TRANSLATE_TO),
+    )
 
 
 def list_indexed_content(session: Session, query: str | None = None, *, candidate_limit: int = 300) -> list[ContentItem]:
     statement = select(ContentItem).where(ContentItem.status == "published", ContentItem.is_indexed.is_(True))
 
-    # Production is PostgreSQL-only. Use its GIN-backed full-text index to bound the
-    # expensive application ranking stage. SQLite remains a deterministic dev/test fallback.
+    # Production is PostgreSQL-only. Use a GIN-backed, Arabic-normalized full-text
+    # index to bound the more expensive transparent application ranking stage.
+    # SQLite remains a deterministic dev/test fallback.
     bind = session.get_bind()
     if query and bind.dialect.name == "postgresql":
-        document = func.to_tsvector(
-            "simple",
-            func.coalesce(ContentItem.title, "")
-            + " "
-            + func.coalesce(ContentItem.summary, "")
-            + " "
-            + func.coalesce(ContentItem.body, "")
-            + " "
-            + func.coalesce(ContentItem.section, ""),
-        )
-        tsquery = func.websearch_to_tsquery("simple", query)
+        document = _postgres_search_document()
+        tsquery = func.websearch_to_tsquery("simple", normalize_text(query))
         statement = (
             statement.where(document.op("@@")(tsquery))
             .order_by(func.ts_rank_cd(document, tsquery).desc(), ContentItem.published_at.desc().nullslast(), ContentItem.slug.asc())
