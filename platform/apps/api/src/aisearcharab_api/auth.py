@@ -14,6 +14,8 @@ from .models import AdminSession, User
 from .rbac import authorize, permissions_for_role
 from .security import secret_digest
 
+PRIVILEGED_MFA_ROLES = frozenset({"owner", "admin", "publisher"})
+
 
 def _aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
@@ -26,7 +28,19 @@ class Principal:
     permissions: frozenset[str]
 
 
-def get_principal(request: Request, db: Annotated[Session, Depends(get_db)]) -> Principal:
+def mfa_required_for_user(request: Request, user: User) -> bool:
+    settings = request.app.state.settings
+    return user.mfa_enabled_at is not None or (
+        settings.require_mfa_for_privileged and user.role in PRIVILEGED_MFA_ROLES
+    )
+
+
+def get_base_principal(request: Request, db: Annotated[Session, Depends(get_db)]) -> Principal:
+    """Authenticate the opaque session without requiring completion of MFA.
+
+    This dependency is intentionally restricted to MFA enrollment/verification and
+    session termination paths. Application/admin authorization must use get_principal.
+    """
     settings = request.app.state.settings
     token = request.cookies.get(settings.session_cookie_name)
     if not token:
@@ -63,6 +77,15 @@ def get_principal(request: Request, db: Annotated[Session, Depends(get_db)]) -> 
     )
 
 
+def get_principal(
+    request: Request,
+    principal: Annotated[Principal, Depends(get_base_principal)],
+) -> Principal:
+    if mfa_required_for_user(request, principal.user) and principal.session.mfa_verified_at is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="multi-factor authentication required")
+    return principal
+
+
 def _check_permissions(principal: Principal, required: tuple[str, ...]) -> None:
     decision = authorize(principal.user.role, required)
     if not decision.allowed:
@@ -91,6 +114,11 @@ def require_permissions(*required: str):
 
 
 def require_csrf(request: Request, principal: Annotated[Principal, Depends(get_principal)]) -> Principal:
+    _check_csrf(request, principal)
+    return principal
+
+
+def require_base_csrf(request: Request, principal: Annotated[Principal, Depends(get_base_principal)]) -> Principal:
     _check_csrf(request, principal)
     return principal
 
