@@ -59,6 +59,7 @@ class Settings:
     search_candidate_limit: int = 300
     session_ttl_minutes: int = 720
     session_idle_minutes: int = 30
+    step_up_ttl_minutes: int = 10
     login_max_failures: int = 5
     login_lock_minutes: int = 15
     password_min_length: int = 14
@@ -101,6 +102,10 @@ class Settings:
             raise ConfigurationError("SESSION_IDLE_MINUTES must be between 5 and 240")
         if self.session_idle_minutes >= self.session_ttl_minutes:
             raise ConfigurationError("SESSION_IDLE_MINUTES must be lower than SESSION_TTL_MINUTES")
+        if not 2 <= self.step_up_ttl_minutes <= 30:
+            raise ConfigurationError("STEP_UP_TTL_MINUTES must be between 2 and 30")
+        if self.step_up_ttl_minutes >= self.session_ttl_minutes:
+            raise ConfigurationError("STEP_UP_TTL_MINUTES must be lower than SESSION_TTL_MINUTES")
         if not 3 <= self.login_max_failures <= 20:
             raise ConfigurationError("LOGIN_MAX_FAILURES must be between 3 and 20")
         if not 1 <= self.login_lock_minutes <= 1440:
@@ -141,6 +146,7 @@ def get_settings() -> Settings:
         search_candidate_limit=_int("SEARCH_CANDIDATE_LIMIT", os.getenv("SEARCH_CANDIDATE_LIMIT", "300")),
         session_ttl_minutes=_int("SESSION_TTL_MINUTES", os.getenv("SESSION_TTL_MINUTES", "720")),
         session_idle_minutes=_int("SESSION_IDLE_MINUTES", os.getenv("SESSION_IDLE_MINUTES", "30")),
+        step_up_ttl_minutes=_int("STEP_UP_TTL_MINUTES", os.getenv("STEP_UP_TTL_MINUTES", "10")),
         login_max_failures=_int("LOGIN_MAX_FAILURES", os.getenv("LOGIN_MAX_FAILURES", "5")),
         login_lock_minutes=_int("LOGIN_LOCK_MINUTES", os.getenv("LOGIN_LOCK_MINUTES", "15")),
         password_min_length=_int("PASSWORD_MIN_LENGTH", os.getenv("PASSWORD_MIN_LENGTH", "14")),
