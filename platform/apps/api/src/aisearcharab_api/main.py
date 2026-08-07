@@ -23,12 +23,13 @@ from .repository import count_indexed_matches, get_published_content, list_index
 from .routes_admin import router as admin_router
 from .routes_admin_detail import router as admin_detail_router
 from .routes_auth import router as auth_router
+from .routes_mfa import router as mfa_router
 from .schemas import CapabilitiesResponse, HealthResponse, PublicClaimSummary, PublicContentDetail, SearchResponse, SearchResult, SourceSummary
 from .search import rank_items
 
 ADMIN_STATIC = Path(__file__).resolve().parent / "admin_static"
 _PUBLIC_CLAIM_STATES = {"reviewed", "published"}
-EXPECTED_ALEMBIC_REVISION = "20260807_0004"
+EXPECTED_ALEMBIC_REVISION = "20260808_0005"
 
 
 def _public_content(item) -> PublicContentDetail:
@@ -77,6 +78,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(runtime_settings.allowed_hosts))
 
     app.include_router(auth_router, prefix=runtime_settings.api_prefix)
+    app.include_router(mfa_router, prefix=runtime_settings.api_prefix)
     app.include_router(admin_router, prefix=runtime_settings.api_prefix)
     app.include_router(admin_detail_router, prefix=runtime_settings.api_prefix)
 
