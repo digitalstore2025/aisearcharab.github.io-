@@ -61,6 +61,17 @@ jobs:
       - name: Verify installed dependencies
         run: python -m pip check
 
+      - name: Generate hashed runtime dependency lock
+        run: pip-compile pyproject.toml --generate-hashes --strip-extras --output-file /tmp/requirements-runtime.lock
+
+      - name: Upload hashed runtime lock candidate
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: phase3-1-runtime-lock
+          path: /tmp/requirements-runtime.lock
+          if-no-files-found: error
+          retention-days: 14
+
       - name: Audit known Python dependency vulnerabilities
         run: pip-audit --strict --progress-spinner off
 
