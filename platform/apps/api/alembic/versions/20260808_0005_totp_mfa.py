@@ -37,7 +37,6 @@ def upgrade() -> None:
         sa.Column("used_at", sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("code_hash"),
     )
     op.create_index("ix_mfa_recovery_codes_code_hash", "mfa_recovery_codes", ["code_hash"], unique=True)
     op.create_index("ix_mfa_recovery_codes_user_unused", "mfa_recovery_codes", ["user_id", "used_at"], unique=False)
