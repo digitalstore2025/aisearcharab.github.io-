@@ -40,6 +40,14 @@ def test_legacy_scrypt_profile_is_accepted_but_marked_for_rehash() -> None:
     assert needs_password_rehash(encoded) is True
 
 
+def test_hostile_stored_work_factor_is_rejected_before_scrypt() -> None:
+    salt = base64.urlsafe_b64encode(b"bounded-salt-1234").decode("ascii")
+    digest = base64.urlsafe_b64encode(b"0" * 32).decode("ascii")
+    encoded = f"scrypt-v1${2**24}$8$1${salt}${digest}"
+    assert verify_password("attacker-controlled", encoded) is False
+    assert needs_password_rehash(encoded) is True
+
+
 def test_password_policy_and_email_normalization() -> None:
     with pytest.raises(PasswordPolicyError):
         hash_password("short")
