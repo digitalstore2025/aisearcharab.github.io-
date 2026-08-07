@@ -144,6 +144,14 @@ class LoginResponse(BaseModel):
     expires_at: datetime
 
 
+class StepUpRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=256)
+
+
+class StepUpResponse(BaseModel):
+    elevated_until: datetime
+
+
 class UserCreate(BaseModel):
     email: str = Field(min_length=3, max_length=254)
     display_name: str = Field(min_length=2, max_length=160)
