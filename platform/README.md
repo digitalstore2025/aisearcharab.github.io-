@@ -9,6 +9,7 @@
 - fallback محلي في واجهة Hugo عند غياب API.
 - جلسات Opaque داخل HttpOnly cookies، CSRF double-submit وSameSite=Strict.
 - Scrypt versioned password hashes مع transparent rehash وserver-side idle timeout.
+- password step-up re-authentication قصيرة العمر للعمليات الحساسة؛ نافذتها الافتراضية 10 دقائق ولا يمكن أن تتجاوز انتهاء الجلسة.
 - RBAC للأدوار: owner, admin, editor, reviewer, publisher, analyst.
 - Separation of Duties اختياري في التطوير وإجباري في production configuration.
 - optimistic locking + row locks + actor provenance لدورة التحرير.
@@ -33,6 +34,12 @@ python apps/api/scripts/bootstrap_admin.py --email owner@example.com --name "ا�
 ```
 
 ثم افتح `http://localhost:8000/admin/`.
+
+### Step-up للعمليات الحساسة
+
+تسجيل الدخول العادي لا يمنح تلقائياً صلاحية تنفيذ عمليات privileged. عند محاولة إنشاء/تعديل مستخدم، نشر/أرشفة مادة، أو تحويل ادعاء إلى `published`، يطلب الخادم إعادة التحقق بكلمة مرور الحساب عبر `POST /v1/auth/step-up` مع CSRF صحيح. بعد النجاح تصبح الجلسة elevated لمدة `STEP_UP_TTL_MINUTES` فقط، وبحد أقصى حتى انتهاء الجلسة الأصلية. المحاولات الفاشلة تدخل في عداد القفل نفسه، وقد تؤدي إلى قفل الحساب وإبطال الجلسة عند بلوغ الحد.
+
+هذا Step-up مبني على عامل كلمة المرور الحالي، لذلك لا يُسوّق ولا يُعامل على أنه MFA/WebAuthn.
 
 ## ربط البحث العام بالـAPI في Preview
 
@@ -73,4 +80,4 @@ python scripts/load_probe.py \
 - لا crawling خارجي.
 - لا مدفوعات.
 - لا نشر إنتاجي تلقائي.
-- Production ما يزال يتطلب distributed rate limiting/WAF، MFA/step-up للحسابات الحساسة، managed PostgreSQL مع PITR/restore drill، benchmark عربي حقيقي، external observability، مراجعة أمن/إتاحة مستقلة وStaging/rollback موثق.
+- Production ما يزال يتطلب distributed rate limiting/WAF، MFA/WebAuthn أو عامل مستقل أقوى للحسابات privileged، managed PostgreSQL مع PITR/restore drill، benchmark عربي حقيقي، external observability، مراجعة أمن/إتاحة مستقلة وStaging/rollback موثق.
