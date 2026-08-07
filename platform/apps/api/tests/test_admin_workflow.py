@@ -9,6 +9,11 @@ def login_owner(client: TestClient, credentials: dict[str, str]) -> dict[str, st
     return {"X-CSRF-Token": csrf_from_client(client)}
 
 
+def step_up_owner(client: TestClient, credentials: dict[str, str], headers: dict[str, str]) -> None:
+    response = client.post("/v1/auth/step-up", headers=headers, json={"password": credentials["password"]})
+    assert response.status_code == 200
+
+
 def create_governance_item(client: TestClient, headers: dict[str, str], slug: str = "arabic-ai-governance") -> dict:
     response = client.post(
         "/v1/admin/content",
@@ -85,6 +90,12 @@ def test_governed_content_workflow(client: TestClient, owner_credentials: dict[s
 
     reviewed_again = client.post(f"/v1/admin/content/{content_id}/transition", headers=headers, json={"status": "reviewed"})
     assert reviewed_again.status_code == 200
+
+    denied_publish = client.post(f"/v1/admin/content/{content_id}/transition", headers=headers, json={"status": "published"})
+    assert denied_publish.status_code == 403
+    assert denied_publish.json()["detail"] == "step-up authentication required"
+
+    step_up_owner(client, owner_credentials, headers)
     published = client.post(f"/v1/admin/content/{content_id}/transition", headers=headers, json={"status": "published"})
     assert published.status_code == 200
     assert published.json()["status"] == "published"
@@ -142,6 +153,21 @@ def test_editing_reviewed_content_invalidates_review(client: TestClient, owner_c
 def test_owner_can_create_user_editor_cannot_manage_users_and_audit_ids_exist(client: TestClient, owner_credentials: dict[str, str]) -> None:
     headers = login_owner(client, owner_credentials)
     content = create_governance_item(client, headers, slug="audit-target-check")
+
+    denied_without_step_up = client.post(
+        "/v1/admin/users",
+        headers=headers,
+        json={
+            "email": "editor@example.com",
+            "display_name": "Arabic Editor",
+            "role": "editor",
+            "password": "editor-secure-password-2026",
+        },
+    )
+    assert denied_without_step_up.status_code == 403
+    assert denied_without_step_up.json()["detail"] == "step-up authentication required"
+
+    step_up_owner(client, owner_credentials, headers)
     created = client.post(
         "/v1/admin/users",
         headers=headers,
