@@ -31,6 +31,21 @@ def test_production_rejects_wildcard_cors() -> None:
         settings.validate()
 
 
+def test_production_rejects_wildcard_hosts() -> None:
+    settings = Settings(
+        environment="production",
+        database_url="postgresql+psycopg://app:secret@db/app",
+        allowed_origins=("https://aisearcharab.com",),
+        allowed_hosts=("*",),
+        api_prefix="/v1",
+        max_search_limit=20,
+        log_queries=False,
+        enforce_separation_of_duties=True,
+    )
+    with pytest.raises(ConfigurationError, match="Wildcard hosts"):
+        settings.validate()
+
+
 def test_query_logging_requires_keyed_hash_secret() -> None:
     settings = Settings(
         environment="staging",
