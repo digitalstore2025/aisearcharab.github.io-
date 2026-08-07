@@ -13,7 +13,7 @@ from .auth import Principal, get_principal, require_csrf
 from .database import get_db
 from .models import AdminSession, User
 from .rbac import permissions_for_role
-from .schemas import LoginRequest, LoginResponse, UserPublic
+from .schemas import LoginRequest, LoginResponse, StepUpRequest, StepUpResponse, UserPublic
 from .security import (
     hash_password,
     needs_password_rehash,
@@ -148,6 +148,59 @@ def login(
 @router.get("/me", response_model=UserPublic)
 def me(principal: Annotated[Principal, Depends(get_principal)]) -> UserPublic:
     return user_public(principal.user)
+
+
+@router.post("/step-up", response_model=StepUpResponse)
+def step_up(
+    payload: StepUpRequest,
+    request: Request,
+    principal: Annotated[Principal, Depends(require_csrf)],
+    db: Annotated[Session, Depends(get_db)],
+) -> StepUpResponse:
+    settings = request.app.state.settings
+    now = datetime.now(timezone.utc)
+    password_matches = verify_password(payload.password, principal.user.password_hash)
+    if not password_matches:
+        principal.user.failed_login_count += 1
+        revoked = False
+        if principal.user.failed_login_count >= settings.login_max_failures:
+            principal.user.locked_until = now + timedelta(minutes=settings.login_lock_minutes)
+            principal.user.failed_login_count = 0
+            principal.session.revoked_at = now
+            revoked = True
+        record_audit(
+            db,
+            action="auth.step_up",
+            outcome="failure",
+            actor_user_id=principal.user.id,
+            target_type="session",
+            target_id=principal.session.id,
+            request_id=getattr(request.state, "request_id", None),
+            metadata={"reason": "invalid_credentials", "session_revoked": revoked},
+        )
+        db.commit()
+        time.sleep(0.08)
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
+
+    principal.user.failed_login_count = 0
+    principal.user.locked_until = None
+    elevated_until = min(
+        now + timedelta(minutes=settings.step_up_ttl_minutes),
+        _aware(principal.session.expires_at),
+    )
+    principal.session.elevated_until = elevated_until
+    record_audit(
+        db,
+        action="auth.step_up",
+        outcome="success",
+        actor_user_id=principal.user.id,
+        target_type="session",
+        target_id=principal.session.id,
+        request_id=getattr(request.state, "request_id", None),
+        metadata={"ttl_minutes": settings.step_up_ttl_minutes},
+    )
+    db.commit()
+    return StepUpResponse(elevated_until=elevated_until)
 
 
 @router.post("/logout", status_code=204)
