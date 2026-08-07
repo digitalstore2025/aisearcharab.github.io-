@@ -18,19 +18,23 @@ _POSTGRES_TRANSLATE_FROM = (
 )
 _POSTGRES_TRANSLATE_TO = "اااايوي"
 _SIMPLE_REGCONFIG = literal_column("'simple'::regconfig")
+_EMPTY_SQL = literal_column("''")
+_SPACE_SQL = literal_column("' '")
 _TRANSLATE_FROM_SQL = literal_column("'" + _POSTGRES_TRANSLATE_FROM.replace("'", "''") + "'")
 _TRANSLATE_TO_SQL = literal_column("'" + _POSTGRES_TRANSLATE_TO.replace("'", "''") + "'")
 
 
 def _postgres_search_document():
+    # All expression constants are rendered literally so PostgreSQL can match this
+    # query expression exactly to the functional GIN index created by Alembic.
     combined = (
-        func.coalesce(ContentItem.title, "")
-        + " "
-        + func.coalesce(ContentItem.summary, "")
-        + " "
-        + func.coalesce(ContentItem.body, "")
-        + " "
-        + func.coalesce(ContentItem.section, "")
+        func.coalesce(ContentItem.title, _EMPTY_SQL)
+        + _SPACE_SQL
+        + func.coalesce(ContentItem.summary, _EMPTY_SQL)
+        + _SPACE_SQL
+        + func.coalesce(ContentItem.body, _EMPTY_SQL)
+        + _SPACE_SQL
+        + func.coalesce(ContentItem.section, _EMPTY_SQL)
     )
     normalized = func.translate(func.lower(combined), _TRANSLATE_FROM_SQL, _TRANSLATE_TO_SQL)
     return func.to_tsvector(_SIMPLE_REGCONFIG, normalized)
