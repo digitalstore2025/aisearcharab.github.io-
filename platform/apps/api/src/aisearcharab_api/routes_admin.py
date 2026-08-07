@@ -192,10 +192,13 @@ def create_content(
     principal: Annotated[Principal, Depends(require_mutation("content:write"))],
     db: Annotated[Session, Depends(get_db)],
 ) -> ContentDetail:
-    item = ContentItem(slug=payload.slug, url_path=payload.url_path, title=payload.title.strip(),
-                       summary=payload.summary.strip(), body=payload.body.strip(), section=payload.section,
-                       language=payload.language, status="draft", is_indexed=False,
-                       source_authority=payload.source_authority, created_by_user_id=principal.user.id)
+    item = ContentItem(
+        slug=payload.slug, url_path=payload.url_path, title=payload.title.strip(),
+        summary=payload.summary.strip(), body=payload.body.strip(), section=payload.section,
+        language=payload.language, status="draft", is_indexed=False,
+        source_authority=payload.source_authority, created_by_user_id=principal.user.id,
+        last_modified_by_user_id=principal.user.id,
+    )
     db.add(item)
     try:
         db.flush()
@@ -220,6 +223,7 @@ def update_content(
     item = _content(db, content_id, lock=True); _editable(item); previous = item.status
     for field, value in changes.items():
         setattr(item, field, value.strip() if isinstance(value, str) else value)
+    item.last_modified_by_user_id = principal.user.id
     invalidated = _demote(item)
     record_audit(db, action="content.update", outcome="success", actor_user_id=principal.user.id,
                  target_type="content", target_id=item.id, request_id=_rid(request),
@@ -246,7 +250,7 @@ def transition_content(
     if payload.status == "reviewed":
         if not item.sources:
             raise HTTPException(status_code=409, detail="at least one source is required before review approval")
-        _sod(request, principal.user.id, item.created_by_user_id)
+        _sod(request, principal.user.id, item.created_by_user_id, item.last_modified_by_user_id)
         item.reviewed_by_user_id = principal.user.id; item.published_by_user_id = None
     if payload.status == "published":
         if not item.sources:
@@ -254,7 +258,7 @@ def transition_content(
         claims = list(db.scalars(select(Claim).where(Claim.content_id == content_id).with_for_update()).all())
         if any(claim.review_status not in _PUBLISHABLE_CLAIM_STATES for claim in claims):
             raise HTTPException(status_code=409, detail="all claims must be approved before publishing")
-        _sod(request, principal.user.id, item.created_by_user_id, item.reviewed_by_user_id)
+        _sod(request, principal.user.id, item.created_by_user_id, item.last_modified_by_user_id, item.reviewed_by_user_id)
         item.published_by_user_id = principal.user.id
         item.published_at = item.published_at or datetime.now(timezone.utc); item.is_indexed = True
     elif payload.status in {"draft", "reviewed", "archived"}:
@@ -285,7 +289,9 @@ def add_source(
         raise HTTPException(status_code=409, detail="source key already represents different source metadata")
     if source in item.sources:
         raise HTTPException(status_code=409, detail="source is already attached")
-    item.sources.append(source); previous = item.status; invalidated = _demote(item)
+    item.sources.append(source)
+    item.last_modified_by_user_id = principal.user.id
+    previous = item.status; invalidated = _demote(item)
     record_audit(db, action="content.source.attach", outcome="success", actor_user_id=principal.user.id,
                  target_type="content", target_id=item.id, request_id=_rid(request),
                  metadata={"source_key": payload.source_key, "reliability": payload.reliability,
@@ -306,7 +312,9 @@ def add_claim(
     item = _content(db, content_id, lock=True); _editable(item)
     claim = Claim(claim_key=payload.claim_key, text=payload.text.strip(), claim_type=payload.claim_type,
                   confidence=payload.confidence, review_status="draft", created_by_user_id=principal.user.id)
-    item.claims.append(claim); previous = item.status; invalidated = _demote(item)
+    item.claims.append(claim)
+    item.last_modified_by_user_id = principal.user.id
+    previous = item.status; invalidated = _demote(item)
     try:
         db.flush()
         record_audit(db, action="content.claim.create", outcome="success", actor_user_id=principal.user.id,
