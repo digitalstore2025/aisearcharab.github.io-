@@ -33,6 +33,50 @@ def test_invalid_login_is_generic(client: TestClient) -> None:
     assert response.json()["detail"] == "invalid credentials"
 
 
+def test_sensitive_user_creation_requires_step_up_and_expiry(
+    client: TestClient,
+    owner_credentials: dict[str, str],
+    session_factory: sessionmaker[Session],
+) -> None:
+    assert client.post("/v1/auth/login", json=owner_credentials).status_code == 200
+    headers = {"X-CSRF-Token": csrf_from_client(client)}
+    payload = {
+        "email": "step-up-user@example.com",
+        "display_name": "Step Up User",
+        "role": "editor",
+        "password": "editor-secure-password-2026",
+    }
+
+    denied = client.post("/v1/admin/users", headers=headers, json=payload)
+    assert denied.status_code == 403
+    assert denied.json()["detail"] == "step-up authentication required"
+
+    invalid = client.post("/v1/auth/step-up", headers=headers, json={"password": "wrong-password-value"})
+    assert invalid.status_code == 401
+    assert invalid.json()["detail"] == "invalid credentials"
+
+    elevated = client.post("/v1/auth/step-up", headers=headers, json={"password": owner_credentials["password"]})
+    assert elevated.status_code == 200
+    elevated_until = datetime.fromisoformat(elevated.json()["elevated_until"])
+    assert elevated_until > datetime.now(timezone.utc)
+
+    created = client.post("/v1/admin/users", headers=headers, json=payload)
+    assert created.status_code == 201
+
+    with session_factory() as db:
+        admin_session = db.query(AdminSession).filter(AdminSession.revoked_at.is_(None)).one()
+        admin_session.elevated_until = datetime.now(timezone.utc) - timedelta(seconds=1)
+        db.commit()
+
+    denied_after_expiry = client.post(
+        "/v1/admin/users",
+        headers=headers,
+        json={**payload, "email": "step-up-expired@example.com"},
+    )
+    assert denied_after_expiry.status_code == 403
+    assert denied_after_expiry.json()["detail"] == "step-up authentication required"
+
+
 def test_idle_session_is_revoked_server_side(
     client: TestClient,
     owner_credentials: dict[str, str],
