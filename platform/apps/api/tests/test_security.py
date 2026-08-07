@@ -16,3 +16,18 @@ def test_invalid_request_id_is_replaced(client: TestClient) -> None:
     response = client.get("/health/live", headers={"X-Request-ID": "<script>"})
     assert response.headers["x-request-id"] != "<script>"
     assert len(response.headers["x-request-id"]) >= 32
+
+
+def test_untrusted_host_is_rejected(client: TestClient) -> None:
+    response = client.get("/health/live", headers={"Host": "attacker.invalid"})
+    assert response.status_code == 400
+
+
+def test_oversized_declared_body_is_rejected_before_route_handling(client: TestClient) -> None:
+    response = client.post(
+        "/v1/auth/login",
+        headers={"Content-Length": "600000", "Content-Type": "application/json"},
+        content=b"{}",
+    )
+    assert response.status_code == 413
+    assert response.json()["detail"] == "request body too large"
