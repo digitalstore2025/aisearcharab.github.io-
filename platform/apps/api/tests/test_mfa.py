@@ -130,7 +130,6 @@ def test_owner_must_enroll_and_verify_mfa_before_admin_access(
     recovery_codes = confirmed.json()["recovery_codes"]
     assert len(recovery_codes) == 10
     assert len(set(recovery_codes)) == 10
-    assert all(code not in confirmed.text.replace(code, "", 1) for code in [])
 
     assert mfa_client.get("/v1/auth/me").status_code == 200
     status_after = mfa_client.get("/v1/auth/mfa/status", headers=headers)
