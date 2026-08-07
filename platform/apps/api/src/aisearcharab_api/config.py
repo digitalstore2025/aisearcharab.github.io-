@@ -36,6 +36,15 @@ def _valid_origin(value: str, *, require_https: bool) -> bool:
     return True
 
 
+def _valid_host(value: str) -> bool:
+    if not value or "://" in value or "/" in value or "@" in value:
+        return False
+    if value == "*":
+        return True
+    candidate = value[2:] if value.startswith("*.") else value
+    return all(part and part.replace("-", "").isalnum() for part in candidate.split("."))
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     environment: str
@@ -45,6 +54,8 @@ class Settings:
     max_search_limit: int
     log_queries: bool
     query_hash_key: str | None = None
+    allowed_hosts: tuple[str, ...] = ("localhost", "127.0.0.1", "testserver")
+    max_request_body_bytes: int = 524_288
     search_candidate_limit: int = 300
     session_ttl_minutes: int = 720
     session_idle_minutes: int = 30
@@ -80,6 +91,10 @@ class Settings:
             raise ConfigurationError("MAX_SEARCH_LIMIT must be between 1 and 100")
         if not self.max_search_limit <= self.search_candidate_limit <= 2_000:
             raise ConfigurationError("SEARCH_CANDIDATE_LIMIT must be between MAX_SEARCH_LIMIT and 2000")
+        if not 16_384 <= self.max_request_body_bytes <= 5_000_000:
+            raise ConfigurationError("MAX_REQUEST_BODY_BYTES must be between 16384 and 5000000")
+        if not self.allowed_hosts or any(not _valid_host(host) for host in self.allowed_hosts):
+            raise ConfigurationError("ALLOWED_HOSTS must contain valid host names")
         if not 15 <= self.session_ttl_minutes <= 1440:
             raise ConfigurationError("SESSION_TTL_MINUTES must be between 15 and 1440")
         if not 5 <= self.session_idle_minutes <= 240:
@@ -103,6 +118,8 @@ class Settings:
                 raise ConfigurationError("SQLite is not allowed in production")
             if "*" in self.allowed_origins:
                 raise ConfigurationError("Wildcard CORS origins are not allowed in production")
+            if "*" in self.allowed_hosts:
+                raise ConfigurationError("Wildcard hosts are not allowed in production")
             if "change-me" in self.database_url.lower():
                 raise ConfigurationError("DATABASE_URL contains a placeholder credential")
             if not self.enforce_separation_of_duties:
@@ -115,8 +132,10 @@ def get_settings() -> Settings:
         environment=os.getenv("APP_ENV", "development").strip().lower(),
         database_url=os.getenv("DATABASE_URL", "sqlite+pysqlite:///./aisearcharab.db").strip(),
         allowed_origins=_csv(os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")),
+        allowed_hosts=_csv(os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1,testserver")),
         api_prefix=os.getenv("API_PREFIX", "/v1").rstrip("/"),
         max_search_limit=_int("MAX_SEARCH_LIMIT", os.getenv("MAX_SEARCH_LIMIT", "20")),
+        max_request_body_bytes=_int("MAX_REQUEST_BODY_BYTES", os.getenv("MAX_REQUEST_BODY_BYTES", "524288")),
         log_queries=_bool(os.getenv("LOG_SEARCH_QUERIES", "false")),
         query_hash_key=os.getenv("QUERY_HASH_KEY") or None,
         search_candidate_limit=_int("SEARCH_CANDIDATE_LIMIT", os.getenv("SEARCH_CANDIDATE_LIMIT", "300")),
