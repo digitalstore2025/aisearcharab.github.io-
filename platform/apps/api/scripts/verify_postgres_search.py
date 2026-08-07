@@ -3,13 +3,19 @@ from __future__ import annotations
 import os
 from datetime import datetime, timezone
 
-from sqlalchemy import create_engine, delete
+from sqlalchemy import create_engine, delete, select, text
 from sqlalchemy.orm import Session
 
 from aisearcharab_api.models import ContentItem
-from aisearcharab_api.repository import count_indexed_matches, list_indexed_content
+from aisearcharab_api.repository import (
+    _postgres_search_document,
+    _postgres_tsquery,
+    count_indexed_matches,
+    list_indexed_content,
+)
 
 SLUG = "ci-arabic-fts-normalization"
+INDEX_NAME = "ix_content_items_search_fts"
 
 
 def main() -> int:
@@ -40,10 +46,27 @@ def main() -> int:
         assert any(item.slug == SLUG for item in matches), "Arabic-normalized GIN FTS failed to retrieve the seeded document"
         assert total is not None and total >= 1, "PostgreSQL FTS total-count query failed"
 
+        document = _postgres_search_document()
+        tsquery = _postgres_tsquery(query)
+        probe = (
+            select(ContentItem.id)
+            .where(
+                ContentItem.status == "published",
+                ContentItem.is_indexed.is_(True),
+                document.op("@@")(tsquery),
+            )
+            .limit(20)
+        )
+        compiled = probe.compile(engine, compile_kwargs={"literal_binds": True})
+        session.execute(text("SET LOCAL enable_seqscan = off"))
+        plan_rows = session.execute(text("EXPLAIN " + str(compiled))).scalars().all()
+        plan = "\n".join(str(row) for row in plan_rows)
+        assert INDEX_NAME in plan, f"expected PostgreSQL to use {INDEX_NAME}; plan was: {plan}"
+
         session.execute(delete(ContentItem).where(ContentItem.slug == SLUG))
         session.commit()
 
-    print("PostgreSQL Arabic-normalized FTS integration probe passed.")
+    print("PostgreSQL Arabic-normalized FTS integration and index-usage probes passed.")
     return 0
 
 
