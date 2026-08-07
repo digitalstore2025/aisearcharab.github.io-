@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, selectinload
 from sqlalchemy.orm.exc import StaleDataError
 
 from .audit import record_audit
-from .auth import Principal, require_mutation, require_permissions
+from .auth import Principal, require_mutation, require_permissions, require_sensitive_mutation, require_step_up
 from .database import get_db
 from .models import AdminSession, AuditEvent, Claim, ContentItem, Source, User
 from .routes_auth import user_public
@@ -103,7 +103,7 @@ def list_users(
 @router.post("/users", response_model=UserPublic, status_code=201)
 def create_user(
     payload: UserCreate, request: Request,
-    principal: Annotated[Principal, Depends(require_mutation("users:manage"))],
+    principal: Annotated[Principal, Depends(require_sensitive_mutation("users:manage"))],
     db: Annotated[Session, Depends(get_db)],
 ) -> UserPublic:
     try:
@@ -128,7 +128,7 @@ def create_user(
 @router.patch("/users/{user_id}", response_model=UserPublic)
 def update_user(
     user_id: str, payload: UserUpdate, request: Request,
-    principal: Annotated[Principal, Depends(require_mutation("users:manage"))],
+    principal: Annotated[Principal, Depends(require_sensitive_mutation("users:manage"))],
     db: Annotated[Session, Depends(get_db)],
 ) -> UserPublic:
     if not payload.model_dump(exclude_unset=True):
@@ -247,6 +247,8 @@ def transition_content(
                 "published": "content:publish", "archived": "content:publish"}[payload.status]
     if required not in principal.permissions:
         raise HTTPException(status_code=403, detail="insufficient permissions for transition")
+    if payload.status in {"published", "archived"}:
+        require_step_up(principal)
     if payload.status == "reviewed":
         if not item.sources:
             raise HTTPException(status_code=409, detail="at least one source is required before review approval")
@@ -334,6 +336,8 @@ def review_claim(
     principal: Annotated[Principal, Depends(require_mutation("claims:review"))],
     db: Annotated[Session, Depends(get_db)],
 ) -> ClaimSummary:
+    if payload.review_status == "published":
+        require_step_up(principal)
     content_id = db.scalar(select(Claim.content_id).where(Claim.id == claim_id))
     if content_id is None:
         raise HTTPException(status_code=404, detail="claim not found")
