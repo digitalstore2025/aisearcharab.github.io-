@@ -25,6 +25,9 @@ def upgrade() -> None:
         batch.add_column(sa.Column("mfa_enabled_at", sa.DateTime(timezone=True), nullable=True))
         batch.add_column(sa.Column("mfa_last_counter", sa.Integer(), nullable=False, server_default=sa.text("-1")))
 
+    with op.batch_alter_table("users") as batch:
+        batch.alter_column("mfa_last_counter", server_default=None)
+
     with op.batch_alter_table("admin_sessions") as batch:
         batch.add_column(sa.Column("mfa_verified_at", sa.DateTime(timezone=True), nullable=True))
 
