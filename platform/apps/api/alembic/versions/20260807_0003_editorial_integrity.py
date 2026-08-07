@@ -16,6 +16,15 @@ down_revision: str | None = "20260805_0002"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
+_ARABIC_TRANSLATE_FROM = (
+    "إأآٱىؤئـ"
+    + "".join(chr(codepoint) for codepoint in range(0x0610, 0x061B))
+    + "".join(chr(codepoint) for codepoint in range(0x064B, 0x0660))
+    + "\u0670"
+    + "".join(chr(codepoint) for codepoint in range(0x06D6, 0x06EE))
+)
+_ARABIC_TRANSLATE_TO = "اااايوي"
+
 
 def upgrade() -> None:
     with op.batch_alter_table("content_items") as batch:
@@ -37,12 +46,16 @@ def upgrade() -> None:
     bind = op.get_bind()
     if bind.dialect.name == "postgresql":
         op.execute(
-            """
+            f"""
             CREATE INDEX IF NOT EXISTS ix_content_items_search_fts
             ON content_items USING GIN (
               to_tsvector(
                 'simple',
-                coalesce(title, '') || ' ' || coalesce(summary, '') || ' ' || coalesce(body, '') || ' ' || coalesce(section, '')
+                translate(
+                  lower(coalesce(title, '') || ' ' || coalesce(summary, '') || ' ' || coalesce(body, '') || ' ' || coalesce(section, '')),
+                  '{_ARABIC_TRANSLATE_FROM}',
+                  '{_ARABIC_TRANSLATE_TO}'
+                )
               )
             )
             WHERE status = 'published' AND is_indexed = true
