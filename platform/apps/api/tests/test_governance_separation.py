@@ -12,6 +12,8 @@ from aisearcharab_api.models import User
 from aisearcharab_api.security import hash_password
 from conftest import OWNER_EMAIL, OWNER_PASSWORD, csrf_from_client
 
+ADMIN_EMAIL = "governance-admin@example.com"
+ADMIN_PASSWORD = "admin-secure-password-2026"
 REVIEWER_EMAIL = "reviewer@example.com"
 REVIEWER_PASSWORD = "reviewer-secure-password-2026"
 PUBLISHER_EMAIL = "publisher@example.com"
@@ -28,10 +30,18 @@ def _logout(client: TestClient, headers: dict[str, str]) -> None:
     assert client.post("/v1/auth/logout", headers=headers).status_code == 204
 
 
-def test_creator_reviewer_publisher_must_be_distinct(session_factory: sessionmaker[Session]) -> None:
+def test_creator_latest_editor_reviewer_and_publisher_duties_are_separated(
+    session_factory: sessionmaker[Session],
+) -> None:
     with session_factory() as db:
         db.add_all(
             [
+                User(
+                    email=ADMIN_EMAIL,
+                    display_name="Governance Admin",
+                    role="admin",
+                    password_hash=hash_password(ADMIN_PASSWORD),
+                ),
                 User(
                     email=REVIEWER_EMAIL,
                     display_name="Independent Reviewer",
@@ -114,13 +124,28 @@ def test_creator_reviewer_publisher_must_be_distinct(session_factory: sessionmak
         assert claim.status_code == 201
         claim_id = claim.json()["claims"][0]["id"]
 
-        same_actor_review = client.post(
+        same_creator_review = client.post(
             f"/v1/admin/content/{content_id}/transition",
             headers=owner_headers,
             json={"status": "reviewed"},
         )
-        assert same_actor_review.status_code == 409
+        assert same_creator_review.status_code == 409
         _logout(client, owner_headers)
+
+        admin_headers = _login(client, ADMIN_EMAIL, ADMIN_PASSWORD)
+        modified = client.patch(
+            f"/v1/admin/content/{content_id}",
+            headers=admin_headers,
+            json={"summary": "تعديل جوهري مستقل يجب ألا يسمح للمحرر نفسه باعتماده للمراجعة."},
+        )
+        assert modified.status_code == 200
+        same_latest_editor_review = client.post(
+            f"/v1/admin/content/{content_id}/transition",
+            headers=admin_headers,
+            json={"status": "reviewed"},
+        )
+        assert same_latest_editor_review.status_code == 409
+        _logout(client, admin_headers)
 
         reviewer_headers = _login(client, REVIEWER_EMAIL, REVIEWER_PASSWORD)
         reviewed_claim = client.patch(
