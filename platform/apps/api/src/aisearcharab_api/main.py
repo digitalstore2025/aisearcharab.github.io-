@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import __version__
 from .arabic import normalize_text
@@ -73,6 +74,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         expose_headers=["X-Request-ID"],
         max_age=600,
     )
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(runtime_settings.allowed_hosts))
 
     app.include_router(auth_router, prefix=runtime_settings.api_prefix)
     app.include_router(admin_router, prefix=runtime_settings.api_prefix)
