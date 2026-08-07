@@ -72,12 +72,12 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Audit known Python dependency vulnerabilities
-        run: pip-audit --strict --progress-spinner off
+      - name: Audit hashed runtime dependencies
+        run: pip-audit -r /tmp/requirements-runtime.lock --require-hashes --strict --progress-spinner off
 
-      - name: Generate CycloneDX dependency SBOM
+      - name: Generate runtime CycloneDX SBOM
         if: always()
-        run: pip-audit --strict --progress-spinner off --format cyclonedx-json --output /tmp/aisearcharab-sbom.cdx.json
+        run: pip-audit -r /tmp/requirements-runtime.lock --require-hashes --strict --progress-spinner off --format cyclonedx-json --output /tmp/aisearcharab-sbom.cdx.json
         continue-on-error: true
 
       - name: Upload dependency SBOM
