@@ -121,7 +121,7 @@ jobs:
           test -n "$expected"
           test "$actual" = "$expected"
 
-      - name: Verify migrations on PostgreSQL
+      - name: Verify migrations and Arabic-normalized FTS on PostgreSQL
         env:
           APP_ENV: test
           DATABASE_URL: postgresql+psycopg://aisearcharab_ci:ci-only-password@127.0.0.1:5432/aisearcharab_ci
@@ -136,6 +136,7 @@ jobs:
               assert connection.scalar(text("select version_num from alembic_version")) == "20260807_0003"
               assert connection.scalar(text("select to_regclass('public.ix_content_items_search_fts')")) == "ix_content_items_search_fts"
           PY
+          python scripts/verify_postgres_search.py
 
       - name: Verify schema drift with SQLite compatibility path
         env:
