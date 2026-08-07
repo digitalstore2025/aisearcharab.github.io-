@@ -46,10 +46,16 @@ def main() -> int:
         index_state = session.execute(
             text(
                 """
-                SELECT i.indisvalid, i.indisready
+                SELECT
+                    i.indisvalid,
+                    i.indisready,
+                    am.amname AS access_method,
+                    pg_get_indexdef(i.indexrelid) AS index_definition,
+                    pg_get_expr(i.indpred, i.indrelid) AS index_predicate
                 FROM pg_index AS i
                 JOIN pg_class AS c ON c.oid = i.indexrelid
                 JOIN pg_namespace AS n ON n.oid = c.relnamespace
+                JOIN pg_am AS am ON am.oid = c.relam
                 WHERE n.nspname = 'public' AND c.relname = :index_name
                 """
             ),
@@ -58,30 +64,18 @@ def main() -> int:
         assert index_state is not None, f"missing PostgreSQL index {INDEX_NAME}"
         assert bool(index_state.indisvalid), f"PostgreSQL index {INDEX_NAME} is not valid"
         assert bool(index_state.indisready), f"PostgreSQL index {INDEX_NAME} is not ready"
+        assert index_state.access_method == "gin", f"PostgreSQL index {INDEX_NAME} must use GIN"
 
-        indexdef = session.scalar(
-            text(
-                """
-                SELECT indexdef
-                FROM pg_indexes
-                WHERE schemaname = 'public' AND indexname = :index_name
-                """
-            ),
-            {"index_name": INDEX_NAME},
+        indexdef = " ".join(str(index_state.index_definition or "").lower().split())
+        predicate = " ".join(str(index_state.index_predicate or "").lower().split())
+        assert "to_tsvector" in indexdef, f"PostgreSQL index {INDEX_NAME} must index a tsvector"
+        assert "translate" in indexdef, f"PostgreSQL index {INDEX_NAME} must normalize Arabic text"
+        assert "status" in predicate and "published" in predicate, (
+            f"PostgreSQL index {INDEX_NAME} must be restricted to published content; predicate={predicate}"
         )
-        assert isinstance(indexdef, str) and indexdef, f"missing definition for {INDEX_NAME}"
-        normalized_indexdef = " ".join(indexdef.lower().split())
-        required_fragments = (
-            "using gin",
-            "to_tsvector",
-            "translate",
-            "status = 'published'",
-            "is_indexed = true",
+        assert "is_indexed" in predicate and "true" in predicate, (
+            f"PostgreSQL index {INDEX_NAME} must be restricted to indexable content; predicate={predicate}"
         )
-        for fragment in required_fragments:
-            assert fragment in normalized_indexdef, (
-                f"PostgreSQL index {INDEX_NAME} is missing expected fragment: {fragment}"
-            )
 
         session.execute(delete(ContentItem).where(ContentItem.slug == SLUG))
         session.commit()
