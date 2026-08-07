@@ -9,7 +9,10 @@
 - fallback محلي في واجهة Hugo عند غياب API.
 - جلسات Opaque داخل HttpOnly cookies، CSRF double-submit وSameSite=Strict.
 - Scrypt versioned password hashes مع transparent rehash وserver-side idle timeout.
-- password step-up re-authentication قصيرة العمر للعمليات الحساسة؛ نافذتها الافتراضية 10 دقائق ولا يمكن أن تتجاوز انتهاء الجلسة.
+- TOTP MFA مستقلة للحسابات `owner` و`admin` و`publisher` عند تفعيل سياسة privileged MFA، وهي إلزامية في Staging/Production configuration.
+- أسرار TOTP مشفرة at rest بمفتاح بيئي خارجي `MFA_ENCRYPTION_KEY`، ولا يجوز تخزين المفتاح الحقيقي في Git.
+- منع إعادة استخدام TOTP المقبول عبر counter محفوظ، وأكواد استرداد عالية العشوائية أحادية الاستخدام تُخزن كـSHA-256 digests وتُعرض plaintext مرة واحدة عند الإنشاء/التجديد.
+- password step-up re-authentication قصيرة العمر للعمليات الحساسة؛ نافذتها الافتراضية 10 دقائق ولا يمكن أن تتجاوز انتهاء الجلسة. الـStep-up يبقى defense-in-depth إضافياً ولا يُعامل كعامل MFA ثانٍ.
 - RBAC للأدوار: owner, admin, editor, reviewer, publisher, analyst.
 - Separation of Duties اختياري في التطوير وإجباري في production configuration.
 - optimistic locking + row locks + actor provenance لدورة التحرير.
@@ -35,11 +38,33 @@ python apps/api/scripts/bootstrap_admin.py --email owner@example.com --name "ا�
 
 ثم افتح `http://localhost:8000/admin/`.
 
+### MFA للحسابات المميزة
+
+في Staging/Production يجب ضبط:
+
+```text
+REQUIRE_MFA_FOR_PRIVILEGED=true
+MFA_ENCRYPTION_KEY=<secret-manager value with at least 32 random bytes>
+MFA_ENROLLMENT_TTL_MINUTES=10
+MFA_ISSUER=AISearcharab.com
+```
+
+بعد password login، الحساب المميز الذي لم يسجل MFA لا يحصل على وصول فعلي إلى `/auth/me` أو مسارات الإدارة حتى يتم تسجيل TOTP وتأكيد الرمز. لوحة الإدارة same-origin تقود عملية التسجيل، وتعرض مفتاح `otpauth` وأكواد الاسترداد فقط أثناء التدفق التفاعلي؛ لا تستخدم LocalStorage/SessionStorage لهذه المواد.
+
+المسارات الأساسية:
+
+- `GET /v1/auth/mfa/status`
+- `POST /v1/auth/mfa/enroll/start`
+- `POST /v1/auth/mfa/enroll/confirm`
+- `POST /v1/auth/mfa/verify`
+- `POST /v1/auth/mfa/recovery-codes/regenerate`
+- `POST /v1/auth/mfa/disable`
+
+تجديد أكواد الاسترداد وتعطيل MFA يتطلبان جلسة MFA مكتملة وPassword Step-up. تعطيل MFA مرفوض للحسابات المميزة عندما تكون السياسة الإلزامية مفعلة.
+
 ### Step-up للعمليات الحساسة
 
-تسجيل الدخول العادي لا يمنح تلقائياً صلاحية تنفيذ عمليات privileged. عند محاولة إنشاء/تعديل مستخدم، نشر/أرشفة مادة، أو تحويل ادعاء إلى `published`، يطلب الخادم إعادة التحقق بكلمة مرور الحساب عبر `POST /v1/auth/step-up` مع CSRF صحيح. بعد النجاح تصبح الجلسة elevated لمدة `STEP_UP_TTL_MINUTES` فقط، وبحد أقصى حتى انتهاء الجلسة الأصلية. المحاولات الفاشلة تدخل في عداد القفل نفسه، وقد تؤدي إلى قفل الحساب وإبطال الجلسة عند بلوغ الحد.
-
-هذا Step-up مبني على عامل كلمة المرور الحالي، لذلك لا يُسوّق ولا يُعامل على أنه MFA/WebAuthn.
+حتى بعد MFA، تسجيل الدخول لا يمنح تلقائياً صلاحية تنفيذ عمليات privileged. عند محاولة إنشاء/تعديل مستخدم، نشر/أرشفة مادة، أو تحويل ادعاء إلى `published`، يطلب الخادم إعادة التحقق بكلمة مرور الحساب عبر `POST /v1/auth/step-up` مع CSRF صحيح. بعد النجاح تصبح الجلسة elevated لمدة `STEP_UP_TTL_MINUTES` فقط، وبحد أقصى حتى انتهاء الجلسة الأصلية. المحاولات الفاشلة تدخل في عداد القفل نفسه، وقد تؤدي إلى قفل الحساب وإبطال الجلسة عند بلوغ الحد.
 
 ## ربط البحث العام بالـAPI في Preview
 
@@ -71,7 +96,7 @@ python scripts/load_probe.py \
 ## وثائق الإطلاق
 
 - `../docs/PERFECT-MASTER-2026.md` — النموذج الهندسي، الحوكمة وبوابات الجاهزية.
-- `../docs/STAGING-RELEASE-RUNBOOK-2026.md` — تشغيل Staging، فحوص الأمن/البحث/الحمولة وخطة rollback.
+- `../docs/STAGING-RELEASE-RUNBOOK-2026.md` — تشغيل Staging، فحوص الأمن/MFA/البحث/الحمولة وخطة rollback.
 
 ## بوابات غير مفتوحة بعد
 
@@ -80,4 +105,4 @@ python scripts/load_probe.py \
 - لا crawling خارجي.
 - لا مدفوعات.
 - لا نشر إنتاجي تلقائي.
-- Production ما يزال يتطلب distributed rate limiting/WAF، MFA/WebAuthn أو عامل مستقل أقوى للحسابات privileged، managed PostgreSQL مع PITR/restore drill، benchmark عربي حقيقي، external observability، مراجعة أمن/إتاحة مستقلة وStaging/rollback موثق.
+- TOTP MFA نُفذت على مستوى الكود، لكن Production ما يزال يتطلب إثباتها فعلياً في Staging ومراجعتها أمنياً بصورة مستقلة، إضافة إلى distributed rate limiting/WAF، managed PostgreSQL مع PITR/restore drill، benchmark عربي حقيقي، external observability، مراجعة إتاحة مستقلة وStaging/rollback موثق.
