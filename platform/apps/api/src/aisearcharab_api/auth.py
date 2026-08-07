@@ -52,7 +52,6 @@ def get_principal(request: Request, db: Annotated[Session, Depends(get_db)]) -> 
         db.commit()
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
 
-    # Avoid a write on every request while still enforcing a server-side idle window.
     if _aware(admin_session.last_seen_at) + timedelta(minutes=5) <= now:
         admin_session.last_seen_at = now
         db.commit()
@@ -76,6 +75,13 @@ def _check_csrf(request: Request, principal: Principal) -> None:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="csrf validation failed")
 
 
+def require_step_up(principal: Principal) -> Principal:
+    elevated_until = principal.session.elevated_until
+    if elevated_until is None or _aware(elevated_until) <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="step-up authentication required")
+    return principal
+
+
 def require_permissions(*required: str):
     def dependency(principal: Annotated[Principal, Depends(get_principal)]) -> Principal:
         _check_permissions(principal, tuple(required))
@@ -94,5 +100,14 @@ def require_mutation(*required: str):
         _check_permissions(principal, tuple(required))
         _check_csrf(request, principal)
         return principal
+
+    return dependency
+
+
+def require_sensitive_mutation(*required: str):
+    def dependency(request: Request, principal: Annotated[Principal, Depends(get_principal)]) -> Principal:
+        _check_permissions(principal, tuple(required))
+        _check_csrf(request, principal)
+        return require_step_up(principal)
 
     return dependency
