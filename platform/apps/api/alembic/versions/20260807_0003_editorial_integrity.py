@@ -30,10 +30,12 @@ def upgrade() -> None:
     with op.batch_alter_table("content_items") as batch:
         batch.add_column(sa.Column("revision", sa.Integer(), server_default="1", nullable=False))
         batch.add_column(sa.Column("created_by_user_id", sa.String(length=36), nullable=True))
+        batch.add_column(sa.Column("last_modified_by_user_id", sa.String(length=36), nullable=True))
         batch.add_column(sa.Column("reviewed_by_user_id", sa.String(length=36), nullable=True))
         batch.add_column(sa.Column("published_by_user_id", sa.String(length=36), nullable=True))
         batch.create_check_constraint("ck_content_revision", "revision >= 1")
         batch.create_foreign_key("fk_content_created_by", "users", ["created_by_user_id"], ["id"], ondelete="SET NULL")
+        batch.create_foreign_key("fk_content_last_modified_by", "users", ["last_modified_by_user_id"], ["id"], ondelete="SET NULL")
         batch.create_foreign_key("fk_content_reviewed_by", "users", ["reviewed_by_user_id"], ["id"], ondelete="SET NULL")
         batch.create_foreign_key("fk_content_published_by", "users", ["published_by_user_id"], ["id"], ondelete="SET NULL")
 
@@ -77,9 +79,11 @@ def downgrade() -> None:
     with op.batch_alter_table("content_items") as batch:
         batch.drop_constraint("fk_content_published_by", type_="foreignkey")
         batch.drop_constraint("fk_content_reviewed_by", type_="foreignkey")
+        batch.drop_constraint("fk_content_last_modified_by", type_="foreignkey")
         batch.drop_constraint("fk_content_created_by", type_="foreignkey")
         batch.drop_constraint("ck_content_revision", type_="check")
         batch.drop_column("published_by_user_id")
         batch.drop_column("reviewed_by_user_id")
+        batch.drop_column("last_modified_by_user_id")
         batch.drop_column("created_by_user_id")
         batch.drop_column("revision")
