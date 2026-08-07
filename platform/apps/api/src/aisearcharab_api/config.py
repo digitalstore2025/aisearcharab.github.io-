@@ -64,6 +64,10 @@ class Settings:
     login_lock_minutes: int = 15
     password_min_length: int = 14
     enforce_separation_of_duties: bool = False
+    require_mfa_for_privileged: bool = False
+    mfa_encryption_key: str | None = None
+    mfa_enrollment_ttl_minutes: int = 10
+    mfa_issuer: str = "AISearcharab.com"
 
     @property
     def is_production(self) -> bool:
@@ -112,12 +116,25 @@ class Settings:
             raise ConfigurationError("LOGIN_LOCK_MINUTES must be between 1 and 1440")
         if not 12 <= self.password_min_length <= 128:
             raise ConfigurationError("PASSWORD_MIN_LENGTH must be between 12 and 128")
+        if not 2 <= self.mfa_enrollment_ttl_minutes <= 30:
+            raise ConfigurationError("MFA_ENROLLMENT_TTL_MINUTES must be between 2 and 30")
+        if not 2 <= len(self.mfa_issuer.strip()) <= 64:
+            raise ConfigurationError("MFA_ISSUER must contain between 2 and 64 characters")
+        if self.mfa_encryption_key is not None and len(self.mfa_encryption_key.encode("utf-8")) < 32:
+            raise ConfigurationError("MFA_ENCRYPTION_KEY must contain at least 32 bytes")
+        if self.require_mfa_for_privileged and not self.mfa_encryption_key:
+            raise ConfigurationError("MFA_ENCRYPTION_KEY is required when privileged MFA is enabled")
         if not self.allowed_origins:
             raise ConfigurationError("ALLOWED_ORIGINS must contain at least one explicit origin")
         if any(not _valid_origin(origin, require_https=self.is_production) for origin in self.allowed_origins):
             raise ConfigurationError("ALLOWED_ORIGINS must contain valid origins without paths, credentials, queries, or fragments")
         if self.log_queries and (self.query_hash_key is None or len(self.query_hash_key.encode("utf-8")) < 32):
             raise ConfigurationError("QUERY_HASH_KEY must contain at least 32 bytes when query logging is enabled")
+        if self.environment in {"staging", "production"}:
+            if not self.require_mfa_for_privileged:
+                raise ConfigurationError("REQUIRE_MFA_FOR_PRIVILEGED must be enabled in staging and production")
+            if not self.mfa_encryption_key:
+                raise ConfigurationError("MFA_ENCRYPTION_KEY is required in staging and production")
         if self.is_production:
             if self.database_url.startswith("sqlite"):
                 raise ConfigurationError("SQLite is not allowed in production")
@@ -151,6 +168,10 @@ def get_settings() -> Settings:
         login_lock_minutes=_int("LOGIN_LOCK_MINUTES", os.getenv("LOGIN_LOCK_MINUTES", "15")),
         password_min_length=_int("PASSWORD_MIN_LENGTH", os.getenv("PASSWORD_MIN_LENGTH", "14")),
         enforce_separation_of_duties=_bool(os.getenv("ENFORCE_SEPARATION_OF_DUTIES", "false")),
+        require_mfa_for_privileged=_bool(os.getenv("REQUIRE_MFA_FOR_PRIVILEGED", "false")),
+        mfa_encryption_key=os.getenv("MFA_ENCRYPTION_KEY") or None,
+        mfa_enrollment_ttl_minutes=_int("MFA_ENROLLMENT_TTL_MINUTES", os.getenv("MFA_ENROLLMENT_TTL_MINUTES", "10")),
+        mfa_issuer=os.getenv("MFA_ISSUER", "AISearcharab.com").strip(),
     )
     settings.validate()
     return settings
