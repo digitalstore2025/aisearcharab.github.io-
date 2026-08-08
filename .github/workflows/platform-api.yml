@@ -87,7 +87,16 @@ jobs:
           fi
 
       - name: Audit hashed runtime dependencies with dual sources and VEX policy
-        run: python scripts/audit_runtime_dependencies.py --lock /tmp/requirements-runtime.lock --vex security/pip-audit-vex.json
+        run: python scripts/audit_runtime_dependencies.py --lock /tmp/requirements-runtime.lock --vex security/pip-audit-vex.json --report-dir /tmp/dependency-audit
+
+      - name: Upload dependency audit evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: phase3-1-dependency-audit
+          path: /tmp/dependency-audit
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Generate runtime CycloneDX SBOM
         if: always()
