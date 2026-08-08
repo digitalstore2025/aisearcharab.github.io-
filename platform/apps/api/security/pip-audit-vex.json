@@ -13,6 +13,19 @@
         "https://nvd.nist.gov/vuln/detail/CVE-2026-45180",
         "https://pypi.org/project/cryptography/"
       ]
+    },
+    {
+      "id": "PYSEC-2026-3552",
+      "package": "cryptography",
+      "version": "49.0.0",
+      "services": ["osv"],
+      "status": "not_affected",
+      "expires_on": "2026-08-22",
+      "rationale": "The OSV finding concerns PKCS#7 EnvelopedData decryption and a Bleichenbacher oracle. AISearcharab imports only cryptography.fernet for symmetric authenticated encryption of MFA seed material and does not import or invoke PKCS7/CMS decryption APIs. A repository AST regression test enforces this usage boundary. Re-evaluate immediately if cryptography usage expands or a patched release becomes available.",
+      "references": [
+        "OSV/PYSEC-2026-3552 as emitted by the CI CycloneDX artifact",
+        "platform/apps/api/tests/test_crypto_usage.py"
+      ]
     }
   ]
 }
