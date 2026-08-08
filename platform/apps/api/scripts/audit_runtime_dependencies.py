@@ -150,10 +150,33 @@ def evaluate(service: str, dependencies: list[dict], rules: list[ExceptionRule])
     return unresolved
 
 
+def write_report(
+    report_dir: Path,
+    *,
+    service: str,
+    dependencies: list[dict],
+    unresolved: list[tuple[str, str, str, list[str]]],
+) -> None:
+    report_dir.mkdir(parents=True, exist_ok=True)
+    report = {
+        "service": service,
+        "dependencies": dependencies,
+        "unresolved": [
+            {"package": package, "version": version, "id": vulnerability_id, "fix_versions": fixes}
+            for package, version, vulnerability_id, fixes in unresolved
+        ],
+    }
+    (report_dir / f"{service}.json").write_text(
+        json.dumps(report, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Audit a hashed runtime lock against PyPI and OSV with expiring VEX rules.")
     parser.add_argument("--lock", required=True, type=Path)
     parser.add_argument("--vex", required=True, type=Path)
+    parser.add_argument("--report-dir", type=Path)
     args = parser.parse_args()
 
     rules = load_exceptions(args.vex)
@@ -161,6 +184,8 @@ def main() -> int:
     for service in ("pypi", "osv"):
         dependencies = run_audit(args.lock, service)
         unresolved = evaluate(service, dependencies, rules)
+        if args.report_dir is not None:
+            write_report(args.report_dir, service=service, dependencies=dependencies, unresolved=unresolved)
         all_unresolved.extend((*item, service) for item in unresolved)
 
     if all_unresolved:
