@@ -7,6 +7,7 @@ import sys
 from dataclasses import dataclass
 from datetime import date
 from pathlib import Path
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -21,31 +22,58 @@ class ExceptionRule:
 
 def load_exceptions(path: Path) -> list[ExceptionRule]:
     payload = json.loads(path.read_text(encoding="utf-8"))
-    if payload.get("schema") != 1 or not isinstance(payload.get("exceptions"), list):
+    if not isinstance(payload, dict) or payload.get("schema") != 1 or not isinstance(payload.get("exceptions"), list):
         raise ValueError("unsupported VEX exception schema")
 
     rules: list[ExceptionRule] = []
     today = date.today()
     for entry in payload["exceptions"]:
+        if not isinstance(entry, dict):
+            raise ValueError("VEX exception entries must be objects")
         if entry.get("status") != "not_affected":
             raise ValueError("only not_affected VEX exceptions are permitted")
-        expiry = date.fromisoformat(entry["expires_on"])
+        expiry = date.fromisoformat(str(entry["expires_on"]))
         if expiry < today:
             raise ValueError(f"expired VEX exception: {entry['id']} ({expiry.isoformat()})")
-        services = frozenset(entry.get("services", []))
+        services = frozenset(str(item).lower() for item in entry.get("services", []))
         if not services or not services.issubset({"pypi", "osv"}):
             raise ValueError(f"invalid vulnerability service scope for {entry['id']}")
+        package = str(entry.get("package", "")).strip().lower()
+        version = str(entry.get("version", "")).strip()
+        vulnerability_id = str(entry.get("id", "")).strip()
+        rationale = str(entry.get("rationale", "")).strip()
+        if not package or not version or not vulnerability_id or not rationale:
+            raise ValueError("VEX exceptions require id, package, version and rationale")
         rules.append(
             ExceptionRule(
-                vulnerability_id=entry["id"],
-                package=entry["package"].lower(),
-                version=entry["version"],
+                vulnerability_id=vulnerability_id,
+                package=package,
+                version=version,
                 services=services,
                 expires_on=expiry,
-                rationale=entry["rationale"],
+                rationale=rationale,
             )
         )
     return rules
+
+
+def normalize_audit_payload(payload: Any, *, service: str) -> list[dict]:
+    """Return dependency records from supported pip-audit JSON shapes.
+
+    pip-audit has emitted both a legacy top-level dependency list and a report
+    object containing a ``dependencies`` array. Supporting only these explicit
+    shapes keeps the gate fail-closed if the upstream schema changes again.
+    """
+    if isinstance(payload, list):
+        dependencies = payload
+    elif isinstance(payload, dict) and isinstance(payload.get("dependencies"), list):
+        dependencies = payload["dependencies"]
+    else:
+        raise RuntimeError(f"unexpected pip-audit JSON shape for service={service}")
+
+    if any(not isinstance(item, dict) for item in dependencies):
+        raise RuntimeError(f"invalid dependency record in pip-audit JSON for service={service}")
+    return dependencies
 
 
 def run_audit(lock: Path, service: str) -> list[dict]:
@@ -77,9 +105,7 @@ def run_audit(lock: Path, service: str) -> list[dict]:
     except json.JSONDecodeError as exc:
         sys.stderr.write(completed.stderr)
         raise RuntimeError(f"pip-audit emitted invalid JSON for service={service}") from exc
-    if not isinstance(payload, list):
-        raise RuntimeError(f"unexpected pip-audit JSON shape for service={service}")
-    return payload
+    return normalize_audit_payload(payload, service=service)
 
 
 def finding_ids(vulnerability: dict) -> set[str]:
@@ -93,7 +119,12 @@ def evaluate(service: str, dependencies: list[dict], rules: list[ExceptionRule])
     for dependency in dependencies:
         package = str(dependency.get("name", "")).lower()
         version = str(dependency.get("version", ""))
-        for vulnerability in dependency.get("vulns", []) or []:
+        vulnerabilities = dependency.get("vulns", []) or []
+        if not isinstance(vulnerabilities, list):
+            raise RuntimeError(f"invalid vulnerability list for package={package or 'unknown'} service={service}")
+        for vulnerability in vulnerabilities:
+            if not isinstance(vulnerability, dict):
+                raise RuntimeError(f"invalid vulnerability record for package={package or 'unknown'} service={service}")
             ids = finding_ids(vulnerability)
             matched = next(
                 (
