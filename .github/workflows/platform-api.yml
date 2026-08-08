@@ -86,12 +86,12 @@ jobs:
             exit 1
           fi
 
-      - name: Audit hashed runtime dependencies
-        run: pip-audit -r /tmp/requirements-runtime.lock --require-hashes --strict --progress-spinner off
+      - name: Audit hashed runtime dependencies with dual sources and VEX policy
+        run: python scripts/audit_runtime_dependencies.py --lock /tmp/requirements-runtime.lock --vex security/pip-audit-vex.json
 
       - name: Generate runtime CycloneDX SBOM
         if: always()
-        run: pip-audit -r /tmp/requirements-runtime.lock --require-hashes --strict --progress-spinner off --format cyclonedx-json --output /tmp/aisearcharab-sbom.cdx.json
+        run: pip-audit -r /tmp/requirements-runtime.lock --require-hashes --strict --progress-spinner off --vulnerability-service osv --format cyclonedx-json --output /tmp/aisearcharab-sbom.cdx.json
         continue-on-error: true
 
       - name: Upload dependency SBOM
