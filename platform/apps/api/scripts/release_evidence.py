@@ -91,7 +91,7 @@ def build_evidence() -> ReleaseEvidence:
         branch=os.getenv("GITHUB_HEAD_REF") or os.getenv("GITHUB_REF_NAME") or None,
         pull_request=os.getenv("RELEASE_PR") or None,
         status=os.getenv("RELEASE_STATUS", "INTEGRATED_NOT_TESTED"),
-        migration=os.getenv("RELEASE_MIGRATION", "20260807_0004"),
+        migration=os.getenv("RELEASE_MIGRATION", "20260808_0005"),
         openapi_sha256=os.getenv("OPENAPI_SHA256") or None,
         dependency_lock_sha256=os.getenv("DEPENDENCY_LOCK_SHA256") or None,
         ci={
