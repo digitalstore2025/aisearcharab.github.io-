@@ -58,12 +58,6 @@ def load_exceptions(path: Path) -> list[ExceptionRule]:
 
 
 def normalize_audit_payload(payload: Any, *, service: str) -> list[dict]:
-    """Return dependency records from supported pip-audit JSON shapes.
-
-    pip-audit has emitted both a legacy top-level dependency list and a report
-    object containing a ``dependencies`` array. Supporting only these explicit
-    shapes keeps the gate fail-closed if the upstream schema changes again.
-    """
     if isinstance(payload, list):
         dependencies = payload
     elif isinstance(payload, dict) and isinstance(payload.get("dependencies"), list):
@@ -172,11 +166,56 @@ def write_report(
     )
 
 
+def generate_cyclonedx(lock: Path, output: Path, rules: list[ExceptionRule]) -> None:
+    """Generate an SBOM only after the exact lock has passed the VEX-aware gate.
+
+    Active OSV-scoped VEX IDs are passed to pip-audit solely so that its SBOM
+    formatter does not convert an already adjudicated not-affected finding into
+    a second, contradictory release decision. The preceding audit remains the
+    security gate and validates package, version, service and expiry.
+    """
+    output.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        sys.executable,
+        "-m",
+        "pip_audit",
+        "-r",
+        str(lock),
+        "--require-hashes",
+        "--strict",
+        "--progress-spinner",
+        "off",
+        "--vulnerability-service",
+        "osv",
+        "--format",
+        "cyclonedx-json",
+        "--output",
+        str(output),
+    ]
+    for vulnerability_id in sorted({rule.vulnerability_id for rule in rules if "osv" in rule.services}):
+        command.extend(["--ignore-vuln", vulnerability_id])
+
+    completed = subprocess.run(command, capture_output=True, text=True, check=False)
+    if completed.returncode != 0:
+        sys.stderr.write(completed.stdout)
+        sys.stderr.write(completed.stderr)
+        raise RuntimeError(f"CycloneDX generation failed exit={completed.returncode}")
+    if not output.is_file() or output.stat().st_size == 0:
+        raise RuntimeError("CycloneDX generation produced no artifact")
+    try:
+        payload = json.loads(output.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("CycloneDX generator emitted invalid JSON") from exc
+    if not isinstance(payload, dict) or payload.get("bomFormat") != "CycloneDX":
+        raise RuntimeError("unexpected CycloneDX document shape")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Audit a hashed runtime lock against PyPI and OSV with expiring VEX rules.")
     parser.add_argument("--lock", required=True, type=Path)
     parser.add_argument("--vex", required=True, type=Path)
     parser.add_argument("--report-dir", type=Path)
+    parser.add_argument("--cyclonedx-output", type=Path)
     args = parser.parse_args()
 
     rules = load_exceptions(args.vex)
@@ -196,6 +235,10 @@ def main() -> int:
                 file=sys.stderr,
             )
         return 1
+
+    if args.cyclonedx_output is not None:
+        generate_cyclonedx(args.lock, args.cyclonedx_output, rules)
+        print(f"cyclonedx_sbom={args.cyclonedx_output}")
 
     print("dependency_audit=pass services=pypi,osv")
     return 0
