@@ -99,17 +99,17 @@ jobs:
           retention-days: 14
 
       - name: Generate runtime CycloneDX SBOM
-        if: always()
         run: pip-audit -r /tmp/requirements-runtime.lock --require-hashes --strict --progress-spinner off --vulnerability-service osv --format cyclonedx-json --output /tmp/aisearcharab-sbom.cdx.json
-        continue-on-error: true
+
+      - name: Validate runtime CycloneDX SBOM JSON
+        run: python -m json.tool /tmp/aisearcharab-sbom.cdx.json > /dev/null
 
       - name: Upload dependency SBOM
-        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: phase3-1-dependency-sbom
           path: /tmp/aisearcharab-sbom.cdx.json
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
 
       - name: Compile Python
@@ -233,3 +233,55 @@ jobs:
         if: always()
         working-directory: platform
         run: docker compose down -v --remove-orphans
+
+  release-evidence:
+    needs: [api-quality, container-smoke]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Prepare immutable release identifiers
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "OPENAPI_SHA256=$(tr -d '[:space:]' < platform/contracts/openapi.sha256)" >> "$GITHUB_ENV"
+          echo "DEPENDENCY_LOCK_SHA256=$(awk '{print $1}' platform/apps/api/requirements-runtime.lock.sha256)" >> "$GITHUB_ENV"
+
+      - name: Generate fail-closed release evidence
+        env:
+          RELEASE_STATUS: INTEGRATED_NOT_TESTED
+          RELEASE_MIGRATION: "20260808_0005"
+          RELEASE_PR: "13"
+          CI_SITE_STATUS: separate-workflow
+          CI_API_STATUS: pass
+          CI_CONTAINER_STATUS: pass
+          DEPENDENCY_AUDIT_PASSED: "true"
+          MFA_VERIFIED: "false"
+          DISTRIBUTED_RATE_LIMIT_VERIFIED: "false"
+          MANAGED_POSTGRES_VERIFIED: "false"
+          PITR_VERIFIED: "false"
+          BACKUP_VERIFIED: "false"
+          RESTORE_VERIFIED: "false"
+          WCAG_22_AA_VERIFIED: "false"
+          EXTERNAL_SECURITY_REVIEW_VERIFIED: "false"
+          EXTERNAL_ACCESSIBILITY_REVIEW_VERIFIED: "false"
+          STAGING_VERIFIED: "false"
+          DNS_TLS_VERIFIED: "false"
+          ROLLBACK_VERIFIED: "false"
+          OBSERVABILITY_VERIFIED: "false"
+          RELEASE_BLOCKERS: "external staging not verified|distributed rate limiting not verified|managed PostgreSQL and restore drill not verified|external security/accessibility verification pending"
+        run: python platform/apps/api/scripts/release_evidence.py --output /tmp/release-evidence.json
+
+      - name: Validate release evidence JSON
+        run: python -m json.tool /tmp/release-evidence.json > /dev/null
+
+      - name: Upload release evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: phase3-1-release-evidence
+          path: /tmp/release-evidence.json
+          if-no-files-found: error
+          retention-days: 30
