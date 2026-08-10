@@ -86,8 +86,13 @@ jobs:
             exit 1
           fi
 
-      - name: Audit hashed runtime dependencies with dual sources and VEX policy
-        run: python scripts/audit_runtime_dependencies.py --lock /tmp/requirements-runtime.lock --vex security/pip-audit-vex.json --report-dir /tmp/dependency-audit
+      - name: Audit dependencies and generate VEX-aware CycloneDX SBOM
+        run: >-
+          python scripts/audit_runtime_dependencies.py
+          --lock /tmp/requirements-runtime.lock
+          --vex security/pip-audit-vex.json
+          --report-dir /tmp/dependency-audit
+          --cyclonedx-output /tmp/aisearcharab-sbom.cdx.json
 
       - name: Upload dependency audit evidence
         if: always()
@@ -97,9 +102,6 @@ jobs:
           path: /tmp/dependency-audit
           if-no-files-found: warn
           retention-days: 14
-
-      - name: Generate runtime CycloneDX SBOM
-        run: pip-audit -r /tmp/requirements-runtime.lock --require-hashes --strict --progress-spinner off --vulnerability-service osv --format cyclonedx-json --output /tmp/aisearcharab-sbom.cdx.json
 
       - name: Validate runtime CycloneDX SBOM JSON
         run: python -m json.tool /tmp/aisearcharab-sbom.cdx.json > /dev/null
