@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -18,6 +19,8 @@ STATUS_VALUES = {
     "BLOCKED",
     "PRODUCTION_READY",
 }
+HEX_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,64}$")
+SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
 
 @dataclass(slots=True)
@@ -31,6 +34,7 @@ class ReleaseEvidence:
     pull_request: str | None = None
     openapi_sha256: str | None = None
     dependency_lock_sha256: str | None = None
+    container_image_digest: str | None = None
     ci: dict[str, Any] = field(default_factory=dict)
     security: dict[str, Any] = field(default_factory=dict)
     search: dict[str, Any] = field(default_factory=dict)
@@ -44,13 +48,30 @@ class ReleaseEvidence:
     def validate(self) -> None:
         if self.status not in STATUS_VALUES:
             raise ValueError(f"unsupported release status: {self.status}")
-        if not self.commit or len(self.commit) < 7:
-            raise ValueError("commit must contain a Git commit SHA")
+        if not HEX_SHA_RE.fullmatch(self.commit):
+            raise ValueError("commit must be a hexadecimal Git commit SHA")
+        for field_name, digest in (
+            ("openapi_sha256", self.openapi_sha256),
+            ("dependency_lock_sha256", self.dependency_lock_sha256),
+        ):
+            if digest is not None and not SHA256_RE.fullmatch(digest):
+                raise ValueError(f"{field_name} must be a 64-character SHA-256 digest")
+        if self.container_image_digest is not None and not self.container_image_digest.startswith("sha256:"):
+            raise ValueError("container_image_digest must use sha256:<digest> format")
+        if self.container_image_digest is not None and not SHA256_RE.fullmatch(self.container_image_digest.removeprefix("sha256:")):
+            raise ValueError("container_image_digest must contain a valid SHA-256 digest")
+
         if self.status == "PRODUCTION_READY":
-            required = (
+            required_true = (
+                ("security.dependency_audit_passed", self.security.get("dependency_audit_passed")),
+                ("security.secret_scan_passed", self.security.get("secret_scan_passed")),
                 ("security.mfa_verified", self.security.get("mfa_verified")),
                 ("security.distributed_rate_limit_verified", self.security.get("distributed_rate_limit_verified")),
+                ("search.benchmark_verified", self.search.get("benchmark_verified")),
+                ("performance.load_test_verified", self.performance.get("load_test_verified")),
+                ("performance.slo_accepted", self.performance.get("slo_accepted")),
                 ("database.managed_postgres_verified", self.database.get("managed_postgres_verified")),
+                ("database.pitr_verified", self.database.get("pitr_verified")),
                 ("database.backup_verified", self.database.get("backup_verified")),
                 ("database.restore_verified", self.database.get("restore_verified")),
                 ("accessibility.wcag_22_aa", self.accessibility.get("wcag_22_aa")),
@@ -60,8 +81,30 @@ class ReleaseEvidence:
                 ("deployment.rollback_verified", self.deployment.get("rollback_verified")),
                 ("deployment.dns_tls_verified", self.deployment.get("dns_tls_verified")),
                 ("deployment.observability_verified", self.deployment.get("observability_verified")),
+                ("deployment.incident_drill_verified", self.deployment.get("incident_drill_verified")),
+                ("deployment.secrets_management_verified", self.deployment.get("secrets_management_verified")),
+                ("deployment.branch_governance_verified", self.deployment.get("branch_governance_verified")),
             )
-            missing = [name for name, value in required if value is not True]
+            missing = [name for name, value in required_true if value is not True]
+            if self.security.get("critical_open") != 0:
+                missing.append("security.critical_open must be 0")
+            if self.security.get("high_open") != 0:
+                missing.append("security.high_open must be 0")
+            if not self.openapi_sha256:
+                missing.append("openapi_sha256")
+            if not self.dependency_lock_sha256:
+                missing.append("dependency_lock_sha256")
+            if not self.container_image_digest:
+                missing.append("container_image_digest")
+            dataset_queries = self.search.get("dataset_queries")
+            if not isinstance(dataset_queries, int) or dataset_queries < 200:
+                missing.append("search.dataset_queries must be >= 200")
+            for metric in ("mrr_at_10", "ndcg_at_10", "recall_at_5", "recall_at_10", "precision_at_5", "zero_result_rate"):
+                if self.search.get(metric) is None:
+                    missing.append(f"search.{metric}")
+            for metric in ("p50_ms", "p95_ms", "p99_ms", "error_rate"):
+                if self.performance.get(metric) is None:
+                    missing.append(f"performance.{metric}")
             if self.blockers:
                 missing.append("blockers must be empty")
             if missing:
@@ -94,6 +137,7 @@ def build_evidence() -> ReleaseEvidence:
         migration=os.getenv("RELEASE_MIGRATION", "20260808_0005"),
         openapi_sha256=os.getenv("OPENAPI_SHA256") or None,
         dependency_lock_sha256=os.getenv("DEPENDENCY_LOCK_SHA256") or None,
+        container_image_digest=os.getenv("CONTAINER_IMAGE_DIGEST") or None,
         ci={
             "site": os.getenv("CI_SITE_STATUS", "unknown"),
             "api": os.getenv("CI_API_STATUS", "unknown"),
@@ -108,6 +152,7 @@ def build_evidence() -> ReleaseEvidence:
             "secret_scan_passed": _env_bool("SECRET_SCAN_PASSED"),
         },
         search={
+            "benchmark_verified": _env_bool("SEARCH_BENCHMARK_VERIFIED"),
             "dataset_queries": _env_int("SEARCH_DATASET_QUERIES"),
             "mrr_at_10": _env_float("SEARCH_MRR_AT_10"),
             "ndcg_at_10": _env_float("SEARCH_NDCG_AT_10"),
@@ -117,6 +162,8 @@ def build_evidence() -> ReleaseEvidence:
             "zero_result_rate": _env_float("SEARCH_ZERO_RESULT_RATE"),
         },
         performance={
+            "load_test_verified": _env_bool("LOAD_TEST_VERIFIED"),
+            "slo_accepted": _env_bool("LOAD_SLO_ACCEPTED"),
             "p50_ms": _env_float("LOAD_P50_MS"),
             "p95_ms": _env_float("LOAD_P95_MS"),
             "p99_ms": _env_float("LOAD_P99_MS"),
@@ -138,6 +185,9 @@ def build_evidence() -> ReleaseEvidence:
             "dns_tls_verified": _env_bool("DNS_TLS_VERIFIED"),
             "rollback_verified": _env_bool("ROLLBACK_VERIFIED"),
             "observability_verified": _env_bool("OBSERVABILITY_VERIFIED"),
+            "incident_drill_verified": _env_bool("INCIDENT_DRILL_VERIFIED"),
+            "secrets_management_verified": _env_bool("SECRETS_MANAGEMENT_VERIFIED"),
+            "branch_governance_verified": _env_bool("BRANCH_GOVERNANCE_VERIFIED"),
         },
         blockers=blockers,
     )
