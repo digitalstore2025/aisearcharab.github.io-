@@ -22,19 +22,50 @@ STATUS_VALUES = {
 HEX_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,64}$")
 SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
+REQUIRED_CONTROLS = (
+    "security.dependency_audit_passed",
+    "security.secret_scan_passed",
+    "security.mfa_verified",
+    "security.distributed_rate_limit_verified",
+    "search.benchmark_verified",
+    "performance.load_test_verified",
+    "performance.slo_accepted",
+    "database.managed_postgres_verified",
+    "database.pitr_verified",
+    "database.backup_verified",
+    "database.restore_verified",
+    "accessibility.wcag_22_aa",
+    "external_review.security",
+    "external_review.accessibility",
+    "deployment.staging_verified",
+    "deployment.rollback_verified",
+    "deployment.dns_tls_verified",
+    "deployment.observability_verified",
+    "deployment.incident_drill_verified",
+    "deployment.secrets_management_verified",
+    "deployment.branch_governance_verified",
+)
+REQUIRED_CI = ("site", "api", "container")
+
 
 @dataclass(slots=True)
 class ReleaseEvidence:
     project: str
     generated_at: str
-    commit: str
+    source_head_sha: str
+    tested_sha: str
     status: str
     migration: str
+    base_sha: str | None = None
+    repository: str | None = None
     branch: str | None = None
     pull_request: str | None = None
+    workflow_run_id: int | None = None
+    workflow_run_attempt: int | None = None
     openapi_sha256: str | None = None
     dependency_lock_sha256: str | None = None
     container_image_digest: str | None = None
+    evidence_refs: dict[str, str] = field(default_factory=dict)
     ci: dict[str, Any] = field(default_factory=dict)
     security: dict[str, Any] = field(default_factory=dict)
     search: dict[str, Any] = field(default_factory=dict)
@@ -45,11 +76,43 @@ class ReleaseEvidence:
     deployment: dict[str, Any] = field(default_factory=dict)
     blockers: list[str] = field(default_factory=list)
 
+    def _control_value(self, path: str) -> Any:
+        section, key = path.split(".", 1)
+        value = getattr(self, section)
+        return value.get(key) if isinstance(value, dict) else None
+
+    def derive_blockers(self) -> list[str]:
+        blockers: list[str] = []
+        for name in REQUIRED_CI:
+            if self.ci.get(name) != "pass":
+                blockers.append(f"ci.{name} is not verified pass")
+        for path in REQUIRED_CONTROLS:
+            if self._control_value(path) is not True:
+                blockers.append(f"{path} is not verified")
+        for item in self.blockers:
+            normalized = item.strip()
+            if normalized and normalized not in blockers:
+                blockers.append(normalized)
+        return blockers
+
     def validate(self) -> None:
         if self.status not in STATUS_VALUES:
             raise ValueError(f"unsupported release status: {self.status}")
-        if not HEX_SHA_RE.fullmatch(self.commit):
-            raise ValueError("commit must be a hexadecimal Git commit SHA")
+        for field_name, sha in (
+            ("source_head_sha", self.source_head_sha),
+            ("tested_sha", self.tested_sha),
+        ):
+            if not HEX_SHA_RE.fullmatch(sha):
+                raise ValueError(f"{field_name} must be a hexadecimal Git commit SHA")
+        if self.base_sha is not None and not HEX_SHA_RE.fullmatch(self.base_sha):
+            raise ValueError("base_sha must be a hexadecimal Git commit SHA")
+        if self.pull_request and self.base_sha is None:
+            raise ValueError("base_sha is required for pull-request evidence")
+        if self.workflow_run_id is not None and self.workflow_run_id <= 0:
+            raise ValueError("workflow_run_id must be positive")
+        if self.workflow_run_attempt is not None and self.workflow_run_attempt <= 0:
+            raise ValueError("workflow_run_attempt must be positive")
+
         for field_name, digest in (
             ("openapi_sha256", self.openapi_sha256),
             ("dependency_lock_sha256", self.dependency_lock_sha256),
@@ -60,32 +123,29 @@ class ReleaseEvidence:
             raise ValueError("container_image_digest must use sha256:<digest> format")
         if self.container_image_digest is not None and not SHA256_RE.fullmatch(self.container_image_digest.removeprefix("sha256:")):
             raise ValueError("container_image_digest must contain a valid SHA-256 digest")
+        if any(not key.strip() or not isinstance(value, str) or not value.strip() for key, value in self.evidence_refs.items()):
+            raise ValueError("evidence_refs must map non-empty control names to non-empty references")
+
+        self.blockers = self.derive_blockers()
 
         if self.status == "PRODUCTION_READY":
-            required_true = (
-                ("security.dependency_audit_passed", self.security.get("dependency_audit_passed")),
-                ("security.secret_scan_passed", self.security.get("secret_scan_passed")),
-                ("security.mfa_verified", self.security.get("mfa_verified")),
-                ("security.distributed_rate_limit_verified", self.security.get("distributed_rate_limit_verified")),
-                ("search.benchmark_verified", self.search.get("benchmark_verified")),
-                ("performance.load_test_verified", self.performance.get("load_test_verified")),
-                ("performance.slo_accepted", self.performance.get("slo_accepted")),
-                ("database.managed_postgres_verified", self.database.get("managed_postgres_verified")),
-                ("database.pitr_verified", self.database.get("pitr_verified")),
-                ("database.backup_verified", self.database.get("backup_verified")),
-                ("database.restore_verified", self.database.get("restore_verified")),
-                ("accessibility.wcag_22_aa", self.accessibility.get("wcag_22_aa")),
-                ("external_review.security", self.external_review.get("security")),
-                ("external_review.accessibility", self.external_review.get("accessibility")),
-                ("deployment.staging_verified", self.deployment.get("staging_verified")),
-                ("deployment.rollback_verified", self.deployment.get("rollback_verified")),
-                ("deployment.dns_tls_verified", self.deployment.get("dns_tls_verified")),
-                ("deployment.observability_verified", self.deployment.get("observability_verified")),
-                ("deployment.incident_drill_verified", self.deployment.get("incident_drill_verified")),
-                ("deployment.secrets_management_verified", self.deployment.get("secrets_management_verified")),
-                ("deployment.branch_governance_verified", self.deployment.get("branch_governance_verified")),
-            )
-            missing = [name for name, value in required_true if value is not True]
+            missing: list[str] = []
+            if self.pull_request:
+                missing.append("production evidence must be generated from a non-PR release ref")
+            if self.source_head_sha != self.tested_sha:
+                missing.append("source_head_sha must equal tested_sha for the final production release ref")
+            if self.workflow_run_id is None:
+                missing.append("workflow_run_id")
+            if self.workflow_run_attempt is None:
+                missing.append("workflow_run_attempt")
+            for name in REQUIRED_CI:
+                if self.ci.get(name) != "pass":
+                    missing.append(f"ci.{name} must be pass")
+            for path in REQUIRED_CONTROLS:
+                if self._control_value(path) is not True:
+                    missing.append(path)
+                if not self.evidence_refs.get(path, "").strip():
+                    missing.append(f"evidence_refs.{path}")
             if self.security.get("critical_open") != 0:
                 missing.append("security.critical_open must be 0")
             if self.security.get("high_open") != 0:
@@ -97,14 +157,19 @@ class ReleaseEvidence:
             if not self.container_image_digest:
                 missing.append("container_image_digest")
             dataset_queries = self.search.get("dataset_queries")
-            if not isinstance(dataset_queries, int) or dataset_queries < 200:
-                missing.append("search.dataset_queries must be >= 200")
+            if not isinstance(dataset_queries, int) or dataset_queries < 500:
+                missing.append("search.dataset_queries must be >= 500")
             for metric in ("mrr_at_10", "ndcg_at_10", "recall_at_5", "recall_at_10", "precision_at_5", "zero_result_rate"):
-                if self.search.get(metric) is None:
-                    missing.append(f"search.{metric}")
-            for metric in ("p50_ms", "p95_ms", "p99_ms", "error_rate"):
-                if self.performance.get(metric) is None:
-                    missing.append(f"performance.{metric}")
+                value = self.search.get(metric)
+                if not isinstance(value, (int, float)) or not 0 <= float(value) <= 1:
+                    missing.append(f"search.{metric} must be between 0 and 1")
+            for metric in ("p50_ms", "p95_ms", "p99_ms"):
+                value = self.performance.get(metric)
+                if not isinstance(value, (int, float)) or float(value) < 0:
+                    missing.append(f"performance.{metric} must be non-negative")
+            error_rate = self.performance.get("error_rate")
+            if not isinstance(error_rate, (int, float)) or not 0 <= float(error_rate) <= 1:
+                missing.append("performance.error_rate must be between 0 and 1")
             if self.blockers:
                 missing.append("blockers must be empty")
             if missing:
@@ -125,19 +190,37 @@ def _env_int(name: str) -> int | None:
     return None if not value else int(value)
 
 
+def _env_json_string_map(name: str) -> dict[str, str]:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return {}
+    value = json.loads(raw)
+    if not isinstance(value, dict) or any(not isinstance(key, str) or not isinstance(item, str) for key, item in value.items()):
+        raise ValueError(f"{name} must be a JSON object mapping strings to strings")
+    return value
+
+
 def build_evidence() -> ReleaseEvidence:
-    blockers = [item.strip() for item in os.getenv("RELEASE_BLOCKERS", "").split("|") if item.strip()]
-    return ReleaseEvidence(
+    tested_sha = os.getenv("RELEASE_TESTED_SHA") or os.getenv("GITHUB_SHA") or os.getenv("RELEASE_COMMIT", "")
+    source_head_sha = os.getenv("RELEASE_SOURCE_HEAD_SHA") or tested_sha
+    manual_blockers = [item.strip() for item in os.getenv("RELEASE_BLOCKERS", "").split("|") if item.strip()]
+    evidence = ReleaseEvidence(
         project="AISearcharab.com",
         generated_at=datetime.now(timezone.utc).isoformat(),
-        commit=os.getenv("GITHUB_SHA") or os.getenv("RELEASE_COMMIT", ""),
+        source_head_sha=source_head_sha,
+        tested_sha=tested_sha,
+        base_sha=os.getenv("RELEASE_BASE_SHA") or None,
+        repository=os.getenv("GITHUB_REPOSITORY") or None,
         branch=os.getenv("GITHUB_HEAD_REF") or os.getenv("GITHUB_REF_NAME") or None,
         pull_request=os.getenv("RELEASE_PR") or None,
+        workflow_run_id=_env_int("GITHUB_RUN_ID"),
+        workflow_run_attempt=_env_int("GITHUB_RUN_ATTEMPT"),
         status=os.getenv("RELEASE_STATUS", "INTEGRATED_NOT_TESTED"),
         migration=os.getenv("RELEASE_MIGRATION", "20260808_0005"),
         openapi_sha256=os.getenv("OPENAPI_SHA256") or None,
         dependency_lock_sha256=os.getenv("DEPENDENCY_LOCK_SHA256") or None,
         container_image_digest=os.getenv("CONTAINER_IMAGE_DIGEST") or None,
+        evidence_refs=_env_json_string_map("RELEASE_EVIDENCE_REFS_JSON"),
         ci={
             "site": os.getenv("CI_SITE_STATUS", "unknown"),
             "api": os.getenv("CI_API_STATUS", "unknown"),
@@ -189,8 +272,10 @@ def build_evidence() -> ReleaseEvidence:
             "secrets_management_verified": _env_bool("SECRETS_MANAGEMENT_VERIFIED"),
             "branch_governance_verified": _env_bool("BRANCH_GOVERNANCE_VERIFIED"),
         },
-        blockers=blockers,
+        blockers=manual_blockers,
     )
+    evidence.blockers = evidence.derive_blockers()
+    return evidence
 
 
 def main() -> int:
