@@ -1,0 +1,18 @@
+repos:
+  - repo: local
+    hooks:
+      - id: aisearcharab-secure-source
+        name: AISearcharab secure source policy
+        entry: python platform/apps/api/scripts/validate_secure_source.py
+        language: system
+        pass_filenames: false
+      - id: aisearcharab-ruff
+        name: AISearcharab Python lint
+        entry: python -m ruff check platform/apps/api/src platform/apps/api/tests platform/apps/api/scripts platform/apps/api/alembic
+        language: system
+        pass_filenames: false
+      - id: aisearcharab-compile
+        name: AISearcharab Python compile
+        entry: python -m compileall -q platform/apps/api/src platform/apps/api/tests platform/apps/api/scripts platform/apps/api/alembic scripts tests
+        language: system
+        pass_filenames: false

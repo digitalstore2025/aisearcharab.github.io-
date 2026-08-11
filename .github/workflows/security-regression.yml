@@ -1,0 +1,121 @@
+name: Security regression
+
+on:
+  push:
+    paths:
+      - "platform/**"
+      - "static/js/**"
+      - ".pre-commit-config.yaml"
+      - ".github/workflows/security-regression.yml"
+  pull_request:
+    paths:
+      - "platform/**"
+      - "static/js/**"
+      - ".pre-commit-config.yaml"
+      - ".github/workflows/security-regression.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  source-and-unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: platform/apps/api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: platform/apps/api/pyproject.toml
+
+      - name: Install pinned development dependencies
+        run: python -m pip install 'pip==26.1.2' && python -m pip install -e '.[dev]'
+
+      - name: Lint Python
+        run: python -m ruff check src tests scripts alembic
+
+      - name: Validate secure source policy
+        run: python scripts/validate_secure_source.py
+
+      - name: Compile Python
+        run: python -m compileall -q src tests scripts alembic
+
+      - name: Run adversarial security tests
+        run: python -m pytest tests/test_security.py tests/test_authorization_boundaries.py
+
+  hardened-runtime:
+    needs: source-and-unit
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      POSTGRES_PASSWORD: ci-only-password
+      APP_ENV: staging
+      ALLOWED_ORIGINS: https://preview.example
+      ENFORCE_SEPARATION_OF_DUTIES: "true"
+      REQUIRE_MFA_FOR_PRIVILEGED: "true"
+      MFA_ENCRYPTION_KEY: "ci-only-not-a-secret-mfa-encryption-key-2026"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Build and start hardened stack
+        working-directory: platform
+        run: |
+          docker compose build
+          docker compose up -d --wait
+
+      - name: Verify security headers with curl -I
+        shell: bash
+        run: |
+          set -euo pipefail
+          headers="$(curl --fail --silent --show-error -I http://127.0.0.1:8000/admin/)"
+          grep -qi '^X-Content-Type-Options: nosniff' <<< "$headers"
+          grep -qi '^X-Frame-Options: DENY' <<< "$headers"
+          grep -qi '^Content-Security-Policy:' <<< "$headers"
+          grep -qi '^Cache-Control: no-store' <<< "$headers"
+          grep -qi '^X-DNS-Prefetch-Control: off' <<< "$headers"
+
+      - name: Reject oversized chunked body
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+          Path('/tmp/oversized.json').write_bytes(b'{"email":"nobody@example.com","password":"' + b'x' * 600000 + b'"}')
+          PY
+          code="$(curl --silent --output /tmp/oversized-response.json --write-out '%{http_code}' \
+            -H 'Content-Type: application/json' \
+            -H 'Transfer-Encoding: chunked' \
+            --data-binary @/tmp/oversized.json \
+            http://127.0.0.1:8000/v1/auth/login)"
+          test "$code" = "413"
+          grep -q 'request body too large' /tmp/oversized-response.json
+
+      - name: Reject malicious payload on absent upload surface
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s' '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>' > /tmp/payload.svg
+          code="$(curl --silent --output /tmp/upload-response.json --write-out '%{http_code}' \
+            -H 'Content-Type: image/png' \
+            --data-binary @/tmp/payload.svg \
+            http://127.0.0.1:8000/v1/admin/upload)"
+          test "$code" = "404"
+
+      - name: Tear down stack
+        if: always()
+        working-directory: platform
+        run: docker compose down -v --remove-orphans

@@ -5,15 +5,10 @@ import getpass
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT / "src"))
-
 from sqlalchemy import func, select
 
-from aisearcharab_api.config import get_settings
-from aisearcharab_api.database import get_session_factory
-from aisearcharab_api.models import User
-from aisearcharab_api.security import PasswordPolicyError, hash_password, normalize_email
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
 
 
 def parse_args() -> argparse.Namespace:
@@ -24,6 +19,11 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    from aisearcharab_api.config import get_settings
+    from aisearcharab_api.database import get_session_factory
+    from aisearcharab_api.models import User
+    from aisearcharab_api.security import PasswordPolicyError, hash_password, normalize_email
+
     args = parse_args()
     settings = get_settings()
     try:
