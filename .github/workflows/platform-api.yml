@@ -8,6 +8,7 @@ on:
       - "layouts/_default/baseof.html"
       - "hugo.toml"
       - ".github/workflows/platform-api.yml"
+      - ".github/workflows/ci.yml"
   pull_request:
     paths:
       - "platform/**"
@@ -15,6 +16,7 @@ on:
       - "layouts/_default/baseof.html"
       - "hugo.toml"
       - ".github/workflows/platform-api.yml"
+      - ".github/workflows/ci.yml"
 
 permissions:
   contents: read
@@ -24,6 +26,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  site-quality:
+    uses: ./.github/workflows/ci.yml
+
   api-quality:
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -237,13 +242,27 @@ jobs:
         run: docker compose down -v --remove-orphans
 
   release-evidence:
-    needs: [api-quality, container-smoke]
+    needs: [site-quality, api-quality, container-smoke]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
+          fetch-depth: 2
+
+      - name: Verify pull-request merge provenance
+        if: github.event_name == 'pull_request'
+        shell: bash
+        env:
+          EXPECTED_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          parents="$(git show -s --format='%P' "$GITHUB_SHA")"
+          test "$(wc -w <<< "$parents" | tr -d ' ')" = "2"
+          grep -qw "$EXPECTED_BASE_SHA" <<< "$parents"
+          grep -qw "$EXPECTED_HEAD_SHA" <<< "$parents"
 
       - name: Prepare immutable release identifiers
         shell: bash
@@ -256,13 +275,20 @@ jobs:
         env:
           RELEASE_STATUS: INTEGRATED_NOT_TESTED
           RELEASE_MIGRATION: "20260808_0005"
-          RELEASE_PR: "13"
-          CI_SITE_STATUS: separate-workflow
+          RELEASE_PR: ${{ github.event.pull_request.number }}
+          RELEASE_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          RELEASE_TESTED_SHA: ${{ github.sha }}
+          RELEASE_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          CI_SITE_STATUS: pass
           CI_API_STATUS: pass
           CI_CONTAINER_STATUS: pass
           DEPENDENCY_AUDIT_PASSED: "true"
+          SECRET_SCAN_PASSED: "true"
           MFA_VERIFIED: "false"
           DISTRIBUTED_RATE_LIMIT_VERIFIED: "false"
+          SEARCH_BENCHMARK_VERIFIED: "false"
+          LOAD_TEST_VERIFIED: "false"
+          LOAD_SLO_ACCEPTED: "false"
           MANAGED_POSTGRES_VERIFIED: "false"
           PITR_VERIFIED: "false"
           BACKUP_VERIFIED: "false"
@@ -274,7 +300,9 @@ jobs:
           DNS_TLS_VERIFIED: "false"
           ROLLBACK_VERIFIED: "false"
           OBSERVABILITY_VERIFIED: "false"
-          RELEASE_BLOCKERS: "external staging not verified|distributed rate limiting not verified|managed PostgreSQL and restore drill not verified|external security/accessibility verification pending"
+          INCIDENT_DRILL_VERIFIED: "false"
+          SECRETS_MANAGEMENT_VERIFIED: "false"
+          BRANCH_GOVERNANCE_VERIFIED: "false"
         run: python platform/apps/api/scripts/release_evidence.py --output /tmp/release-evidence.json
 
       - name: Validate release evidence JSON
