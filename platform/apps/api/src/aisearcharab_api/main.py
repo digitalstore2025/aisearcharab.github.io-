@@ -16,7 +16,7 @@ from . import __version__
 from .arabic import normalize_text
 from .config import Settings, get_settings
 from .database import get_db
-from .middleware import SecurityHeadersMiddleware
+from .middleware import RequestBodyLimitMiddleware, SecurityHeadersMiddleware
 from .models import SearchQueryEvent
 from .privacy import hash_query
 from .repository import count_indexed_matches, get_published_content, list_indexed_content
@@ -65,6 +65,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         openapi_url="/openapi.json" if not runtime_settings.is_production else None,
     )
     app.state.settings = runtime_settings
+    app.add_middleware(RequestBodyLimitMiddleware, max_bytes=runtime_settings.max_request_body_bytes)
     app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(
         CORSMiddleware,
