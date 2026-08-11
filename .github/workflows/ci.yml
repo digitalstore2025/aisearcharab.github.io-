@@ -1,6 +1,7 @@
 name: Validate site
 
 on:
+  workflow_call:
   push:
   pull_request:
 
@@ -8,7 +9,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: validate-${{ github.ref }}
+  group: validate-${{ github.ref }}-${{ github.workflow }}
   cancel-in-progress: true
 
 jobs:
