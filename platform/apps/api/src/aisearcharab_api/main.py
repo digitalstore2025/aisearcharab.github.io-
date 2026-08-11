@@ -87,6 +87,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def liveness() -> HealthResponse:
         return HealthResponse(status="ok", version=__version__)
 
+    @app.get("/api/health", response_model=HealthResponse, include_in_schema=False)
     @app.get("/health/ready", response_model=HealthResponse, tags=["health"])
     def readiness(session: Session = Depends(get_db)) -> HealthResponse:
         try:
