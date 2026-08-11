@@ -4,21 +4,28 @@ import json
 
 import pytest
 
-from scripts.release_evidence import ReleaseEvidence, build_evidence, main
+from scripts.release_evidence import REQUIRED_CONTROLS, ReleaseEvidence, build_evidence, main
 
 DIGEST = "a" * 64
+SHA = "abcdef1234567890"
+BASE_SHA = "1234567890abcdef"
 
 
 def complete_evidence(**overrides) -> ReleaseEvidence:
     values = {
         "project": "AISearcharab.com",
         "generated_at": "2026-08-10T00:00:00+00:00",
-        "commit": "abcdef1234567890",
+        "source_head_sha": SHA,
+        "tested_sha": SHA,
         "status": "PRODUCTION_READY",
         "migration": "20260808_0005",
+        "workflow_run_id": 12345,
+        "workflow_run_attempt": 1,
         "openapi_sha256": DIGEST,
         "dependency_lock_sha256": DIGEST,
         "container_image_digest": f"sha256:{DIGEST}",
+        "evidence_refs": {path: f"artifact://{path}" for path in REQUIRED_CONTROLS},
+        "ci": {"site": "pass", "api": "pass", "container": "pass"},
         "security": {
             "critical_open": 0,
             "high_open": 0,
@@ -29,7 +36,7 @@ def complete_evidence(**overrides) -> ReleaseEvidence:
         },
         "search": {
             "benchmark_verified": True,
-            "dataset_queries": 200,
+            "dataset_queries": 500,
             "mrr_at_10": 0.8,
             "ndcg_at_10": 0.8,
             "recall_at_5": 0.75,
@@ -68,20 +75,35 @@ def complete_evidence(**overrides) -> ReleaseEvidence:
 
 
 def test_default_evidence_never_claims_production_ready(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RELEASE_COMMIT", "abcdef1234567890")
+    monkeypatch.setenv("RELEASE_COMMIT", SHA)
     monkeypatch.delenv("GITHUB_SHA", raising=False)
     evidence = build_evidence()
     assert evidence.status == "INTEGRATED_NOT_TESTED"
     assert evidence.migration == "20260808_0005"
+    assert evidence.source_head_sha == SHA
+    assert evidence.tested_sha == SHA
     assert evidence.security["mfa_verified"] is False
     assert evidence.search["benchmark_verified"] is False
     assert evidence.database["restore_verified"] is False
     assert evidence.deployment["staging_verified"] is False
+    assert "deployment.staging_verified is not verified" in evidence.blockers
 
 
-def test_invalid_commit_sha_is_rejected() -> None:
-    evidence = complete_evidence(commit="not-a-sha")
-    with pytest.raises(ValueError, match="hexadecimal Git commit SHA"):
+def test_invalid_source_sha_is_rejected() -> None:
+    evidence = complete_evidence(source_head_sha="not-a-sha")
+    with pytest.raises(ValueError, match="source_head_sha"):
+        evidence.validate()
+
+
+def test_invalid_tested_sha_is_rejected() -> None:
+    evidence = complete_evidence(tested_sha="not-a-sha")
+    with pytest.raises(ValueError, match="tested_sha"):
+        evidence.validate()
+
+
+def test_pr_evidence_requires_base_sha() -> None:
+    evidence = complete_evidence(status="INTEGRATED_NOT_TESTED", pull_request="13", base_sha=None)
+    with pytest.raises(ValueError, match="base_sha is required"):
         evidence.validate()
 
 
@@ -101,7 +123,8 @@ def test_production_ready_requires_external_gates() -> None:
     evidence = ReleaseEvidence(
         project="AISearcharab.com",
         generated_at="2026-08-10T00:00:00+00:00",
-        commit="abcdef1234567890",
+        source_head_sha=SHA,
+        tested_sha=SHA,
         status="PRODUCTION_READY",
         migration="20260808_0005",
     )
@@ -109,33 +132,56 @@ def test_production_ready_requires_external_gates() -> None:
         evidence.validate()
 
 
+def test_production_ready_is_forbidden_from_pull_request() -> None:
+    evidence = complete_evidence(pull_request="13", base_sha=BASE_SHA)
+    with pytest.raises(ValueError, match="non-PR release ref"):
+        evidence.validate()
+
+
+def test_production_ready_requires_final_sha_to_match_tested_sha() -> None:
+    evidence = complete_evidence(source_head_sha=BASE_SHA)
+    with pytest.raises(ValueError, match="source_head_sha must equal tested_sha"):
+        evidence.validate()
+
+
+def test_production_ready_requires_evidence_reference_for_true_control() -> None:
+    refs = {path: f"artifact://{path}" for path in REQUIRED_CONTROLS}
+    refs.pop("database.restore_verified")
+    evidence = complete_evidence(evidence_refs=refs)
+    with pytest.raises(ValueError, match=r"evidence_refs\.database\.restore_verified"):
+        evidence.validate()
+
+
 def test_production_ready_requires_real_search_dataset_size() -> None:
-    evidence = complete_evidence(search={
-        "benchmark_verified": True,
-        "dataset_queries": 7,
-        "mrr_at_10": 1.0,
-        "ndcg_at_10": 1.0,
-        "recall_at_5": 1.0,
-        "recall_at_10": 1.0,
-        "precision_at_5": 0.2,
-        "zero_result_rate": 0.0,
-    })
-    with pytest.raises(ValueError, match="dataset_queries must be >= 200"):
+    search = complete_evidence().search.copy()
+    search["dataset_queries"] = 7
+    evidence = complete_evidence(search=search)
+    with pytest.raises(ValueError, match="dataset_queries must be >= 500"):
         evidence.validate()
 
 
-def test_production_ready_rejects_nonempty_blockers() -> None:
-    evidence = complete_evidence(blockers=["independent review pending"])
-    with pytest.raises(ValueError, match="blockers must be empty"):
+def test_production_ready_rejects_invalid_metric_ranges() -> None:
+    performance = complete_evidence().performance.copy()
+    performance["error_rate"] = 1.5
+    evidence = complete_evidence(performance=performance)
+    with pytest.raises(ValueError, match="performance.error_rate must be between 0 and 1"):
         evidence.validate()
 
 
-def test_production_ready_accepts_complete_evidence() -> None:
+def test_blockers_are_derived_from_unverified_controls() -> None:
+    security = complete_evidence().security.copy()
+    security["mfa_verified"] = False
+    evidence = complete_evidence(status="INTEGRATED_NOT_TESTED", security=security, blockers=[])
+    evidence.validate()
+    assert "security.mfa_verified is not verified" in evidence.blockers
+
+
+def test_production_ready_accepts_complete_attested_evidence() -> None:
     complete_evidence().validate()
 
 
 def test_cli_writes_machine_readable_evidence(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("RELEASE_COMMIT", "abcdef1234567890")
+    monkeypatch.setenv("RELEASE_COMMIT", SHA)
     monkeypatch.delenv("GITHUB_SHA", raising=False)
     output = tmp_path / "release-evidence.json"
     monkeypatch.setattr("sys.argv", ["release_evidence.py", "--output", str(output)])
@@ -144,5 +190,8 @@ def test_cli_writes_machine_readable_evidence(tmp_path, monkeypatch: pytest.Monk
     assert payload["project"] == "AISearcharab.com"
     assert payload["status"] == "INTEGRATED_NOT_TESTED"
     assert payload["migration"] == "20260808_0005"
+    assert payload["source_head_sha"] == SHA
+    assert payload["tested_sha"] == SHA
     assert payload["security"]["mfa_verified"] is False
     assert payload["deployment"]["incident_drill_verified"] is False
+    assert payload["blockers"]
