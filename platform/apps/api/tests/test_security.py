@@ -21,6 +21,13 @@ def test_security_headers_and_request_id(client: TestClient) -> None:
     assert response.headers["origin-agent-cluster"] == "?1"
 
 
+def test_operational_health_alias_is_real_readiness(client: TestClient) -> None:
+    response = client.get("/api/health")
+    assert response.status_code == 200
+    assert response.json()["status"] == "ready"
+    assert response.headers["cache-control"] == "no-store"
+
+
 def test_admin_csp_rejects_inline_and_object_execution(client: TestClient) -> None:
     response = client.get("/admin/")
     assert response.status_code == 200
