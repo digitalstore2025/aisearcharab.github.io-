@@ -1,23 +1,38 @@
 baseURL = "https://aisearcharab.com/"
 languageCode = "ar"
 defaultContentLanguage = "ar"
-title = "AI Search Arab"
+title = "مرصد الذكاء الاصطناعي العربي"
 enableRobotsTXT = true
 enableGitInfo = true
+canonifyURLs = false
 
 [pagination]
   pagerSize = 12
 
 [params]
-  description = "منصة عربية للتحقيق الرقمي وOSINT والتحقق وتحليل البيانات"
-  author = "AI Search Arab"
+  siteName = "مرصد الذكاء الاصطناعي العربي"
+  shortName = "AI Search Arab"
+  description = "منصة عربية للبحث والرصد والتحليل في الذكاء الاصطناعي، تجمع المحتوى الموثق والمنهجيات والأدوات القابلة للتدقيق."
+  author = "فريق AI Search Arab"
   locale = "ar_AR"
+  themeColor = "#0B1F33"
+
+[taxonomies]
+  category = "categories"
+  tag = "tags"
+  author = "authors"
 
 [markup.goldmark.renderer]
   unsafe = false
 
 [outputs]
   home = ["HTML", "RSS", "JSON"]
+  section = ["HTML", "RSS"]
+
+[sitemap]
+  changefreq = "weekly"
+  priority = 0.5
+  filename = "sitemap.xml"
 
 [security]
   enableInlineShortcodes = false

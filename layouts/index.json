@@ -1,13 +1,14 @@
 [
-{{- $pages := where site.RegularPages "Section" "in" (slice "investigations" "toolkits" "methodology") -}}
+{{- $pages := where site.RegularPages "RelPermalink" "ne" "/search/" -}}
 {{- range $index, $page := $pages -}}
 {{- if $index }},{{ end }}
 {
-  "title": {{ $page.Title | jsonify }},
+  "title": {{ $page.Title | plainify | jsonify }},
   "url": {{ $page.RelPermalink | jsonify }},
-  "section": {{ $page.Section | jsonify }},
-  "summary": {{ $page.Summary | plainify | jsonify }},
-  "date": {{ $page.Date.Format "2006-01-02" | jsonify }}
+  "section": {{ ($page.Section | default "pages") | jsonify }},
+  "summary": {{ ($page.Summary | plainify | htmlUnescape | truncate 320) | jsonify }},
+  "date": {{ $page.Date.Format "2006-01-02" | jsonify }},
+  "lastmod": {{ $page.Lastmod.Format "2006-01-02" | jsonify }}
 }
 {{- end -}}
 ]
