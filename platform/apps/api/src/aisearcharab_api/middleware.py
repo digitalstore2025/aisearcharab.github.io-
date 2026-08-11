@@ -4,16 +4,99 @@ import json
 import logging
 import re
 import time
+from collections.abc import Awaitable, Callable
 from uuid import uuid4
 
 from fastapi import Request
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import JSONResponse, Response
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
-ADMIN_CSP = "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'"
-API_CSP = "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+ADMIN_CSP = (
+    "default-src 'self'; "
+    "script-src 'self'; "
+    "style-src 'self'; "
+    "img-src 'self' data:; "
+    "connect-src 'self'; "
+    "font-src 'self'; "
+    "object-src 'none'; "
+    "worker-src 'none'; "
+    "frame-src 'none'; "
+    "frame-ancestors 'none'; "
+    "base-uri 'none'; "
+    "form-action 'self'; "
+    "manifest-src 'self'"
+)
+API_CSP = "default-src 'none'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
 REQUEST_LOGGER = logging.getLogger("aisearcharab.request")
+
+
+class RequestBodyLimitMiddleware:
+    """Fail closed on oversized request bodies, including chunked requests.
+
+    The API does not expose streaming upload endpoints, so bounded buffering is an
+    intentional trade-off: it prevents Content-Length bypasses while retaining a
+    hard upper bound configured by MAX_REQUEST_BODY_BYTES.
+    """
+
+    def __init__(self, app: ASGIApp, *, max_bytes: int) -> None:
+        self.app = app
+        self.max_bytes = max_bytes
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+
+        declared_length: int | None = None
+        for raw_name, raw_value in scope.get("headers", []):
+            if raw_name.lower() != b"content-length":
+                continue
+            try:
+                declared_length = int(raw_value.decode("ascii"))
+            except (UnicodeDecodeError, ValueError):
+                response = JSONResponse({"detail": "invalid content length"}, status_code=400)
+                await response(scope, receive, send)
+                return
+            break
+
+        if declared_length is not None:
+            if declared_length < 0:
+                response = JSONResponse({"detail": "invalid content length"}, status_code=400)
+                await response(scope, receive, send)
+                return
+            if declared_length > self.max_bytes:
+                response = JSONResponse({"detail": "request body too large"}, status_code=413)
+                await response(scope, receive, send)
+                return
+
+        buffered: list[Message] = []
+        total = 0
+        while True:
+            message = await receive()
+            buffered.append(message)
+            if message["type"] != "http.request":
+                break
+            total += len(message.get("body", b""))
+            if total > self.max_bytes:
+                response = JSONResponse({"detail": "request body too large"}, status_code=413)
+                await response(scope, receive, send)
+                return
+            if not message.get("more_body", False):
+                break
+
+        index = 0
+
+        async def replay_receive() -> Message:
+            nonlocal index
+            if index < len(buffered):
+                message = buffered[index]
+                index += 1
+                return message
+            return await receive()
+
+        await self.app(scope, replay_receive, send)
 
 
 def _route_template(request: Request) -> str:
@@ -21,8 +104,6 @@ def _route_template(request: Request) -> str:
     template = getattr(route, "path", None)
     if isinstance(template, str) and template.startswith("/"):
         return template
-    # Never emit an arbitrary unmatched URL path. It can contain user-controlled
-    # identifiers or deliberately injected sensitive material.
     return "__unmatched__"
 
 
@@ -35,8 +116,6 @@ def _log_request(
     status_code: int,
     duration_ms: float,
 ) -> None:
-    # Deliberately omit query strings, raw URL paths, request/response bodies,
-    # cookies, authorization headers and client/network identifiers.
     REQUEST_LOGGER.info(
         json.dumps(
             {
@@ -64,21 +143,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         status_code = 500
 
         try:
-            content_length = request.headers.get("content-length")
-            if content_length:
-                try:
-                    declared_size = int(content_length)
-                except ValueError:
-                    declared_size = -1
-                if declared_size < 0:
-                    response: Response = JSONResponse({"detail": "invalid content length"}, status_code=400)
-                elif declared_size > request.app.state.settings.max_request_body_bytes:
-                    response = JSONResponse({"detail": "request body too large"}, status_code=413)
-                else:
-                    response = await call_next(request)
-            else:
-                response = await call_next(request)
-
+            response = await call_next(request)
             status_code = response.status_code
             response.headers["X-Request-ID"] = request_id
             response.headers["X-Content-Type-Options"] = "nosniff"
@@ -88,6 +153,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
             response.headers["Cross-Origin-Resource-Policy"] = "same-site"
             response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
+            response.headers["X-DNS-Prefetch-Control"] = "off"
+            response.headers["Origin-Agent-Cluster"] = "?1"
             response.headers["X-Robots-Tag"] = "noindex, nofollow"
             response.headers["Cache-Control"] = "no-store"
             response.headers["Content-Security-Policy"] = ADMIN_CSP if request.url.path.startswith("/admin") else API_CSP
