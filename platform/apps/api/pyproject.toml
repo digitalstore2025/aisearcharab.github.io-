@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=80.9.0", "wheel>=0.45.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aisearcharab-api"
+version = "0.1.0"
+description = "Phase 2 retrieval API for AISearcharab.com"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+  "fastapi==0.139.2",
+  "pydantic==2.13.4",
+  "sqlalchemy==2.0.51",
+  "alembic==1.18.5",
+  "psycopg[binary]==3.3.4",
+  "uvicorn[standard]==0.51.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "httpx==0.28.1",
+  "pytest==9.1.1",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+addopts = "-q --strict-markers --disable-warnings"
+testpaths = ["tests"]
+pythonpath = ["src", "."]
