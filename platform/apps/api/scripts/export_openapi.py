@@ -7,10 +7,6 @@ from pathlib import Path
 
 API_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(API_ROOT / "src"))
-
-from aisearcharab_api.config import Settings
-from aisearcharab_api.main import create_app
-
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUTPUT = ROOT / "contracts" / "openapi.generated.json"
 
@@ -22,6 +18,9 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> int:
+    from aisearcharab_api.config import Settings
+    from aisearcharab_api.main import create_app
+
     args = parse_args()
     settings = Settings(
         environment="test",
