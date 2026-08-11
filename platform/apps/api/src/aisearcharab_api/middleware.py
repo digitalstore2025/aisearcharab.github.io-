@@ -4,7 +4,6 @@ import json
 import logging
 import re
 import time
-from collections.abc import Awaitable, Callable
 from uuid import uuid4
 
 from fastapi import Request
