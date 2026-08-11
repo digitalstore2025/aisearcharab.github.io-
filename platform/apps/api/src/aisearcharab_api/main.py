@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from . import __version__
 from .arabic import normalize_text
@@ -18,15 +19,17 @@ from .database import get_db
 from .middleware import SecurityHeadersMiddleware
 from .models import SearchQueryEvent
 from .privacy import hash_query
-from .repository import get_published_content, list_indexed_content
+from .repository import count_indexed_matches, get_published_content, list_indexed_content
 from .routes_admin import router as admin_router
 from .routes_admin_detail import router as admin_detail_router
 from .routes_auth import router as auth_router
+from .routes_mfa import router as mfa_router
 from .schemas import CapabilitiesResponse, HealthResponse, PublicClaimSummary, PublicContentDetail, SearchResponse, SearchResult, SourceSummary
 from .search import rank_items
 
 ADMIN_STATIC = Path(__file__).resolve().parent / "admin_static"
 _PUBLIC_CLAIM_STATES = {"reviewed", "published"}
+EXPECTED_ALEMBIC_REVISION = "20260808_0005"
 
 
 def _public_content(item) -> PublicContentDetail:
@@ -72,8 +75,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         expose_headers=["X-Request-ID"],
         max_age=600,
     )
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(runtime_settings.allowed_hosts))
 
     app.include_router(auth_router, prefix=runtime_settings.api_prefix)
+    app.include_router(mfa_router, prefix=runtime_settings.api_prefix)
     app.include_router(admin_router, prefix=runtime_settings.api_prefix)
     app.include_router(admin_detail_router, prefix=runtime_settings.api_prefix)
 
@@ -85,6 +90,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def readiness(session: Session = Depends(get_db)) -> HealthResponse:
         try:
             session.execute(text("SELECT 1"))
+            if runtime_settings.environment in {"staging", "production"}:
+                revision = session.scalar(text("SELECT version_num FROM alembic_version"))
+                if revision != EXPECTED_ALEMBIC_REVISION:
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="database schema revision mismatch",
+                    )
+        except HTTPException:
+            raise
         except SQLAlchemyError as exc:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="database unavailable") from exc
         return HealthResponse(status="ready", version=__version__)
@@ -111,13 +125,20 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     ) -> SearchResponse:
         if limit > runtime_settings.max_search_limit:
             raise HTTPException(status_code=400, detail=f"limit must not exceed {runtime_settings.max_search_limit}")
+        if offset + limit > runtime_settings.search_candidate_limit:
+            raise HTTPException(
+                status_code=400,
+                detail=f"offset + limit must not exceed the ranked candidate window ({runtime_settings.search_candidate_limit})",
+            )
         started = time.perf_counter()
         normalized_query = normalize_text(q)
         if len(normalized_query) < 2:
             raise HTTPException(status_code=422, detail="query is too short after normalization")
 
-        ranked = rank_items(q, list_indexed_content(session))
-        total = len(ranked)
+        candidates = list_indexed_content(session, q, candidate_limit=runtime_settings.search_candidate_limit)
+        ranked = rank_items(q, candidates)
+        database_total = count_indexed_matches(session, q)
+        total = database_total if database_total is not None else len(ranked)
         page = ranked[offset : offset + limit]
         took_ms = round((time.perf_counter() - started) * 1000, 3)
 

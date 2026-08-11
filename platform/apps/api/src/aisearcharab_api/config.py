@@ -36,6 +36,15 @@ def _valid_origin(value: str, *, require_https: bool) -> bool:
     return True
 
 
+def _valid_host(value: str) -> bool:
+    if not value or "://" in value or "/" in value or "@" in value:
+        return False
+    if value == "*":
+        return True
+    candidate = value[2:] if value.startswith("*.") else value
+    return all(part and part.replace("-", "").isalnum() for part in candidate.split("."))
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     environment: str
@@ -45,10 +54,20 @@ class Settings:
     max_search_limit: int
     log_queries: bool
     query_hash_key: str | None = None
+    allowed_hosts: tuple[str, ...] = ("localhost", "127.0.0.1", "testserver")
+    max_request_body_bytes: int = 524_288
+    search_candidate_limit: int = 300
     session_ttl_minutes: int = 720
+    session_idle_minutes: int = 30
+    step_up_ttl_minutes: int = 10
     login_max_failures: int = 5
     login_lock_minutes: int = 15
     password_min_length: int = 14
+    enforce_separation_of_duties: bool = False
+    require_mfa_for_privileged: bool = False
+    mfa_encryption_key: str | None = None
+    mfa_enrollment_ttl_minutes: int = 10
+    mfa_issuer: str = "AISearcharab.com"
 
     @property
     def is_production(self) -> bool:
@@ -75,27 +94,58 @@ class Settings:
             raise ConfigurationError("API_PREFIX must start with '/' and include a version segment")
         if not 1 <= self.max_search_limit <= 100:
             raise ConfigurationError("MAX_SEARCH_LIMIT must be between 1 and 100")
+        if not self.max_search_limit <= self.search_candidate_limit <= 2_000:
+            raise ConfigurationError("SEARCH_CANDIDATE_LIMIT must be between MAX_SEARCH_LIMIT and 2000")
+        if not 16_384 <= self.max_request_body_bytes <= 5_000_000:
+            raise ConfigurationError("MAX_REQUEST_BODY_BYTES must be between 16384 and 5000000")
+        if not self.allowed_hosts or any(not _valid_host(host) for host in self.allowed_hosts):
+            raise ConfigurationError("ALLOWED_HOSTS must contain valid host names")
         if not 15 <= self.session_ttl_minutes <= 1440:
             raise ConfigurationError("SESSION_TTL_MINUTES must be between 15 and 1440")
+        if not 5 <= self.session_idle_minutes <= 240:
+            raise ConfigurationError("SESSION_IDLE_MINUTES must be between 5 and 240")
+        if self.session_idle_minutes >= self.session_ttl_minutes:
+            raise ConfigurationError("SESSION_IDLE_MINUTES must be lower than SESSION_TTL_MINUTES")
+        if not 2 <= self.step_up_ttl_minutes <= 30:
+            raise ConfigurationError("STEP_UP_TTL_MINUTES must be between 2 and 30")
+        if self.step_up_ttl_minutes >= self.session_ttl_minutes:
+            raise ConfigurationError("STEP_UP_TTL_MINUTES must be lower than SESSION_TTL_MINUTES")
         if not 3 <= self.login_max_failures <= 20:
             raise ConfigurationError("LOGIN_MAX_FAILURES must be between 3 and 20")
         if not 1 <= self.login_lock_minutes <= 1440:
             raise ConfigurationError("LOGIN_LOCK_MINUTES must be between 1 and 1440")
         if not 12 <= self.password_min_length <= 128:
             raise ConfigurationError("PASSWORD_MIN_LENGTH must be between 12 and 128")
+        if not 2 <= self.mfa_enrollment_ttl_minutes <= 30:
+            raise ConfigurationError("MFA_ENROLLMENT_TTL_MINUTES must be between 2 and 30")
+        if not 2 <= len(self.mfa_issuer.strip()) <= 64:
+            raise ConfigurationError("MFA_ISSUER must contain between 2 and 64 characters")
+        if self.mfa_encryption_key is not None and len(self.mfa_encryption_key.encode("utf-8")) < 32:
+            raise ConfigurationError("MFA_ENCRYPTION_KEY must contain at least 32 bytes")
+        if self.require_mfa_for_privileged and not self.mfa_encryption_key:
+            raise ConfigurationError("MFA_ENCRYPTION_KEY is required when privileged MFA is enabled")
         if not self.allowed_origins:
             raise ConfigurationError("ALLOWED_ORIGINS must contain at least one explicit origin")
         if any(not _valid_origin(origin, require_https=self.is_production) for origin in self.allowed_origins):
             raise ConfigurationError("ALLOWED_ORIGINS must contain valid origins without paths, credentials, queries, or fragments")
         if self.log_queries and (self.query_hash_key is None or len(self.query_hash_key.encode("utf-8")) < 32):
             raise ConfigurationError("QUERY_HASH_KEY must contain at least 32 bytes when query logging is enabled")
+        if self.environment in {"staging", "production"}:
+            if not self.require_mfa_for_privileged:
+                raise ConfigurationError("REQUIRE_MFA_FOR_PRIVILEGED must be enabled in staging and production")
+            if not self.mfa_encryption_key:
+                raise ConfigurationError("MFA_ENCRYPTION_KEY is required in staging and production")
         if self.is_production:
             if self.database_url.startswith("sqlite"):
                 raise ConfigurationError("SQLite is not allowed in production")
             if "*" in self.allowed_origins:
                 raise ConfigurationError("Wildcard CORS origins are not allowed in production")
+            if "*" in self.allowed_hosts:
+                raise ConfigurationError("Wildcard hosts are not allowed in production")
             if "change-me" in self.database_url.lower():
                 raise ConfigurationError("DATABASE_URL contains a placeholder credential")
+            if not self.enforce_separation_of_duties:
+                raise ConfigurationError("ENFORCE_SEPARATION_OF_DUTIES must be enabled in production")
 
 
 @lru_cache(maxsize=1)
@@ -104,14 +154,24 @@ def get_settings() -> Settings:
         environment=os.getenv("APP_ENV", "development").strip().lower(),
         database_url=os.getenv("DATABASE_URL", "sqlite+pysqlite:///./aisearcharab.db").strip(),
         allowed_origins=_csv(os.getenv("ALLOWED_ORIGINS", "http://localhost:3000")),
+        allowed_hosts=_csv(os.getenv("ALLOWED_HOSTS", "localhost,127.0.0.1,testserver")),
         api_prefix=os.getenv("API_PREFIX", "/v1").rstrip("/"),
         max_search_limit=_int("MAX_SEARCH_LIMIT", os.getenv("MAX_SEARCH_LIMIT", "20")),
+        max_request_body_bytes=_int("MAX_REQUEST_BODY_BYTES", os.getenv("MAX_REQUEST_BODY_BYTES", "524288")),
         log_queries=_bool(os.getenv("LOG_SEARCH_QUERIES", "false")),
         query_hash_key=os.getenv("QUERY_HASH_KEY") or None,
+        search_candidate_limit=_int("SEARCH_CANDIDATE_LIMIT", os.getenv("SEARCH_CANDIDATE_LIMIT", "300")),
         session_ttl_minutes=_int("SESSION_TTL_MINUTES", os.getenv("SESSION_TTL_MINUTES", "720")),
+        session_idle_minutes=_int("SESSION_IDLE_MINUTES", os.getenv("SESSION_IDLE_MINUTES", "30")),
+        step_up_ttl_minutes=_int("STEP_UP_TTL_MINUTES", os.getenv("STEP_UP_TTL_MINUTES", "10")),
         login_max_failures=_int("LOGIN_MAX_FAILURES", os.getenv("LOGIN_MAX_FAILURES", "5")),
         login_lock_minutes=_int("LOGIN_LOCK_MINUTES", os.getenv("LOGIN_LOCK_MINUTES", "15")),
         password_min_length=_int("PASSWORD_MIN_LENGTH", os.getenv("PASSWORD_MIN_LENGTH", "14")),
+        enforce_separation_of_duties=_bool(os.getenv("ENFORCE_SEPARATION_OF_DUTIES", "false")),
+        require_mfa_for_privileged=_bool(os.getenv("REQUIRE_MFA_FOR_PRIVILEGED", "false")),
+        mfa_encryption_key=os.getenv("MFA_ENCRYPTION_KEY") or None,
+        mfa_enrollment_ttl_minutes=_int("MFA_ENROLLMENT_TTL_MINUTES", os.getenv("MFA_ENROLLMENT_TTL_MINUTES", "10")),
+        mfa_issuer=os.getenv("MFA_ISSUER", "AISearcharab.com").strip(),
     )
     settings.validate()
     return settings

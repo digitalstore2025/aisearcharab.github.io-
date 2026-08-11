@@ -5,6 +5,7 @@ from dataclasses import dataclass
 PERMISSIONS = frozenset(
     {
         "content:read",
+        "content:read_drafts",
         "content:write",
         "content:review",
         "content:publish",
@@ -20,9 +21,9 @@ PERMISSIONS = frozenset(
 ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     "owner": PERMISSIONS,
     "admin": frozenset(PERMISSIONS - {"users:manage"}),
-    "editor": frozenset({"content:read", "content:write", "sources:write", "claims:write"}),
-    "reviewer": frozenset({"content:read", "content:review", "claims:review"}),
-    "publisher": frozenset({"content:read", "content:write", "content:review", "content:publish", "sources:write", "claims:write", "claims:review"}),
+    "editor": frozenset({"content:read", "content:read_drafts", "content:write", "sources:write", "claims:write"}),
+    "reviewer": frozenset({"content:read", "content:read_drafts", "content:review", "claims:review"}),
+    "publisher": frozenset({"content:read", "content:read_drafts", "content:publish"}),
     "analyst": frozenset({"content:read", "audit:read"}),
 }
 

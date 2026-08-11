@@ -3,7 +3,7 @@ languageCode = "ar"
 defaultContentLanguage = "ar"
 title = "مرصد الذكاء الاصطناعي العربي"
 enableRobotsTXT = true
-enableGitInfo = true
+enableGitInfo = false
 canonifyURLs = false
 
 [pagination]

@@ -34,6 +34,85 @@
     return payload;
   };
 
+  const make = (tag, text, className = '') => {
+    const node = document.createElement(tag);
+    if (text !== undefined) node.textContent = text;
+    if (className) node.className = className;
+    return node;
+  };
+
+  const requestStepUp = () => new Promise((resolve, reject) => {
+    const dialog = document.createElement('dialog');
+    dialog.setAttribute('aria-labelledby', 'step-up-title');
+    const form = document.createElement('form');
+    const title = make('h2', 'تأكيد الهوية');
+    title.id = 'step-up-title';
+    const help = make('p', 'هذه عملية حساسة. أدخل كلمة مرور حسابك لإعادة التحقق لمدة قصيرة.');
+    const label = make('label', 'كلمة المرور');
+    const password = document.createElement('input');
+    password.type = 'password';
+    password.autocomplete = 'current-password';
+    password.required = true;
+    password.maxLength = 256;
+    label.append(password);
+    const message = make('p', '', 'meta');
+    message.setAttribute('role', 'alert');
+    const actions = make('div', undefined, 'actions');
+    const cancel = make('button', 'إلغاء', 'secondary');
+    cancel.type = 'button';
+    const confirm = make('button', 'تأكيد الهوية');
+    confirm.type = 'submit';
+    actions.append(cancel, confirm);
+    form.append(title, help, label, message, actions);
+    dialog.append(form);
+    document.body.append(dialog);
+
+    const cleanup = () => dialog.remove();
+    cancel.addEventListener('click', () => {
+      dialog.close();
+      cleanup();
+      reject(new Error('تم إلغاء تأكيد الهوية.'));
+    });
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      confirm.disabled = true;
+      message.textContent = '';
+      try {
+        const result = await api('/auth/step-up', {
+          method: 'POST',
+          body: JSON.stringify({ password: password.value })
+        });
+        password.value = '';
+        dialog.close();
+        cleanup();
+        resolve(result);
+      } catch (error) {
+        password.value = '';
+        confirm.disabled = false;
+        message.textContent = error.message === 'invalid credentials' ? 'كلمة المرور غير صحيحة.' : error.message;
+        password.focus();
+      }
+    });
+    dialog.addEventListener('cancel', (event) => {
+      event.preventDefault();
+      dialog.close();
+      cleanup();
+      reject(new Error('تم إلغاء تأكيد الهوية.'));
+    });
+    dialog.showModal();
+    password.focus();
+  });
+
+  const sensitiveApi = async (path, options = {}) => {
+    try {
+      return await api(path, options);
+    } catch (error) {
+      if (error.status !== 403 || error.message !== 'step-up authentication required') throw error;
+      await requestStepUp();
+      return api(path, options);
+    }
+  };
+
   const setStatus = (message, type = '') => {
     if (!statusBox) return;
     statusBox.textContent = message;
@@ -42,12 +121,6 @@
 
   const clear = (node) => node.replaceChildren();
   const can = (permission) => currentUser && currentUser.permissions.includes(permission);
-  const make = (tag, text, className = '') => {
-    const node = document.createElement(tag);
-    if (text !== undefined) node.textContent = text;
-    if (className) node.className = className;
-    return node;
-  };
 
   const showLogin = () => {
     currentUser = null;
@@ -178,14 +251,16 @@
   const transitionContent = async (target) => {
     if (!selectedContent) return;
     try {
-      const item = await api(`/admin/content/${selectedContent.id}/transition`, { method: 'POST', body: JSON.stringify({ status: target }) });
+      const request = target === 'published' || target === 'archived' ? sensitiveApi : api;
+      const item = await request(`/admin/content/${selectedContent.id}/transition`, { method: 'POST', body: JSON.stringify({ status: target }) });
       renderSelected(item); await loadContent(); setStatus('تم تحديث حالة المادة.', 'success');
     } catch (error) { setStatus(error.message, 'error'); }
   };
 
   const reviewClaim = async (claimId, reviewStatus, confidence) => {
     try {
-      await api(`/admin/claims/${claimId}`, { method: 'PATCH', body: JSON.stringify({ review_status: reviewStatus, confidence }) });
+      const request = reviewStatus === 'published' ? sensitiveApi : api;
+      await request(`/admin/claims/${claimId}`, { method: 'PATCH', body: JSON.stringify({ review_status: reviewStatus, confidence }) });
       await selectContent(selectedContent.id); setStatus('تم تحديث مراجعة الادعاء.', 'success');
     } catch (error) { setStatus(error.message, 'error'); }
   };
@@ -235,7 +310,7 @@
     event.preventDefault();
     const payload = { display_name: $('#user-name').value, email: $('#user-email').value, role: $('#user-role').value, password: $('#user-password').value };
     try {
-      await api('/admin/users', { method: 'POST', body: JSON.stringify(payload) });
+      await sensitiveApi('/admin/users', { method: 'POST', body: JSON.stringify(payload) });
       event.target.reset(); await loadUsers(); setStatus('تم إنشاء المستخدم.', 'success');
     } catch (error) { setStatus(error.message, 'error'); }
   });

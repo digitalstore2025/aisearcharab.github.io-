@@ -28,4 +28,6 @@ def admin_content_detail(
     item = db.scalar(statement)
     if item is None:
         raise HTTPException(status_code=404, detail="content not found")
+    if item.status != "published" and "content:read_drafts" not in principal.permissions:
+        raise HTTPException(status_code=403, detail="insufficient permissions for non-public content")
     return ContentDetail.model_validate(item)

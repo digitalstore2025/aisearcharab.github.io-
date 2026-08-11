@@ -24,7 +24,7 @@
     <section id="login-panel" class="panel narrow" aria-labelledby="login-title">
       <p class="eyebrow">وصول مقيّد</p>
       <h1 id="login-title">تسجيل دخول الفريق</h1>
-      <p>لا توجد بيانات دخول افتراضية. يجب إنشاء المالك الأول من أمر Bootstrap الآمن.</p>
+      <p>لا توجد بيانات دخول افتراضية. يجب إنشاء المالك الأول من أمر Bootstrap الآمن. الحسابات المميزة تُلزم بالمصادقة متعددة العوامل في Staging وProduction.</p>
       <form id="login-form" novalidate>
         <label>البريد الإلكتروني<input id="login-email" type="email" autocomplete="username" required maxlength="254"></label>
         <label>كلمة المرور<input id="login-password" type="password" autocomplete="current-password" required maxlength="256"></label>
@@ -109,6 +109,7 @@
       </section>
     </section>
   </main>
+  <script src="/admin/mfa-bridge.js" defer></script>
   <script src="/admin/admin.js" defer></script>
 </body>
 </html>
