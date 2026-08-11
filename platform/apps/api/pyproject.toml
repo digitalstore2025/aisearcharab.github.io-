@@ -9,7 +9,7 @@ description = "Governed retrieval and editorial API for AISearcharab.com"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-  "fastapi==0.139.2",
+  "fastapi==0.141.1",
   "pydantic==2.13.4",
   "sqlalchemy==2.0.51",
   "alembic==1.18.5",
