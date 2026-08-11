@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import time
+from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -16,8 +19,36 @@ from .middleware import SecurityHeadersMiddleware
 from .models import SearchQueryEvent
 from .privacy import hash_query
 from .repository import get_published_content, list_indexed_content
-from .schemas import CapabilitiesResponse, ContentDetail, HealthResponse, SearchResponse, SearchResult
+from .routes_admin import router as admin_router
+from .routes_admin_detail import router as admin_detail_router
+from .routes_auth import router as auth_router
+from .schemas import CapabilitiesResponse, HealthResponse, PublicClaimSummary, PublicContentDetail, SearchResponse, SearchResult, SourceSummary
 from .search import rank_items
+
+ADMIN_STATIC = Path(__file__).resolve().parent / "admin_static"
+_PUBLIC_CLAIM_STATES = {"reviewed", "published"}
+
+
+def _public_content(item) -> PublicContentDetail:
+    return PublicContentDetail.model_validate(
+        {
+            "slug": item.slug,
+            "url_path": item.url_path,
+            "title": item.title,
+            "summary": item.summary,
+            "body": item.body,
+            "section": item.section,
+            "language": item.language,
+            "published_at": item.published_at,
+            "updated_at": item.updated_at,
+            "sources": [SourceSummary.model_validate(source) for source in item.sources],
+            "claims": [
+                PublicClaimSummary.model_validate(claim)
+                for claim in item.claims
+                if claim.review_status in _PUBLIC_CLAIM_STATES
+            ],
+        }
+    )
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -25,7 +56,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title="AISearcharab API",
         version=__version__,
-        description="Arabic-first retrieval API. Phase 2 is retrieval-only and does not generate answers.",
+        description="Arabic-first retrieval and governed editorial API. Generated answers and payments are not enabled.",
         docs_url="/docs" if not runtime_settings.is_production else None,
         redoc_url=None,
         openapi_url="/openapi.json" if not runtime_settings.is_production else None,
@@ -35,12 +66,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=list(runtime_settings.allowed_origins),
-        allow_credentials=False,
-        allow_methods=["GET"],
-        allow_headers=["Accept", "Content-Type", "X-Request-ID"],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PATCH", "OPTIONS"],
+        allow_headers=["Accept", "Content-Type", "X-Request-ID", "X-CSRF-Token"],
         expose_headers=["X-Request-ID"],
         max_age=600,
     )
+
+    app.include_router(auth_router, prefix=runtime_settings.api_prefix)
+    app.include_router(admin_router, prefix=runtime_settings.api_prefix)
+    app.include_router(admin_detail_router, prefix=runtime_settings.api_prefix)
 
     @app.get("/health/live", response_model=HealthResponse, tags=["health"])
     def liveness() -> HealthResponse:
@@ -58,14 +93,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def capabilities() -> CapabilitiesResponse:
         return CapabilitiesResponse(api_version=__version__)
 
-    @app.get(f"{runtime_settings.api_prefix}/content/{{slug}}", response_model=ContentDetail, tags=["content"])
-    def content_detail(slug: str, session: Session = Depends(get_db)) -> ContentDetail:
+    @app.get(f"{runtime_settings.api_prefix}/content/{{slug}}", response_model=PublicContentDetail, tags=["content"])
+    def content_detail(slug: str, session: Session = Depends(get_db)) -> PublicContentDetail:
         if len(slug) > 180:
             raise HTTPException(status_code=400, detail="invalid slug")
         item = get_published_content(session, slug)
         if item is None:
             raise HTTPException(status_code=404, detail="content not found")
-        return ContentDetail.model_validate(item)
+        return _public_content(item)
 
     @app.get(f"{runtime_settings.api_prefix}/search", response_model=SearchResponse, tags=["search"])
     def search_content(
@@ -109,6 +144,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             results=[
                 SearchResult(
                     slug=result.item.slug,
+                    url=result.item.url_path,
                     title=result.item.title,
                     summary=result.item.summary,
                     section=result.item.section,
@@ -122,6 +158,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             ],
         )
 
+    @app.get("/admin", include_in_schema=False)
+    def admin_redirect() -> RedirectResponse:
+        return RedirectResponse(url="/admin/", status_code=307)
+
+    app.mount("/admin", StaticFiles(directory=ADMIN_STATIC, html=True), name="admin-console")
     return app
 
 

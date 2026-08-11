@@ -16,6 +16,7 @@ canonifyURLs = false
   author = "فريق AI Search Arab"
   locale = "ar_AR"
   themeColor = "#0B1F33"
+  apiBaseURL = ""
 
 [taxonomies]
   category = "categories"

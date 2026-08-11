@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="robots" content="noindex,nofollow">
+  <title>لوحة إدارة مرصد الذكاء الاصطناعي العربي</title>
+  <link rel="stylesheet" href="/admin/admin.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">انتقل إلى المحتوى</a>
+  <header class="topbar">
+    <div>
+      <strong>مرصد الذكاء الاصطناعي العربي</strong>
+      <span>لوحة الإدارة المحكومة</span>
+    </div>
+    <div id="session-tools" class="session-tools" hidden>
+      <span id="current-user"></span>
+      <button id="logout-button" type="button" class="secondary">تسجيل الخروج</button>
+    </div>
+  </header>
+
+  <main id="main" class="shell" tabindex="-1">
+    <section id="login-panel" class="panel narrow" aria-labelledby="login-title">
+      <p class="eyebrow">وصول مقيّد</p>
+      <h1 id="login-title">تسجيل دخول الفريق</h1>
+      <p>لا توجد بيانات دخول افتراضية. يجب إنشاء المالك الأول من أمر Bootstrap الآمن.</p>
+      <form id="login-form" novalidate>
+        <label>البريد الإلكتروني<input id="login-email" type="email" autocomplete="username" required maxlength="254"></label>
+        <label>كلمة المرور<input id="login-password" type="password" autocomplete="current-password" required maxlength="256"></label>
+        <button type="submit">تسجيل الدخول</button>
+      </form>
+    </section>
+
+    <section id="app-panel" hidden>
+      <div class="hero">
+        <div><p class="eyebrow">تحرير موثّق</p><h1>إدارة المحتوى والمصادر والصلاحيات</h1></div>
+        <p id="global-status" role="status" aria-live="polite">جاهز.</p>
+      </div>
+
+      <div class="grid two">
+        <section class="panel" data-permission="content:write">
+          <h2>إنشاء مادة جديدة</h2>
+          <form id="content-form" class="form-grid">
+            <label>العنوان<input id="content-title" required maxlength="300"></label>
+            <label>Slug<input id="content-slug" dir="ltr" required pattern="[a-z0-9-]+" maxlength="180"></label>
+            <label>المسار العام<input id="content-url" dir="ltr" value="/" required maxlength="500"></label>
+            <label>القسم<input id="content-section" dir="ltr" value="news" required maxlength="80"></label>
+            <label>اللغة<input id="content-language" dir="ltr" value="ar" required maxlength="12"></label>
+            <label>سلطة المصدر<input id="content-authority" type="number" min="0" max="10" step="0.5" value="0"></label>
+            <label class="full">الملخص<textarea id="content-summary" required minlength="10" maxlength="2000"></textarea></label>
+            <label class="full">المتن<textarea id="content-body" required minlength="20" maxlength="200000"></textarea></label>
+            <button type="submit">حفظ كمسودة</button>
+          </form>
+        </section>
+
+        <section class="panel" data-permission="users:manage">
+          <h2>إضافة عضو فريق</h2>
+          <form id="user-form" class="form-grid">
+            <label>الاسم<input id="user-name" required maxlength="160"></label>
+            <label>البريد<input id="user-email" type="email" required maxlength="254"></label>
+            <label>الدور<select id="user-role"><option value="editor">محرر</option><option value="reviewer">مراجع</option><option value="publisher">ناشر</option><option value="analyst">محلل</option><option value="admin">مدير</option><option value="owner">مالك</option></select></label>
+            <label>كلمة المرور المؤقتة<input id="user-password" type="password" required minlength="14" maxlength="256" autocomplete="new-password"></label>
+            <button type="submit">إنشاء المستخدم</button>
+          </form>
+        </section>
+      </div>
+
+      <section class="panel">
+        <div class="section-heading"><h2>المحتوى</h2><button id="refresh-content" type="button" class="secondary">تحديث</button></div>
+        <div id="content-list" class="cards" aria-live="polite"></div>
+      </section>
+
+      <section id="selected-panel" class="panel" hidden>
+        <div class="section-heading"><div><p class="eyebrow">المادة المحددة</p><h2 id="selected-title">—</h2></div><span id="selected-status" class="badge">—</span></div>
+        <p id="selected-summary"></p>
+        <div id="workflow-actions" class="actions"></div>
+        <div class="grid two">
+          <form id="source-form" data-permission="sources:write" class="subpanel">
+            <h3>إرفاق مصدر</h3>
+            <label>مفتاح المصدر<input id="source-key" dir="ltr" required pattern="[a-z0-9-]+"></label>
+            <label>العنوان<input id="source-title" required></label>
+            <label>الناشر<input id="source-publisher" required></label>
+            <label>الرابط<input id="source-url" type="url" dir="ltr" required></label>
+            <label>النوع<input id="source-type" value="official-document" required></label>
+            <label>الموثوقية<select id="source-reliability"><option value="primary">أولي</option><option value="secondary">ثانوي</option><option value="tertiary">ثالثي</option><option value="unverified">غير متحقق</option></select></label>
+            <button type="submit">إضافة المصدر</button>
+          </form>
+          <form id="claim-form" data-permission="claims:write" class="subpanel">
+            <h3>إضافة ادعاء</h3>
+            <label>مفتاح الادعاء<input id="claim-key" dir="ltr" required pattern="[a-z0-9-]+"></label>
+            <label>النص<textarea id="claim-text" required></textarea></label>
+            <label>النوع<select id="claim-type"><option value="verified-fact">حقيقة قابلة للتحقق</option><option value="estimate">تقدير</option><option value="inference">استنتاج</option><option value="third-party-claim">ادعاء طرف ثالث</option></select></label>
+            <label>الثقة<select id="claim-confidence"><option value="unverified">غير متحقق</option><option value="low">منخفضة</option><option value="medium">متوسطة</option><option value="high">عالية</option></select></label>
+            <button type="submit">إضافة الادعاء</button>
+          </form>
+        </div>
+        <div class="grid two"><div><h3>المصادر</h3><div id="source-list" class="stack"></div></div><div><h3>الادعاءات</h3><div id="claim-list" class="stack"></div></div></div>
+      </section>
+
+      <section class="panel" data-permission="users:read">
+        <div class="section-heading"><h2>المستخدمون</h2><button id="refresh-users" type="button" class="secondary">تحديث</button></div>
+        <div id="user-list" class="stack"></div>
+      </section>
+
+      <section class="panel" data-permission="audit:read">
+        <div class="section-heading"><h2>سجل التدقيق</h2><button id="refresh-audit" type="button" class="secondary">تحديث</button></div>
+        <div id="audit-list" class="stack"></div>
+      </section>
+    </section>
+  </main>
+  <script src="/admin/admin.js" defer></script>
+</body>
+</html>

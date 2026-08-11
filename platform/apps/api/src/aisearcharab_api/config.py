@@ -45,10 +45,26 @@ class Settings:
     max_search_limit: int
     log_queries: bool
     query_hash_key: str | None = None
+    session_ttl_minutes: int = 720
+    login_max_failures: int = 5
+    login_lock_minutes: int = 15
+    password_min_length: int = 14
 
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
+
+    @property
+    def secure_cookies(self) -> bool:
+        return self.environment in {"staging", "production"}
+
+    @property
+    def session_cookie_name(self) -> str:
+        return "__Host-ais-admin" if self.secure_cookies else "ais_admin_session"
+
+    @property
+    def csrf_cookie_name(self) -> str:
+        return "__Host-ais-csrf" if self.secure_cookies else "ais_admin_csrf"
 
     def validate(self) -> None:
         if self.environment not in {"development", "test", "staging", "production"}:
@@ -59,6 +75,14 @@ class Settings:
             raise ConfigurationError("API_PREFIX must start with '/' and include a version segment")
         if not 1 <= self.max_search_limit <= 100:
             raise ConfigurationError("MAX_SEARCH_LIMIT must be between 1 and 100")
+        if not 15 <= self.session_ttl_minutes <= 1440:
+            raise ConfigurationError("SESSION_TTL_MINUTES must be between 15 and 1440")
+        if not 3 <= self.login_max_failures <= 20:
+            raise ConfigurationError("LOGIN_MAX_FAILURES must be between 3 and 20")
+        if not 1 <= self.login_lock_minutes <= 1440:
+            raise ConfigurationError("LOGIN_LOCK_MINUTES must be between 1 and 1440")
+        if not 12 <= self.password_min_length <= 128:
+            raise ConfigurationError("PASSWORD_MIN_LENGTH must be between 12 and 128")
         if not self.allowed_origins:
             raise ConfigurationError("ALLOWED_ORIGINS must contain at least one explicit origin")
         if any(not _valid_origin(origin, require_https=self.is_production) for origin in self.allowed_origins):
@@ -84,6 +108,10 @@ def get_settings() -> Settings:
         max_search_limit=_int("MAX_SEARCH_LIMIT", os.getenv("MAX_SEARCH_LIMIT", "20")),
         log_queries=_bool(os.getenv("LOG_SEARCH_QUERIES", "false")),
         query_hash_key=os.getenv("QUERY_HASH_KEY") or None,
+        session_ttl_minutes=_int("SESSION_TTL_MINUTES", os.getenv("SESSION_TTL_MINUTES", "720")),
+        login_max_failures=_int("LOGIN_MAX_FAILURES", os.getenv("LOGIN_MAX_FAILURES", "5")),
+        login_lock_minutes=_int("LOGIN_LOCK_MINUTES", os.getenv("LOGIN_LOCK_MINUTES", "15")),
+        password_min_length=_int("PASSWORD_MIN_LENGTH", os.getenv("PASSWORD_MIN_LENGTH", "14")),
     )
     settings.validate()
     return settings

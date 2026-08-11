@@ -4,10 +4,16 @@ on:
   push:
     paths:
       - "platform/**"
+      - "static/js/search.js"
+      - "layouts/_default/baseof.html"
+      - "hugo.toml"
       - ".github/workflows/platform-api.yml"
   pull_request:
     paths:
       - "platform/**"
+      - "static/js/search.js"
+      - "layouts/_default/baseof.html"
+      - "hugo.toml"
       - ".github/workflows/platform-api.yml"
 
 permissions:
@@ -48,11 +54,28 @@ jobs:
       - name: Evaluate lexical search
         run: python scripts/evaluate_search.py
 
-      - name: Verify OpenAPI contract is current
+      - name: Generate OpenAPI contract
+        run: python scripts/export_openapi.py --output ../../contracts/openapi.generated.json
+
+      - name: Validate generated OpenAPI JSON
+        run: python -m json.tool ../../contracts/openapi.generated.json > /dev/null
+
+      - name: Upload generated OpenAPI contract
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3-openapi-contract
+          path: platform/contracts/openapi.generated.json
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Verify pinned OpenAPI digest
+        shell: bash
         run: |
-          cp ../../contracts/openapi.json /tmp/openapi.committed.json
-          python scripts/export_openapi.py
-          diff -u /tmp/openapi.committed.json ../../contracts/openapi.json
+          set -euo pipefail
+          expected="$(tr -d '[:space:]' < ../../contracts/openapi.sha256)"
+          actual="$(sha256sum ../../contracts/openapi.generated.json | awk '{print $1}')"
+          test -n "$expected"
+          test "$actual" = "$expected"
 
       - name: Verify database migration
         env:
@@ -61,7 +84,7 @@ jobs:
         run: |
           rm -f /tmp/aisearcharab-platform-ci.db
           alembic upgrade head
-          alembic current | grep 20260805_0001
+          alembic current | grep 20260805_0002
           alembic check
 
       - name: Validate Docker Compose configuration
