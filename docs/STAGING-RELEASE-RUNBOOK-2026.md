@@ -4,6 +4,12 @@
 
 This runbook turns the repository gates into an operational Staging release procedure. It is intentionally provider-neutral. Production deployment is not authorized by this document and remains blocked until the acceptance gates in `PERFECT-MASTER-2026.md` are independently evidenced.
 
+## Deployment governance invariant
+
+Production publishing is explicit and human-triggered. GitHub Pages deployment is permitted only from `refs/heads/main`; a workflow dispatch from a feature or pull-request branch may build for diagnostics but must not upload or deploy the production Pages artifact. A successful internal static artifact is not external Staging evidence.
+
+Provider integrations such as Vercel remain `BLOCKED` whenever the deployment status is failed, build logs are inaccessible to the authorized release operator, or no independently reachable HTTPS preview can be verified. Do not add provider-specific configuration merely to make a status green without first identifying and reproducing the build failure.
+
 ## 1. Required Staging topology
 
 Staging must use the same responsibility boundaries intended for production:
@@ -168,7 +174,7 @@ Delete or archive test content after evidence is captured. Do not capture entere
 
 ## 9. Search quality and load evidence
 
-Repository fixture metrics are regression checks, not launch evidence. Build a human-reviewed Arabic query set and retain it outside public logs when it includes sensitive terms.
+Repository fixture metrics are regression checks, not launch evidence. Build a human-reviewed Arabic query set and retain it outside public logs when it includes sensitive terms. Production Release Evidence requires at least 500 reviewed queries before `search.benchmark_verified=true` is eligible.
 
 Run the aggregate-only load probe:
 
@@ -185,7 +191,7 @@ python scripts/load_probe.py \
 
 Record only the aggregate JSON output. The probe intentionally does not print query text or response bodies.
 
-For production approval, use a benchmark large enough to report MRR@10, NDCG@10, Recall@5/10, Precision@5, zero-result rate and segment metrics alongside P50/P95/P99 latency.
+For production approval, report MRR@10, NDCG@10, Recall@5/10, Precision@5, zero-result rate and segment metrics alongside P50/P95/P99 latency.
 
 ## 10. Observability acceptance
 
@@ -220,4 +226,4 @@ A production approval requires an actual rollback/restore drill, not only this w
 
 Use the project status vocabulary exactly. Staging deployment alone is not `PRODUCTION_READY`.
 
-TOTP MFA is now a code-level control and must be proven in the real Staging environment and included in the independent security review. Promotion beyond `TESTED_IN_STAGING` additionally requires independent accessibility evidence, real search-quality evidence, managed backup/restore evidence, distributed rate limiting/WAF, external observability, DNS/TLS/live-header verification, rollback evidence and explicit human release approval.
+TOTP MFA is now a code-level control and must be proven in the real Staging environment and included in the independent security review. Promotion beyond `TESTED_IN_STAGING` additionally requires independent accessibility evidence, real search-quality evidence, managed backup/restore evidence, distributed rate limiting/WAF, external observability, DNS/TLS/live-header verification, rollback evidence, verified branch governance and explicit human release approval.
