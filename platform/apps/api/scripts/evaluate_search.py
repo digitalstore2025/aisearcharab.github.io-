@@ -9,16 +9,14 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
-
-from aisearcharab_api.models import ContentItem
-from aisearcharab_api.search import rank_items
-
 FIXTURES = ROOT / "tests" / "fixtures"
 
 
-def load_documents() -> list[ContentItem]:
+def load_documents() -> list[object]:
+    from aisearcharab_api.models import ContentItem
+
     rows = json.loads((FIXTURES / "search_documents.json").read_text(encoding="utf-8"))
-    documents: list[ContentItem] = []
+    documents: list[object] = []
     for row in rows:
         if row["status"] != "published" or not row["is_indexed"]:
             continue
@@ -40,6 +38,8 @@ def _dcg(binary_relevance: list[int], cutoff: int) -> float:
 
 
 def evaluate() -> dict[str, float | int]:
+    from aisearcharab_api.search import rank_items
+
     documents = load_documents()
     queries = json.loads((FIXTURES / "golden_queries.json").read_text(encoding="utf-8"))
     reciprocal_ranks: list[float] = []
@@ -106,8 +106,6 @@ def main() -> int:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(rendered, encoding="utf-8")
 
-    # These gates protect the tiny regression fixture only. They are deliberately
-    # not labelled as production search-quality evidence.
     if metrics["mrr_at_10"] < 0.85 or metrics["recall_at_5"] < 1.0 or metrics["zero_result_rate"] > 0.0:
         return 1
     return 0
