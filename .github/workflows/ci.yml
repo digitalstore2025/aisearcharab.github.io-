@@ -29,6 +29,9 @@ jobs:
       - name: Compile Python
         run: python -m compileall -q scripts tests
 
+      - name: Enforce project identity boundary
+        run: python scripts/validate_project_identity.py
+
       - name: Scan working tree for obvious secrets
         run: python scripts/scan_sensitive_data.py
 
