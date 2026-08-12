@@ -1,0 +1,58 @@
+name: Frontend quality
+
+on:
+  push:
+    paths:
+      - "src/**"
+      - "scripts/frontend-lint.mjs"
+      - "scripts/verify-frontend-build.mjs"
+      - "package.json"
+      - "tsconfig.json"
+      - "vite.config.ts"
+      - "vercel.json"
+      - ".github/workflows/frontend-quality.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "scripts/frontend-lint.mjs"
+      - "scripts/verify-frontend-build.mjs"
+      - "package.json"
+      - "tsconfig.json"
+      - "vite.config.ts"
+      - "vercel.json"
+      - ".github/workflows/frontend-quality.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: frontend-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: npm
+      - name: Install exact dependency graph
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Audit dependency graph
+        run: npm audit --audit-level=high
+      - name: Verify source, types and production bundle
+        run: npm run verify
+      - name: Reject source maps and unexpected artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f dist/index.html
+          if find dist -type f -name '*.map' | grep -q .; then
+            echo 'Production source maps are forbidden' >&2
+            exit 1
+          fi
