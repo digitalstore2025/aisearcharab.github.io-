@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import struct
 from pathlib import Path
 
@@ -27,6 +28,14 @@ def require_text(path: Path, *needles: str) -> str:
         if needle not in text:
             fail(f"{path.relative_to(ROOT)} missing required marker: {needle}")
     return text
+
+
+def require_pattern(path: Path, pattern: str, label: str) -> None:
+    if not path.is_file():
+        fail(f"missing {path.relative_to(ROOT)}")
+    text = path.read_text(encoding="utf-8")
+    if re.search(pattern, text, flags=re.IGNORECASE) is None:
+        fail(f"{path.relative_to(ROOT)} missing required {label}")
 
 
 def main() -> None:
@@ -87,12 +96,11 @@ def main() -> None:
         "register(\"/sw.js\"",
     )
     require_text(PUBLIC / "offline.html", "noindex,nofollow")
-    require_text(
-        PUBLIC / "index.html",
-        'rel="manifest"',
-        'rel="apple-touch-icon"',
-        "js/pwa-register.js",
-    )
+
+    index = PUBLIC / "index.html"
+    require_pattern(index, r"rel=(?:\"manifest\"|'manifest'|manifest)(?:\s|>)", "manifest link")
+    require_pattern(index, r"rel=(?:\"apple-touch-icon\"|'apple-touch-icon'|apple-touch-icon)(?:\s|>)", "Apple touch icon")
+    require_pattern(index, r"(?:src=)?(?:\"|')?/?js/pwa-register\.js", "PWA registration script")
 
     print("PWA validation passed")
 
