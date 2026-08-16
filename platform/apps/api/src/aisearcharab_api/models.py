@@ -189,6 +189,20 @@ class MfaRecoveryCode(Base):
     user: Mapped[User] = relationship(back_populates="recovery_codes")
 
 
+class LoginThrottle(Base):
+    __tablename__ = "login_throttles"
+    __table_args__ = (
+        CheckConstraint("failure_count >= 0", name="ck_login_throttle_failure_count"),
+        Index("ix_login_throttles_updated_at", "updated_at"),
+    )
+
+    key_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    failure_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    window_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow)
+    blocked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utcnow, onupdate=utcnow)
+
+
 class AuditEvent(Base):
     __tablename__ = "audit_events"
     __table_args__ = (
