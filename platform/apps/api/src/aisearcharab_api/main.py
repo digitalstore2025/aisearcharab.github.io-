@@ -30,7 +30,7 @@ from .search import rank_items
 
 ADMIN_STATIC = Path(__file__).resolve().parent / "admin_static"
 _PUBLIC_CLAIM_STATES = {"reviewed", "published"}
-EXPECTED_ALEMBIC_REVISION = "20260816_0007"
+EXPECTED_ALEMBIC_REVISION = "20260816_0008"
 
 
 def _public_content(item) -> PublicContentDetail:
