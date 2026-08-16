@@ -58,6 +58,7 @@ class ProviderRun(Base):
     model: Mapped[str] = mapped_column(String(120), nullable=False)
     status: Mapped[str] = mapped_column(String(24), nullable=False)
     answer_text: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    raw_response_payload: Mapped[str] = mapped_column(Text, nullable=False)
     raw_response_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
     error_code: Mapped[str | None] = mapped_column(String(80), nullable=True)
     latency_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
