@@ -58,7 +58,8 @@ jobs:
         run: |
           if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
             test -n "${PAGES_BASE_URL}"
-            hugo --baseURL "${PAGES_BASE_URL}/" --minify --gc
+            NORMALIZED_BASE_URL="${PAGES_BASE_URL%/}/"
+            hugo --baseURL "${NORMALIZED_BASE_URL}" --minify --gc
           else
             hugo --minify --gc
           fi
