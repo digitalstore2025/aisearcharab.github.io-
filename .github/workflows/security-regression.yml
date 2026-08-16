@@ -53,7 +53,7 @@ jobs:
         run: python -m compileall -q src tests scripts alembic
 
       - name: Run adversarial security tests
-        run: python -m pytest tests/test_security.py tests/test_authorization_boundaries.py
+        run: python -m pytest tests/test_security.py tests/test_authorization_boundaries.py tests/test_login_throttle.py
 
   hardened-runtime:
     needs: source-and-unit
@@ -66,6 +66,7 @@ jobs:
       ENFORCE_SEPARATION_OF_DUTIES: "true"
       REQUIRE_MFA_FOR_PRIVILEGED: "true"
       MFA_ENCRYPTION_KEY: "ci-only-not-a-secret-mfa-encryption-key-2026"
+      LOGIN_THROTTLE_KEY: "ci-only-login-throttle-key-not-a-secret-2026"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:

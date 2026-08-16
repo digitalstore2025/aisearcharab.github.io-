@@ -46,15 +46,23 @@ def require_sw_semantics(path: Path) -> None:
         "install listener": r"self\.addEventListener\(\s*['\"]install['\"]",
         "fetch listener": r"self\.addEventListener\(\s*['\"]fetch['\"]",
         "non-GET bypass": r"request\.method\s*!==\s*['\"]GET['\"]",
-        "API bypass": r"url\.pathname\.startsWith\(\s*['\"]/api/['\"]\s*\)",
         "cross-origin bypass": r"url\.origin\s*!==\s*self\.location\.origin",
+        "scope-aware URL derivation": r"new URL\(\s*path\.replace",
         "private/no-store guard": r"no-store\|private",
         "bounded runtime cache": r"MAX_RUNTIME_ENTRIES\s*=\s*\d+",
         "cross-cache lookup": r"caches\.match\(\s*request\s*\)",
+        "sensitive route guard": r"isSensitivePath\(\s*path\s*\)",
     }
     for label, pattern in rules.items():
         if re.search(pattern, source, flags=re.IGNORECASE) is None:
             fail(f"{path.relative_to(ROOT)} missing required semantic: {label}")
+
+    for prefix in ("/api/", "/v1/", "/admin", "/health/"):
+        if prefix not in source:
+            fail(f"{path.relative_to(ROOT)} must bypass sensitive prefix {prefix}")
+    for exact in ("/docs", "/openapi.json", "/index.json"):
+        if exact not in source:
+            fail(f"{path.relative_to(ROOT)} must bypass sensitive path {exact}")
 
 
 def main() -> None:
@@ -82,20 +90,22 @@ def main() -> None:
     if missing:
         fail(f"manifest missing fields: {', '.join(missing)}")
 
-    if manifest["scope"] != "/":
-        fail("manifest scope must remain root-scoped")
+    if manifest["id"] != "." or manifest["scope"] != "./":
+        fail("manifest id/scope must remain base-path portable")
+    if not isinstance(manifest["start_url"], str) or not manifest["start_url"].startswith("./"):
+        fail("manifest start_url must be relative to the deployed base path")
     if manifest["display"] not in {"standalone", "fullscreen", "minimal-ui"}:
         fail("manifest display must be installable")
 
     icon_specs = {
-        "/icons/icon-192.png": (192, 192),
-        "/icons/icon-512.png": (512, 512),
+        "icons/icon-192.png": (192, 192),
+        "icons/icon-512.png": (512, 512),
     }
     declared = {icon.get("src"): icon for icon in manifest.get("icons", [])}
     for src, expected in icon_specs.items():
         if src not in declared:
             fail(f"manifest does not declare {src}")
-        icon_path = PUBLIC / src.lstrip("/")
+        icon_path = PUBLIC / src
         if not icon_path.is_file():
             fail(f"missing generated icon {src}")
         actual = png_size(icon_path)
@@ -103,10 +113,12 @@ def main() -> None:
             fail(f"{src} dimensions are {actual}, expected {expected}")
 
     require_sw_semantics(PUBLIC / "sw.js")
-    require_pattern(
-        PUBLIC / "js" / "pwa-register.js",
-        r"navigator\.serviceWorker\.register\(\s*['\"]/sw\.js['\"]",
-        "service worker registration",
+    registration = PUBLIC / "js" / "pwa-register.js"
+    require_text(
+        registration,
+        'new URL("../", scriptUrl)',
+        'new URL("sw.js", scopeUrl)',
+        "scope: scopeUrl.pathname",
     )
     require_text(PUBLIC / "offline.html", "noindex,nofollow")
 

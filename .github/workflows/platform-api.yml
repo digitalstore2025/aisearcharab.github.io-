@@ -158,14 +158,15 @@ jobs:
           ALLOWED_ORIGINS: http://localhost:8000
         run: |
           alembic upgrade head
-          alembic current | grep 20260808_0005
+          alembic current | grep 20260816_0006
           python - <<'PY'
           from sqlalchemy import create_engine, text
           engine = create_engine("postgresql+psycopg://aisearcharab_ci:ci-only-password@127.0.0.1:5432/aisearcharab_ci")
           with engine.connect() as connection:
-              assert connection.scalar(text("select version_num from alembic_version")) == "20260808_0005"
+              assert connection.scalar(text("select version_num from alembic_version")) == "20260816_0006"
               assert connection.scalar(text("select to_regclass('public.ix_content_items_search_fts')")) == "ix_content_items_search_fts"
               assert connection.scalar(text("select to_regclass('public.mfa_recovery_codes')")) == "mfa_recovery_codes"
+              assert connection.scalar(text("select to_regclass('public.login_throttles')")) == "login_throttles"
           PY
           python scripts/verify_postgres_search.py
           python scripts/verify_postgres_mfa_concurrency.py
@@ -197,6 +198,7 @@ jobs:
       ENFORCE_SEPARATION_OF_DUTIES: "true"
       REQUIRE_MFA_FOR_PRIVILEGED: "true"
       MFA_ENCRYPTION_KEY: "ci-only-not-a-secret-mfa-encryption-key-2026"
+      LOGIN_THROTTLE_KEY: "ci-only-login-throttle-key-not-a-secret-2026"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -274,7 +276,7 @@ jobs:
       - name: Generate fail-closed release evidence
         env:
           RELEASE_STATUS: INTEGRATED_NOT_TESTED
-          RELEASE_MIGRATION: "20260808_0005"
+          RELEASE_MIGRATION: "20260816_0006"
           RELEASE_PR: ${{ github.event.pull_request.number }}
           RELEASE_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
           RELEASE_TESTED_SHA: ${{ github.sha }}

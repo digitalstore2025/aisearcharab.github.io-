@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from .audit import record_audit
 from .auth import Principal, get_principal, require_csrf
 from .database import get_db
+from .login_throttle import clear_login_throttle, enforce_login_throttle, record_login_failure
 from .models import AdminSession, User
 from .rbac import permissions_for_role
 from .schemas import LoginRequest, LoginResponse, StepUpRequest, StepUpResponse, UserPublic
@@ -88,6 +89,11 @@ def _lock_session(db: Session, session_id: str) -> AdminSession:
     return admin_session
 
 
+def _invalid_identity(value: str) -> str:
+    normalized = value.strip().casefold()[:254]
+    return normalized or "<invalid-email>"
+
+
 @router.post("/login", response_model=LoginResponse)
 def login(
     payload: LoginRequest,
@@ -99,12 +105,20 @@ def login(
     try:
         email = normalize_email(payload.email)
     except ValueError:
+        throttle_key = enforce_login_throttle(db, request, _invalid_identity(payload.email))
         perform_dummy_password_check(payload.password)
+        record_login_failure(db, request, throttle_key)
+        db.commit()
         time.sleep(0.08)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
 
-    # Serialise per-account login state in PostgreSQL so concurrent failures cannot
-    # lose increments or bypass the configured lock threshold.
+    # Throttle the source/account pair before expensive password verification. The
+    # persisted key is HMAC-protected and never stores a raw peer address or email.
+    throttle_key = enforce_login_throttle(db, request, email)
+
+    # Serialise account state for successful login/session issuance. Pre-auth
+    # failures deliberately do not mutate the global account lock counter: doing so
+    # lets an unauthenticated attacker turn lockout protection into account DoS.
     user = db.scalar(select(User).where(User.email == email).with_for_update())
     now = datetime.now(timezone.utc)
     if user is None:
@@ -117,11 +131,7 @@ def login(
 
     valid = user is not None and user.is_active and not locked and password_matches
     if not valid:
-        if user is not None and not locked:
-            user.failed_login_count += 1
-            if user.failed_login_count >= settings.login_max_failures:
-                user.locked_until = now + timedelta(minutes=settings.login_lock_minutes)
-                user.failed_login_count = 0
+        throttled = record_login_failure(db, request, throttle_key)
         record_audit(
             db,
             action="auth.login",
@@ -130,12 +140,13 @@ def login(
             target_type="user",
             target_id=user.id if user else None,
             request_id=getattr(request.state, "request_id", None),
-            metadata={"reason": "invalid_credentials"},
+            metadata={"reason": "invalid_credentials", "source_throttled": throttled},
         )
         db.commit()
         time.sleep(0.08)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid credentials")
 
+    clear_login_throttle(db, throttle_key)
     user.failed_login_count = 0
     user.locked_until = None
     user.last_login_at = now
