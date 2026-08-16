@@ -12,6 +12,7 @@
   <link rel="canonical" href="{{ .Permalink }}">
   <link rel="alternate" type="application/rss+xml" title="{{ site.Title }}" href="{{ "index.xml" | absURL }}">
   <link rel="icon" href="{{ "favicon.svg" | relURL }}" type="image/svg+xml">
+  <link rel="apple-touch-icon" sizes="192x192" href="{{ "icons/icon-192.png" | relURL }}">
   <link rel="manifest" href="{{ "site.webmanifest" | relURL }}">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -57,5 +58,6 @@
       <p class="copyright">© {{ now.Year }} AI Search Arab</p>
     </div>
   </footer>
+  <script src="{{ "js/pwa-register.js" | relURL }}" defer></script>
 </body>
 </html>
