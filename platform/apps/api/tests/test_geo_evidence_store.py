@@ -5,7 +5,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
 from aisearcharab_api.geo.evidence_models import Citation, GeoQuery, ProviderRun
-from aisearcharab_api.geo.evidence_store import MalformedProviderOutput, append_provider_result
+from aisearcharab_api.geo.evidence_store import (
+    MAX_CITATIONS,
+    MAX_RAW_PAYLOAD_BYTES,
+    MalformedProviderOutput,
+    append_provider_result,
+)
 from aisearcharab_api.geo.providers.base import ProviderCitation, ProviderResult
 from conftest import csrf_from_client
 
@@ -107,3 +112,34 @@ def test_missing_raw_payload_is_rejected(
         )
         with pytest.raises(MalformedProviderOutput):
             append_provider_result(db, organization_id=org_id, project_id=project_id, query_id=query_id, result=bad)
+
+
+def test_oversized_raw_payload_and_citation_fanout_are_rejected(
+    client: TestClient,
+    owner_credentials: dict[str, str],
+    session_factory: sessionmaker[Session],
+) -> None:
+    org_id, project_id, query_id = _query_id(client, owner_credentials)
+    with session_factory() as db:
+        query = db.query(GeoQuery).filter_by(id=query_id).one()
+        too_large = ProviderResult(
+            provider="provider",
+            model="model",
+            query=query.text,
+            answer_text="answer",
+            citations=(),
+            raw_payload="x" * (MAX_RAW_PAYLOAD_BYTES + 1),
+        )
+        with pytest.raises(MalformedProviderOutput, match="payload exceeds"):
+            append_provider_result(db, organization_id=org_id, project_id=project_id, query_id=query_id, result=too_large)
+
+        too_many = ProviderResult(
+            provider="provider",
+            model="model",
+            query=query.text,
+            answer_text="answer",
+            citations=tuple(ProviderCitation(url=f"https://example.org/{i}") for i in range(MAX_CITATIONS + 1)),
+            raw_payload="{}",
+        )
+        with pytest.raises(MalformedProviderOutput, match="citation count"):
+            append_provider_result(db, organization_id=org_id, project_id=project_id, query_id=query_id, result=too_many)
