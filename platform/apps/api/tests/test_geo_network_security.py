@@ -5,13 +5,15 @@ import pytest
 from aisearcharab_api.geo.network_security import UnsafeTargetError, resolve_public_target, validate_http_url, validate_redirect
 
 
-def test_rejects_local_and_private_targets(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_rejects_local_private_metadata_and_cgnat_targets(monkeypatch: pytest.MonkeyPatch) -> None:
     with pytest.raises(UnsafeTargetError):
         validate_http_url("http://localhost/")
     with pytest.raises(UnsafeTargetError):
         resolve_public_target("http://127.0.0.1/")
     with pytest.raises(UnsafeTargetError):
         resolve_public_target("http://169.254.169.254/latest/meta-data/")
+    with pytest.raises(UnsafeTargetError):
+        resolve_public_target("http://100.64.0.1/")
 
     monkeypatch.setattr(
         socket,
@@ -46,10 +48,22 @@ def test_redirect_is_reresolved_and_private_hop_is_denied(monkeypatch: pytest.Mo
         return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (ip, 443))]
 
     monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
-    first = resolve_public_target("https://safe.example/")
+    first = resolve_public_target("https://safe.example/start")
     with pytest.raises(UnsafeTargetError):
         validate_redirect(first, "https://redirected.example/private")
     assert calls == ["safe.example", "redirected.example"]
+
+
+def test_relative_redirect_is_joined_then_reresolved(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("1.1.1.1", 443))],
+    )
+    first = resolve_public_target("https://safe.example/a/start")
+    redirected = validate_redirect(first, "../next")
+    assert redirected.url == "https://safe.example/next"
+    assert redirected.addresses == ("1.1.1.1",)
 
 
 def test_rejects_credentials_and_nonstandard_ports() -> None:
