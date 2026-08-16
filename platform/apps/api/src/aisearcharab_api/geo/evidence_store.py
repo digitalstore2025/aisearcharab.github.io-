@@ -50,8 +50,9 @@ def append_provider_result(
 ) -> ProviderRun:
     """Persist one normalized provider result and citations as append-only evidence.
 
-    No update/delete operation is provided by this module. A transaction either
-    stores the run and all normalized citations or stores nothing.
+    The raw upstream payload is stored together with its SHA-256 digest so later
+    verification can reproduce the provenance check. This module intentionally
+    exposes no update/delete operation for provider evidence.
     """
     query = db.scalar(
         select(GeoQuery).where(
@@ -72,6 +73,7 @@ def append_provider_result(
         model=result.model.strip(),
         status="completed",
         answer_text=result.answer_text,
+        raw_response_payload=result.raw_payload,
         raw_response_sha256=hashlib.sha256(result.raw_payload.encode("utf-8")).hexdigest(),
         latency_ms=result.latency_ms,
     )
