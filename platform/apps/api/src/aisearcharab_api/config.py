@@ -62,6 +62,10 @@ class Settings:
     step_up_ttl_minutes: int = 10
     login_max_failures: int = 5
     login_lock_minutes: int = 15
+    login_throttle_key: str | None = None
+    login_throttle_max_failures: int = 8
+    login_throttle_window_seconds: int = 300
+    login_throttle_block_seconds: int = 300
     password_min_length: int = 14
     enforce_separation_of_duties: bool = False
     require_mfa_for_privileged: bool = False
@@ -114,6 +118,14 @@ class Settings:
             raise ConfigurationError("LOGIN_MAX_FAILURES must be between 3 and 20")
         if not 1 <= self.login_lock_minutes <= 1440:
             raise ConfigurationError("LOGIN_LOCK_MINUTES must be between 1 and 1440")
+        if not 3 <= self.login_throttle_max_failures <= 100:
+            raise ConfigurationError("LOGIN_THROTTLE_MAX_FAILURES must be between 3 and 100")
+        if not 30 <= self.login_throttle_window_seconds <= 3600:
+            raise ConfigurationError("LOGIN_THROTTLE_WINDOW_SECONDS must be between 30 and 3600")
+        if not 30 <= self.login_throttle_block_seconds <= 3600:
+            raise ConfigurationError("LOGIN_THROTTLE_BLOCK_SECONDS must be between 30 and 3600")
+        if self.login_throttle_key is not None and len(self.login_throttle_key.encode("utf-8")) < 32:
+            raise ConfigurationError("LOGIN_THROTTLE_KEY must contain at least 32 bytes")
         if not 12 <= self.password_min_length <= 128:
             raise ConfigurationError("PASSWORD_MIN_LENGTH must be between 12 and 128")
         if not 2 <= self.mfa_enrollment_ttl_minutes <= 30:
@@ -135,6 +147,8 @@ class Settings:
                 raise ConfigurationError("REQUIRE_MFA_FOR_PRIVILEGED must be enabled in staging and production")
             if not self.mfa_encryption_key:
                 raise ConfigurationError("MFA_ENCRYPTION_KEY is required in staging and production")
+            if not self.login_throttle_key:
+                raise ConfigurationError("LOGIN_THROTTLE_KEY is required in staging and production")
         if self.is_production:
             if self.database_url.startswith("sqlite"):
                 raise ConfigurationError("SQLite is not allowed in production")
@@ -166,6 +180,10 @@ def get_settings() -> Settings:
         step_up_ttl_minutes=_int("STEP_UP_TTL_MINUTES", os.getenv("STEP_UP_TTL_MINUTES", "10")),
         login_max_failures=_int("LOGIN_MAX_FAILURES", os.getenv("LOGIN_MAX_FAILURES", "5")),
         login_lock_minutes=_int("LOGIN_LOCK_MINUTES", os.getenv("LOGIN_LOCK_MINUTES", "15")),
+        login_throttle_key=os.getenv("LOGIN_THROTTLE_KEY") or None,
+        login_throttle_max_failures=_int("LOGIN_THROTTLE_MAX_FAILURES", os.getenv("LOGIN_THROTTLE_MAX_FAILURES", "8")),
+        login_throttle_window_seconds=_int("LOGIN_THROTTLE_WINDOW_SECONDS", os.getenv("LOGIN_THROTTLE_WINDOW_SECONDS", "300")),
+        login_throttle_block_seconds=_int("LOGIN_THROTTLE_BLOCK_SECONDS", os.getenv("LOGIN_THROTTLE_BLOCK_SECONDS", "300")),
         password_min_length=_int("PASSWORD_MIN_LENGTH", os.getenv("PASSWORD_MIN_LENGTH", "14")),
         enforce_separation_of_duties=_bool(os.getenv("ENFORCE_SEPARATION_OF_DUTIES", "false")),
         require_mfa_for_privileged=_bool(os.getenv("REQUIRE_MFA_FOR_PRIVILEGED", "false")),
