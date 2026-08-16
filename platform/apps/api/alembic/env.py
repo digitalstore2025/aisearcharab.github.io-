@@ -9,6 +9,7 @@ from aisearcharab_api.config import get_settings
 from aisearcharab_api.database import Base
 from aisearcharab_api import models  # noqa: F401
 from aisearcharab_api.geo import models as geo_models  # noqa: F401
+from aisearcharab_api.geo import evidence_models as geo_evidence_models  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:
