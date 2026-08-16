@@ -143,3 +143,23 @@ def test_oversized_raw_payload_and_citation_fanout_are_rejected(
         )
         with pytest.raises(MalformedProviderOutput, match="citation count"):
             append_provider_result(db, organization_id=org_id, project_id=project_id, query_id=query_id, result=too_many)
+
+
+def test_provider_and_model_identifier_bounds_are_enforced(
+    client: TestClient,
+    owner_credentials: dict[str, str],
+    session_factory: sessionmaker[Session],
+) -> None:
+    org_id, project_id, query_id = _query_id(client, owner_credentials)
+    with session_factory() as db:
+        query = db.query(GeoQuery).filter_by(id=query_id).one()
+        bad = ProviderResult(
+            provider="p" * 81,
+            model="m" * 121,
+            query=query.text,
+            answer_text="answer",
+            citations=(),
+            raw_payload="{}",
+        )
+        with pytest.raises(MalformedProviderOutput, match="provider name"):
+            append_provider_result(db, organization_id=org_id, project_id=project_id, query_id=query_id, result=bad)
