@@ -1,20 +1,46 @@
 {
+  "id": "/",
   "name": "مرصد الذكاء الاصطناعي العربي",
   "short_name": "AI Search Arab",
   "description": "منصة عربية للبحث والرصد والتحليل في الذكاء الاصطناعي.",
   "lang": "ar",
   "dir": "rtl",
-  "start_url": "/",
+  "start_url": "/?source=pwa",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
   "background_color": "#F6F8FA",
   "theme_color": "#0B1F33",
+  "categories": ["news", "education", "productivity"],
   "icons": [
     {
-      "src": "/favicon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any"
+      "src": "/icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "البحث",
+      "short_name": "بحث",
+      "description": "ابحث في المرصد والمصادر المنشورة",
+      "url": "/search/?source=pwa-shortcut",
+      "icons": [{"src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png"}]
+    },
+    {
+      "name": "التحقيقات",
+      "short_name": "تحقيقات",
+      "description": "الوصول إلى التحقيقات المنشورة",
+      "url": "/investigations/?source=pwa-shortcut",
+      "icons": [{"src": "/icons/icon-192.png", "sizes": "192x192", "type": "image/png"}]
     }
   ]
 }
