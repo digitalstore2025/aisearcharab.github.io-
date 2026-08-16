@@ -55,7 +55,9 @@ jobs:
         run: hugo --minify --gc
 
       - name: Validate generated site
-        run: python scripts/validate_build.py
+        run: |
+          python scripts/validate_build.py
+          python scripts/validate_pwa.py
 
       - name: Enforce static performance budgets
         shell: bash
@@ -64,6 +66,8 @@ jobs:
           test "$(wc -c < public/index.html)" -lt 60000
           test "$(wc -c < public/css/main.css)" -lt 40000
           test "$(wc -c < public/js/search.js)" -lt 12000
+          test "$(wc -c < public/sw.js)" -lt 12000
+          test "$(wc -c < public/js/pwa-register.js)" -lt 4000
 
       - name: Verify required public assets
         shell: bash
@@ -76,6 +80,11 @@ jobs:
           test -f public/CNAME
           test -f public/favicon.svg
           test -f public/site.webmanifest
+          test -f public/sw.js
+          test -f public/offline.html
+          test -f public/js/pwa-register.js
+          test -f public/icons/icon-192.png
+          test -f public/icons/icon-512.png
           test -f public/.well-known/security.txt
 
       - name: Upload validated preview artifact
