@@ -3,7 +3,7 @@
   <p class="eyebrow">فهرس المحتوى المنشور</p>
   <h1 id="search-page-title">{{ .Title }}</h1>
   {{ .Content }}
-  <form id="search-form" class="search-form" role="search" action="{{ "/search/" | relURL }}" method="get">
+  <form id="search-form" class="search-form" role="search" action="{{ "search/" | relURL }}" method="get">
     <label class="sr-only" for="search-input">عبارة البحث</label>
     <input id="search-input" class="search-input" name="q" type="search" minlength="2" maxlength="120" placeholder="اكتب كلمتين على الأقل" autocomplete="off" aria-describedby="search-help search-status">
     <button class="search-submit" type="submit">بحث</button>
@@ -13,5 +13,5 @@
   <div id="search-results" class="search-results" aria-label="نتائج البحث"></div>
   <noscript><p class="search-empty">يتطلب البحث تفعيل JavaScript. يمكنك تصفح الأقسام من قائمة الموقع.</p></noscript>
 </section>
-<script src="{{ "/js/search.js" | relURL }}" defer></script>
+<script src="{{ "js/search.js" | relURL }}" defer></script>
 {{ end }}
