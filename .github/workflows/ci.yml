@@ -59,6 +59,14 @@ jobs:
           python scripts/validate_build.py
           python scripts/validate_pwa.py
 
+      - name: Validate project-pages subpath portability
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf public-subpath
+          hugo --baseURL "https://example.invalid/repository/" --destination public-subpath --minify --gc
+          PUBLIC_DIR=public-subpath python scripts/validate_build.py
+
       - name: Enforce static performance budgets
         shell: bash
         run: |

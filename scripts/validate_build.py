@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from html.parser import HTMLParser
 from pathlib import Path
+from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
-PUBLIC = ROOT / "public"
+PUBLIC = Path(os.environ.get("PUBLIC_DIR", str(ROOT / "public"))).resolve()
 REQUIRED_FILES = (
     "index.html",
     "index.json",
@@ -37,6 +39,7 @@ class HeadAuditParser(HTMLParser):
         self.html_dir = ""
         self.title_seen = False
         self.canonical_seen = False
+        self.canonical_href = ""
         self.description_seen = False
         self.main_seen = False
         self.h1_count = 0
@@ -53,7 +56,8 @@ class HeadAuditParser(HTMLParser):
         elif tag == "title":
             self._in_title = True
         elif tag == "link" and values.get("rel") == "canonical":
-            self.canonical_seen = bool(values.get("href"))
+            self.canonical_href = values.get("href", "")
+            self.canonical_seen = bool(self.canonical_href)
         elif tag == "meta" and values.get("name") == "description":
             self.description_seen = bool(values.get("content"))
         elif tag == "main":
@@ -78,20 +82,39 @@ class HeadAuditParser(HTMLParser):
             self._json_buffer.append(data)
 
 
+class InternalURLAuditParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.urls: list[tuple[str, str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        for key, value in attrs:
+            if key in {"href", "src", "action"} and value:
+                self.urls.append((key, value))
+
+
 def validate_required_files(errors: list[str]) -> None:
     for relative in REQUIRED_FILES:
         path = PUBLIC / relative
         if not path.is_file():
-            errors.append(f"missing generated file: public/{relative}")
+            errors.append(f"missing generated file: {path}")
 
 
-def validate_homepage(errors: list[str]) -> None:
+def homepage_document() -> tuple[HeadAuditParser, str] | None:
     path = PUBLIC / "index.html"
     if not path.is_file():
-        return
+        return None
     text = path.read_text(encoding="utf-8")
     parser = HeadAuditParser()
     parser.feed(text)
+    return parser, text
+
+
+def validate_homepage(errors: list[str]) -> None:
+    document = homepage_document()
+    if document is None:
+        return
+    parser, text = document
     if parser.html_lang != "ar":
         errors.append(f"homepage lang must be ar, got {parser.html_lang!r}")
     if parser.html_dir != "rtl":
@@ -117,6 +140,32 @@ def validate_homepage(errors: list[str]) -> None:
         errors.append("homepage does not contain the approved Arabic brand name")
 
 
+def validate_subpath_internal_urls(errors: list[str]) -> None:
+    document = homepage_document()
+    if document is None:
+        return
+    parser, _ = document
+    if not parser.canonical_href:
+        return
+    base_path = urlparse(parser.canonical_href).path or "/"
+    if not base_path.endswith("/"):
+        base_path += "/"
+    if base_path == "/":
+        return
+    for path in PUBLIC.rglob("*.html"):
+        audit = InternalURLAuditParser()
+        audit.feed(path.read_text(encoding="utf-8"))
+        for attribute, value in audit.urls:
+            if not value.startswith("/") or value.startswith("//"):
+                continue
+            if value == base_path.rstrip("/") or value.startswith(base_path):
+                continue
+            errors.append(
+                f"subpath-breaking {attribute}={value!r} in {path.relative_to(ROOT)}; "
+                f"deployment base is {base_path!r}"
+            )
+
+
 def validate_json_assets(errors: list[str]) -> None:
     for relative in ("index.json", "site.webmanifest"):
         path = PUBLIC / relative
@@ -125,12 +174,12 @@ def validate_json_assets(errors: list[str]) -> None:
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
-            errors.append(f"public/{relative} is invalid JSON: {exc}")
+            errors.append(f"{path} is invalid JSON: {exc}")
             continue
         if relative == "index.json" and not isinstance(value, list):
-            errors.append("public/index.json must contain a JSON array")
+            errors.append(f"{path} must contain a JSON array")
         if relative == "site.webmanifest" and not isinstance(value, dict):
-            errors.append("public/site.webmanifest must contain a JSON object")
+            errors.append(f"{path} must contain a JSON object")
 
 
 def validate_robots(errors: list[str]) -> None:
@@ -160,17 +209,18 @@ def validate_no_fictional_production_data(errors: list[str]) -> None:
 def main() -> int:
     errors: list[str] = []
     if not PUBLIC.is_dir():
-        print("public directory does not exist; run Hugo first", file=sys.stderr)
+        print(f"generated directory does not exist: {PUBLIC}", file=sys.stderr)
         return 1
     validate_required_files(errors)
     validate_homepage(errors)
+    validate_subpath_internal_urls(errors)
     validate_json_assets(errors)
     validate_robots(errors)
     validate_no_fictional_production_data(errors)
     if errors:
         print("\n".join(f"ERROR: {error}" for error in errors), file=sys.stderr)
         return 1
-    print("✓ Generated site validation passed")
+    print(f"✓ Generated site validation passed: {PUBLIC}")
     return 0
 
 
