@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import sys
 from html.parser import HTMLParser
@@ -8,7 +9,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
-PUBLIC = ROOT / "public"
+PUBLIC = Path(os.environ.get("PUBLIC_DIR", str(ROOT / "public"))).resolve()
 REQUIRED_FILES = (
     "index.html",
     "index.json",
@@ -96,7 +97,7 @@ def validate_required_files(errors: list[str]) -> None:
     for relative in REQUIRED_FILES:
         path = PUBLIC / relative
         if not path.is_file():
-            errors.append(f"missing generated file: public/{relative}")
+            errors.append(f"missing generated file: {path}")
 
 
 def homepage_parser() -> HeadAuditParser | None:
@@ -170,12 +171,12 @@ def validate_json_assets(errors: list[str]) -> None:
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
-            errors.append(f"public/{relative} is invalid JSON: {exc}")
+            errors.append(f"{path} is invalid JSON: {exc}")
             continue
         if relative == "index.json" and not isinstance(value, list):
-            errors.append("public/index.json must contain a JSON array")
+            errors.append(f"{path} must contain a JSON array")
         if relative == "site.webmanifest" and not isinstance(value, dict):
-            errors.append("public/site.webmanifest must contain a JSON object")
+            errors.append(f"{path} must contain a JSON object")
 
 
 def validate_robots(errors: list[str]) -> None:
@@ -205,7 +206,7 @@ def validate_no_fictional_production_data(errors: list[str]) -> None:
 def main() -> int:
     errors: list[str] = []
     if not PUBLIC.is_dir():
-        print("public directory does not exist; run Hugo first", file=sys.stderr)
+        print(f"generated directory does not exist: {PUBLIC}", file=sys.stderr)
         return 1
     validate_required_files(errors)
     validate_homepage(errors)
@@ -216,7 +217,7 @@ def main() -> int:
     if errors:
         print("\n".join(f"ERROR: {error}" for error in errors), file=sys.stderr)
         return 1
-    print("✓ Generated site validation passed")
+    print(f"✓ Generated site validation passed: {PUBLIC}")
     return 0
 
 
