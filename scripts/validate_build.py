@@ -100,21 +100,21 @@ def validate_required_files(errors: list[str]) -> None:
             errors.append(f"missing generated file: {path}")
 
 
-def homepage_parser() -> HeadAuditParser | None:
+def homepage_document() -> tuple[HeadAuditParser, str] | None:
     path = PUBLIC / "index.html"
     if not path.is_file():
         return None
+    text = path.read_text(encoding="utf-8")
     parser = HeadAuditParser()
-    parser.feed(path.read_text(encoding="utf-8"))
-    return parser
+    parser.feed(text)
+    return parser, text
 
 
 def validate_homepage(errors: list[str]) -> None:
-    path = PUBLIC / "index.html"
-    parser = homepage_parser()
-    if parser is None:
+    document = homepage_document()
+    if document is None:
         return
-    text = path.read_text(encoding="utf-8")
+    parser, text = document
     if parser.html_lang != "ar":
         errors.append(f"homepage lang must be ar, got {parser.html_lang!r}")
     if parser.html_dir != "rtl":
@@ -141,8 +141,11 @@ def validate_homepage(errors: list[str]) -> None:
 
 
 def validate_subpath_internal_urls(errors: list[str]) -> None:
-    parser = homepage_parser()
-    if parser is None or not parser.canonical_href:
+    document = homepage_document()
+    if document is None:
+        return
+    parser, _ = document
+    if not parser.canonical_href:
         return
     base_path = urlparse(parser.canonical_href).path or "/"
     if not base_path.endswith("/"):
