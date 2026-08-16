@@ -45,17 +45,27 @@ jobs:
           hugo-version: "0.147.9"
           extended: true
 
+      # Ask Pages for the canonical deployment base before building. This keeps
+      # relURL output correct on both project Pages paths and future custom domains.
+      - name: Configure GitHub Pages
+        id: pages
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+        if: github.ref == 'refs/heads/main'
+
       - name: Build and validate site
+        env:
+          PAGES_BASE_URL: ${{ steps.pages.outputs.base_url }}
         run: |
-          hugo --minify --gc
+          if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
+            test -n "${PAGES_BASE_URL}"
+            hugo --baseURL "${PAGES_BASE_URL}/" --minify --gc
+          else
+            hugo --minify --gc
+          fi
           python scripts/validate_build.py
 
       # Publish only a validated Hugo build from main. Manual runs from feature
       # branches remain diagnostic and cannot upload or deploy production assets.
-      - name: Configure GitHub Pages
-        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
-        if: github.ref == 'refs/heads/main'
-
       - name: Upload validated Hugo artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         if: github.ref == 'refs/heads/main'
@@ -68,6 +78,7 @@ jobs:
     if: github.ref == 'refs/heads/main'
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       pages: write
       id-token: write
