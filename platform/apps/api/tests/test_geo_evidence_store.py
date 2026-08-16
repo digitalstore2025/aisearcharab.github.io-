@@ -35,7 +35,7 @@ def _query_id(client: TestClient, owner_credentials: dict[str, str]) -> tuple[st
     return org_id, project_id, query.json()["id"]
 
 
-def test_append_provider_result_is_hashed_and_citations_are_preserved(
+def test_append_provider_result_is_hashed_raw_payload_is_retained_and_citations_are_preserved(
     client: TestClient,
     owner_credentials: dict[str, str],
     session_factory: sessionmaker[Session],
@@ -62,6 +62,8 @@ def test_append_provider_result_is_hashed_and_citations_are_preserved(
         assert run.raw_response_sha256 == hashlib.sha256(raw.encode()).hexdigest()
         stored = db.query(ProviderRun).filter_by(id=run.id).one()
         assert stored.provider == "test-provider"
+        assert stored.raw_response_payload == raw
+        assert hashlib.sha256(stored.raw_response_payload.encode()).hexdigest() == stored.raw_response_sha256
         citations = db.query(Citation).filter_by(run_id=run.id).all()
         assert [(c.url, c.position) for c in citations] == [("https://example.org/source", 1)]
 
