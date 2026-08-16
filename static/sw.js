@@ -1,7 +1,8 @@
-const CACHE_VERSION = "aisearcharab-pwa-v1";
+const CACHE_VERSION = "aisearcharab-pwa-v2";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 const OFFLINE_URL = "/offline.html";
+const MAX_RUNTIME_ENTRIES = 80;
 
 const PRECACHE_URLS = [
   "/",
@@ -41,30 +42,56 @@ function isCacheableResponse(response) {
   return !/no-store|private/i.test(cacheControl);
 }
 
+async function trimRuntimeCache(cache) {
+  const keys = await cache.keys();
+  const overflow = keys.length - MAX_RUNTIME_ENTRIES;
+  if (overflow <= 0) return;
+  await Promise.all(keys.slice(0, overflow).map((key) => cache.delete(key)));
+}
+
+async function cacheRuntimeResponse(cache, request, response) {
+  if (!isCacheableResponse(response)) return;
+  await cache.put(request, response.clone());
+  await trimRuntimeCache(cache);
+}
+
 async function networkFirst(request) {
   try {
     const response = await fetch(request);
-    if (isCacheableResponse(response)) {
-      const cache = await caches.open(RUNTIME_CACHE);
-      await cache.put(request, response.clone());
-    }
+    const cache = await caches.open(RUNTIME_CACHE);
+    await cacheRuntimeResponse(cache, request, response);
     return response;
   } catch (error) {
     const cached = await caches.match(request);
-    return cached || caches.match(OFFLINE_URL);
+    const offline = await caches.match(OFFLINE_URL);
+    return cached || offline || new Response("Offline", {
+      status: 503,
+      headers: { "Content-Type": "text/plain; charset=utf-8" }
+    });
   }
 }
 
 async function staleWhileRevalidate(request) {
   const cache = await caches.open(RUNTIME_CACHE);
   const cached = await cache.match(request);
-  const network = fetch(request)
+
+  const networkPromise = fetch(request)
     .then(async (response) => {
-      if (isCacheableResponse(response)) await cache.put(request, response.clone());
+      await cacheRuntimeResponse(cache, request, response);
       return response;
     })
     .catch(() => null);
-  return cached || network || Response.error();
+
+  if (cached) {
+    void networkPromise;
+    return cached;
+  }
+
+  const network = await networkPromise;
+  return network || new Response("Offline", {
+    status: 503,
+    headers: { "Content-Type": "text/plain; charset=utf-8" }
+  });
 }
 
 self.addEventListener("fetch", (event) => {
