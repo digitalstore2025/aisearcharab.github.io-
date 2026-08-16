@@ -3,7 +3,7 @@ from __future__ import annotations
 import ipaddress
 import socket
 from dataclasses import dataclass
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 
 class UnsafeTargetError(ValueError):
@@ -18,23 +18,9 @@ class ResolvedTarget:
     addresses: tuple[str, ...]
 
 
-def _is_forbidden_ip(value: str) -> bool:
-    ip = ipaddress.ip_address(value)
-    return any(
-        (
-            ip.is_private,
-            ip.is_loopback,
-            ip.is_link_local,
-            ip.is_multicast,
-            ip.is_reserved,
-            ip.is_unspecified,
-        )
-    )
-
-
 def validate_public_ip(value: str) -> str:
     ip = ipaddress.ip_address(value)
-    if _is_forbidden_ip(value):
+    if not ip.is_global:
         raise UnsafeTargetError("target resolves to a non-public address")
     return ip.compressed
 
@@ -81,10 +67,6 @@ def resolve_public_target(url: str) -> ResolvedTarget:
 
 
 def validate_redirect(previous: ResolvedTarget, location: str) -> ResolvedTarget:
-    """Resolve every redirect hop again; callers must connect only to returned addresses.
-
-    Re-resolution on each hop prevents a safe initial hostname from redirecting into
-    loopback, RFC1918, link-local, metadata, or other non-public address space.
-    """
-    del previous
-    return resolve_public_target(location)
+    """Resolve every redirect hop again and allow only globally routable addresses."""
+    target_url = urljoin(previous.url, location)
+    return resolve_public_target(target_url)
