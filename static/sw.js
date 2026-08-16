@@ -1,20 +1,27 @@
-const CACHE_VERSION = "aisearcharab-pwa-v3";
+const CACHE_VERSION = "aisearcharab-pwa-v4";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
-const OFFLINE_URL = "/offline.html";
+const SCOPE_URL = new URL(self.registration.scope);
+const SCOPE_PATH = SCOPE_URL.pathname.endsWith("/") ? SCOPE_URL.pathname : `${SCOPE_URL.pathname}/`;
 const MAX_RUNTIME_ENTRIES = 80;
 
+const scopeUrl = (path = "") => new URL(path.replace(/^\/+/, ""), SCOPE_URL).href;
+const OFFLINE_URL = scopeUrl("offline.html");
+
 const PRECACHE_URLS = [
-  "/",
+  scopeUrl(),
   OFFLINE_URL,
-  "/site.webmanifest",
-  "/favicon.svg",
-  "/icons/icon-192.png",
-  "/icons/icon-512.png",
-  "/css/main.css",
-  "/css/article.css",
-  "/js/pwa-register.js"
+  scopeUrl("site.webmanifest"),
+  scopeUrl("favicon.svg"),
+  scopeUrl("icons/icon-192.png"),
+  scopeUrl("icons/icon-512.png"),
+  scopeUrl("css/main.css"),
+  scopeUrl("css/article.css"),
+  scopeUrl("js/pwa-register.js")
 ];
+
+const SENSITIVE_PREFIXES = ["/api/", "/v1/", "/admin", "/health/"];
+const SENSITIVE_EXACT = new Set(["/docs", "/docs/", "/openapi.json", "/index.json"]);
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -35,6 +42,17 @@ self.addEventListener("activate", (event) => {
       .then(() => self.clients.claim())
   );
 });
+
+function relativePath(url) {
+  if (!url.pathname.startsWith(SCOPE_PATH)) return null;
+  const relative = url.pathname.slice(SCOPE_PATH.length);
+  return `/${relative}`;
+}
+
+function isSensitivePath(path) {
+  if (path === null) return true;
+  return SENSITIVE_EXACT.has(path) || SENSITIVE_PREFIXES.some((prefix) => path.startsWith(prefix));
+}
 
 function isCacheableResponse(response) {
   if (!response || !response.ok || response.type === "opaque") return false;
@@ -100,7 +118,9 @@ self.addEventListener("fetch", (event) => {
 
   const url = new URL(request.url);
   if (url.origin !== self.location.origin) return;
-  if (url.pathname.startsWith("/api/") || url.pathname === "/index.json") return;
+
+  const path = relativePath(url);
+  if (isSensitivePath(path)) return;
 
   if (request.mode === "navigate") {
     event.respondWith(networkFirst(request));
