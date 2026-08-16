@@ -38,6 +38,25 @@ def require_pattern(path: Path, pattern: str, label: str) -> None:
         fail(f"{path.relative_to(ROOT)} missing required {label}")
 
 
+def require_sw_semantics(path: Path) -> None:
+    if not path.is_file():
+        fail(f"missing {path.relative_to(ROOT)}")
+    source = path.read_text(encoding="utf-8")
+    rules = {
+        "install listener": r"self\.addEventListener\(\s*['\"]install['\"]",
+        "fetch listener": r"self\.addEventListener\(\s*['\"]fetch['\"]",
+        "non-GET bypass": r"request\.method\s*!==\s*['\"]GET['\"]",
+        "API bypass": r"url\.pathname\.startsWith\(\s*['\"]/api/['\"]\s*\)",
+        "cross-origin bypass": r"url\.origin\s*!==\s*self\.location\.origin",
+        "private/no-store guard": r"no-store\|private",
+        "bounded runtime cache": r"MAX_RUNTIME_ENTRIES\s*=\s*\d+",
+        "cross-cache lookup": r"caches\.match\(\s*request\s*\)",
+    }
+    for label, pattern in rules.items():
+        if re.search(pattern, source, flags=re.IGNORECASE) is None:
+            fail(f"{path.relative_to(ROOT)} missing required semantic: {label}")
+
+
 def main() -> None:
     manifest_path = PUBLIC / "site.webmanifest"
     if not manifest_path.is_file():
@@ -83,17 +102,11 @@ def main() -> None:
         if actual != expected:
             fail(f"{src} dimensions are {actual}, expected {expected}")
 
-    require_text(
-        PUBLIC / "sw.js",
-        "self.addEventListener(\"install\"",
-        "self.addEventListener(\"fetch\"",
-        "request.method !== \"GET\"",
-        "url.pathname.startsWith(\"/api/\")",
-    )
-    require_text(
+    require_sw_semantics(PUBLIC / "sw.js")
+    require_pattern(
         PUBLIC / "js" / "pwa-register.js",
-        "serviceWorker",
-        "register(\"/sw.js\"",
+        r"navigator\.serviceWorker\.register\(\s*['\"]/sw\.js['\"]",
+        "service worker registration",
     )
     require_text(PUBLIC / "offline.html", "noindex,nofollow")
 
