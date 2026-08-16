@@ -3,6 +3,7 @@ import pytest
 from aisearcharab_api.config import ConfigurationError, Settings
 
 MFA_KEY = "test-only-mfa-encryption-key-not-a-secret-2026"
+THROTTLE_KEY = "test-only-login-throttle-key-not-a-secret-2026"
 
 
 def production_settings(**overrides) -> Settings:
@@ -17,6 +18,7 @@ def production_settings(**overrides) -> Settings:
         "enforce_separation_of_duties": True,
         "require_mfa_for_privileged": True,
         "mfa_encryption_key": MFA_KEY,
+        "login_throttle_key": THROTTLE_KEY,
     }
     values.update(overrides)
     return Settings(**values)
@@ -52,6 +54,7 @@ def test_query_logging_requires_keyed_hash_secret() -> None:
         query_hash_key="short",
         require_mfa_for_privileged=True,
         mfa_encryption_key=MFA_KEY,
+        login_throttle_key=THROTTLE_KEY,
     )
     with pytest.raises(ConfigurationError):
         settings.validate()
@@ -78,6 +81,18 @@ def test_production_requires_privileged_mfa() -> None:
 def test_production_requires_mfa_encryption_key() -> None:
     settings = production_settings(mfa_encryption_key=None)
     with pytest.raises(ConfigurationError, match="MFA_ENCRYPTION_KEY"):
+        settings.validate()
+
+
+def test_production_requires_login_throttle_key() -> None:
+    settings = production_settings(login_throttle_key=None)
+    with pytest.raises(ConfigurationError, match="LOGIN_THROTTLE_KEY"):
+        settings.validate()
+
+
+def test_login_throttle_key_must_be_strong() -> None:
+    settings = production_settings(login_throttle_key="too-short")
+    with pytest.raises(ConfigurationError, match="LOGIN_THROTTLE_KEY"):
         settings.validate()
 
 
