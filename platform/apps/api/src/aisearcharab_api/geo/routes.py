@@ -11,6 +11,7 @@ from ..audit import record_audit
 from ..auth import Principal, get_principal, require_csrf
 from ..database import get_db
 from .models import GeoProject, Organization, OrganizationMembership
+from .query_routes import router as query_router
 from .schemas import GeoProjectCreate, GeoProjectPublic, OrganizationCreate, OrganizationPublic
 from .tenant import require_tenant_access
 
@@ -129,3 +130,6 @@ def create_project(
         raise HTTPException(status_code=409, detail="project slug already exists in organization") from exc
     db.refresh(project)
     return GeoProjectPublic.model_validate(project)
+
+
+router.include_router(query_router)
