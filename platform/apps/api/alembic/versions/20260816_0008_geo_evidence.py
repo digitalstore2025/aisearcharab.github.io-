@@ -55,6 +55,7 @@ def upgrade() -> None:
         sa.Column("model", sa.String(120), nullable=False),
         sa.Column("status", sa.String(24), nullable=False),
         sa.Column("answer_text", sa.Text(), nullable=False, server_default=""),
+        sa.Column("raw_response_payload", sa.Text(), nullable=False),
         sa.Column("raw_response_sha256", sa.String(64), nullable=False),
         sa.Column("error_code", sa.String(80), nullable=True),
         sa.Column("latency_ms", sa.Integer(), nullable=True),
