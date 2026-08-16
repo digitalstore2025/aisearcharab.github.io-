@@ -1,4 +1,4 @@
-const CACHE_VERSION = "aisearcharab-pwa-v2";
+const CACHE_VERSION = "aisearcharab-pwa-v3";
 const STATIC_CACHE = `${CACHE_VERSION}-static`;
 const RUNTIME_CACHE = `${CACHE_VERSION}-runtime`;
 const OFFLINE_URL = "/offline.html";
@@ -72,12 +72,12 @@ async function networkFirst(request) {
 }
 
 async function staleWhileRevalidate(request) {
-  const cache = await caches.open(RUNTIME_CACHE);
-  const cached = await cache.match(request);
+  const runtimeCache = await caches.open(RUNTIME_CACHE);
+  const cached = await caches.match(request);
 
   const networkPromise = fetch(request)
     .then(async (response) => {
-      await cacheRuntimeResponse(cache, request, response);
+      await cacheRuntimeResponse(runtimeCache, request, response);
       return response;
     })
     .catch(() => null);
