@@ -117,12 +117,14 @@ def append_provider_result(
     query_id: str,
     result: ProviderResult,
 ) -> ProviderRun:
-    """Persist one normalized provider result, mentions, and citations as append-only evidence.
+    """Stage normalized provider evidence in the caller-owned transaction.
 
     The raw upstream payload is stored together with its SHA-256 digest so later
     verification can reproduce the provenance check. Untrusted provider output is
-    bounded and type-checked before persistence. This module intentionally exposes
-    no update/delete operation for provider evidence.
+    bounded and type-checked before persistence. This helper flushes the staged
+    run/mention/citation rows but deliberately does not commit: the request or
+    service boundary owns commit/rollback so evidence can participate atomically
+    with audit and other business changes.
     """
     query = db.scalar(
         select(GeoQuery).where(
@@ -173,6 +175,6 @@ def append_provider_result(
                 position=citation.position,
             )
         )
-    db.commit()
+    db.flush()
     db.refresh(run)
     return run
