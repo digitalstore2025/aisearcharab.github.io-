@@ -163,3 +163,47 @@ def test_provider_and_model_identifier_bounds_are_enforced(
         )
         with pytest.raises(MalformedProviderOutput, match="provider name"):
             append_provider_result(db, organization_id=org_id, project_id=project_id, query_id=query_id, result=bad)
+
+
+def test_wrong_runtime_types_fail_closed_as_malformed_output(
+    client: TestClient,
+    owner_credentials: dict[str, str],
+    session_factory: sessionmaker[Session],
+) -> None:
+    org_id, project_id, query_id = _query_id(client, owner_credentials)
+    with session_factory() as db:
+        query = db.query(GeoQuery).filter_by(id=query_id).one()
+
+        bad_payload = ProviderResult(
+            provider="provider",
+            model="model",
+            query=query.text,
+            answer_text="answer",
+            citations=(),
+            raw_payload={"unexpected": "mapping"},  # type: ignore[arg-type]
+        )
+        with pytest.raises(MalformedProviderOutput, match="raw provider payload must be a string"):
+            append_provider_result(db, organization_id=org_id, project_id=project_id, query_id=query_id, result=bad_payload)
+
+        bad_citation = ProviderResult(
+            provider="provider",
+            model="model",
+            query=query.text,
+            answer_text="answer",
+            citations=(ProviderCitation(url=123),),  # type: ignore[arg-type]
+            raw_payload="{}",
+        )
+        with pytest.raises(MalformedProviderOutput, match="citation URL must be a string"):
+            append_provider_result(db, organization_id=org_id, project_id=project_id, query_id=query_id, result=bad_citation)
+
+        bad_latency = ProviderResult(
+            provider="provider",
+            model="model",
+            query=query.text,
+            answer_text="answer",
+            citations=(),
+            raw_payload="{}",
+            latency_ms=True,  # type: ignore[arg-type]
+        )
+        with pytest.raises(MalformedProviderOutput, match="latency must be an integer"):
+            append_provider_result(db, organization_id=org_id, project_id=project_id, query_id=query_id, result=bad_latency)
