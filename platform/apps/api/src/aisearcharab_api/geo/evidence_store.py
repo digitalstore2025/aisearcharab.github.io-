@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .evidence_models import Citation, GeoQuery, ProviderRun
-from .providers.base import ProviderResult
+from .providers.base import ProviderCitation, ProviderResult
 
 MAX_RAW_PAYLOAD_BYTES = 2 * 1024 * 1024
 MAX_ANSWER_BYTES = 1024 * 1024
@@ -20,10 +20,19 @@ class MalformedProviderOutput(ValueError):
     pass
 
 
-def _citation_url(value: str) -> str:
-    normalized = value.strip()
-    if not normalized or len(normalized) > MAX_CITATION_URL_LENGTH:
-        raise MalformedProviderOutput("citation URL is empty or too long")
+def _require_string(value: object, field_name: str, *, allow_empty: bool = False) -> str:
+    if not isinstance(value, str):
+        raise MalformedProviderOutput(f"{field_name} must be a string")
+    if not allow_empty and not value.strip():
+        raise MalformedProviderOutput(f"{field_name} is required")
+    return value
+
+
+def _citation_url(value: object) -> str:
+    raw = _require_string(value, "citation URL")
+    normalized = raw.strip()
+    if len(normalized) > MAX_CITATION_URL_LENGTH:
+        raise MalformedProviderOutput("citation URL is too long")
     parsed = urlsplit(normalized)
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise MalformedProviderOutput("citation must be an absolute http(s) URL")
@@ -33,30 +42,50 @@ def _citation_url(value: str) -> str:
 
 
 def _validate_result(query: GeoQuery, result: ProviderResult) -> None:
-    provider = result.provider.strip()
-    model = result.model.strip()
-    if not provider or len(provider) > 80:
+    if not isinstance(result, ProviderResult):
+        raise MalformedProviderOutput("provider result must use the ProviderResult contract")
+
+    provider = _require_string(result.provider, "provider name").strip()
+    model = _require_string(result.model, "provider model").strip()
+    result_query = _require_string(result.query, "provider query").strip()
+    answer_text = _require_string(result.answer_text, "provider answer", allow_empty=True)
+    raw_payload = _require_string(result.raw_payload, "raw provider payload")
+
+    if len(provider) > 80:
         raise MalformedProviderOutput("provider name is required and must be at most 80 characters")
-    if not model or len(model) > 120:
+    if len(model) > 120:
         raise MalformedProviderOutput("provider model is required and must be at most 120 characters")
-    if result.query.strip() != query.text.strip():
+    if result_query != query.text.strip():
         raise MalformedProviderOutput("provider result query does not match stored query")
-    if not result.raw_payload:
-        raise MalformedProviderOutput("raw provider payload is required")
-    if len(result.raw_payload.encode("utf-8")) > MAX_RAW_PAYLOAD_BYTES:
+    if len(raw_payload.encode("utf-8")) > MAX_RAW_PAYLOAD_BYTES:
         raise MalformedProviderOutput("raw provider payload exceeds size limit")
-    if len(result.answer_text.encode("utf-8")) > MAX_ANSWER_BYTES:
+    if len(answer_text.encode("utf-8")) > MAX_ANSWER_BYTES:
         raise MalformedProviderOutput("provider answer exceeds size limit")
+
+    if not isinstance(result.citations, tuple):
+        raise MalformedProviderOutput("provider citations must be a tuple")
     if len(result.citations) > MAX_CITATIONS:
         raise MalformedProviderOutput("provider citation count exceeds limit")
-    if result.latency_ms is not None and result.latency_ms < 0:
-        raise MalformedProviderOutput("latency cannot be negative")
+
+    if result.latency_ms is not None:
+        if isinstance(result.latency_ms, bool) or not isinstance(result.latency_ms, int):
+            raise MalformedProviderOutput("latency must be an integer number of milliseconds")
+        if result.latency_ms < 0:
+            raise MalformedProviderOutput("latency cannot be negative")
+
     for citation in result.citations:
+        if not isinstance(citation, ProviderCitation):
+            raise MalformedProviderOutput("provider citations must use the ProviderCitation contract")
         _citation_url(citation.url)
-        if citation.title is not None and len(citation.title.strip()) > MAX_CITATION_TITLE_LENGTH:
-            raise MalformedProviderOutput("citation title exceeds size limit")
-        if citation.position is not None and citation.position < 0:
-            raise MalformedProviderOutput("citation position cannot be negative")
+        if citation.title is not None:
+            title = _require_string(citation.title, "citation title", allow_empty=True).strip()
+            if len(title) > MAX_CITATION_TITLE_LENGTH:
+                raise MalformedProviderOutput("citation title exceeds size limit")
+        if citation.position is not None:
+            if isinstance(citation.position, bool) or not isinstance(citation.position, int):
+                raise MalformedProviderOutput("citation position must be an integer")
+            if citation.position < 0:
+                raise MalformedProviderOutput("citation position cannot be negative")
 
 
 def append_provider_result(
@@ -71,8 +100,8 @@ def append_provider_result(
 
     The raw upstream payload is stored together with its SHA-256 digest so later
     verification can reproduce the provenance check. Untrusted provider output is
-    bounded before persistence. This module intentionally exposes no update/delete
-    operation for provider evidence.
+    bounded and type-checked before persistence. This module intentionally exposes
+    no update/delete operation for provider evidence.
     """
     query = db.scalar(
         select(GeoQuery).where(
