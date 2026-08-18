@@ -13,6 +13,7 @@ DEFAULT_TIMEOUT_SECONDS = 120.0
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 DEFAULT_ALLOWED_HOSTS = frozenset({"ollama", "localhost", "127.0.0.1"})
 DEFAULT_ALLOWED_PORTS = frozenset({11434})
+_LOCALE_NAMES = {"ar": "Arabic", "en": "English", "tr": "Turkish"}
 
 
 class OllamaProviderError(RuntimeError):
@@ -81,8 +82,9 @@ class OllamaProvider:
         normalized_query = query.strip()
         if not normalized_query:
             raise ValueError("query must be non-empty")
-        if locale not in {"ar", "en", "tr"}:
+        if locale not in _LOCALE_NAMES:
             raise ValueError("locale must be ar, en, or tr")
+        response_language = _LOCALE_NAMES[locale]
 
         body = json.dumps(
             {
@@ -91,7 +93,7 @@ class OllamaProvider:
                     {
                         "role": "system",
                         "content": (
-                            "Answer the user query directly. Preserve the requested language. "
+                            f"Answer the user query in {response_language} ({locale}). "
                             "Do not invent citations, URLs, or sources that were not supplied to you."
                         ),
                     },
@@ -122,7 +124,8 @@ class OllamaProvider:
             raise OllamaProviderError("Ollama response exceeds size limit")
 
         try:
-            payload = json.loads(raw_bytes.decode("utf-8"))
+            raw_payload = raw_bytes.decode("utf-8")
+            payload = json.loads(raw_payload)
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise OllamaProviderError("Ollama returned invalid JSON") from exc
 
@@ -138,7 +141,6 @@ class OllamaProvider:
         if not isinstance(returned_model, str) or not returned_model.strip():
             returned_model = self.model.strip()
 
-        raw_payload = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
         return ProviderResult(
             provider=self.name,
             model=returned_model,
