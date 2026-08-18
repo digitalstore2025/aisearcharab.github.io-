@@ -226,17 +226,21 @@ def create_query(
         language=payload.language,
     )
     db.add(row)
-    db.flush()
-    record_audit(
-        db,
-        action="geo.query.create",
-        outcome="success",
-        actor_user_id=principal.user.id,
-        target_type="geo_query",
-        target_id=row.id,
-        request_id=_rid(request),
-        metadata={"organization_id": organization_id, "project_id": project_id, "language": row.language},
-    )
-    db.commit()
+    try:
+        db.flush()
+        record_audit(
+            db,
+            action="geo.query.create",
+            outcome="success",
+            actor_user_id=principal.user.id,
+            target_type="geo_query",
+            target_id=row.id,
+            request_id=_rid(request),
+            metadata={"organization_id": organization_id, "project_id": project_id, "language": row.language},
+        )
+        db.commit()
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="query could not be created due to a constraint conflict") from exc
     db.refresh(row)
     return QueryPublic.model_validate(row)
