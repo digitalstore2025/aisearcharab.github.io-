@@ -70,7 +70,7 @@ jobs:
         run: pip-compile pyproject.toml --generate-hashes --strip-extras --output-file /tmp/requirements-runtime.lock
 
       - name: Upload hashed runtime lock evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: phase3-1-runtime-lock
           path: /tmp/requirements-runtime.lock
@@ -101,7 +101,7 @@ jobs:
 
       - name: Upload dependency audit evidence
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: phase3-1-dependency-audit
           path: /tmp/dependency-audit
@@ -112,7 +112,7 @@ jobs:
         run: python -m json.tool /tmp/aisearcharab-sbom.cdx.json > /dev/null
 
       - name: Upload dependency SBOM
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: phase3-1-dependency-sbom
           path: /tmp/aisearcharab-sbom.cdx.json
@@ -135,7 +135,7 @@ jobs:
         run: python -m json.tool ../../contracts/openapi.generated.json > /dev/null
 
       - name: Upload generated OpenAPI contract
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: phase3-openapi-contract
           path: platform/contracts/openapi.generated.json
@@ -389,7 +389,7 @@ jobs:
         run: python -m json.tool /tmp/release-evidence.json > /dev/null
 
       - name: Upload release evidence
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: phase3-1-release-evidence
           path: /tmp/release-evidence.json
