@@ -33,6 +33,13 @@ class QuerySetCreate(BaseModel):
             raise ValueError("invalid slug")
         return normalized
 
+    @field_validator("name", mode="before")
+    @classmethod
+    def normalize_name(cls, value: object) -> str:
+        if not isinstance(value, str):
+            raise ValueError("name must be a string")
+        return value.strip()
+
 
 class QuerySetPublic(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -146,7 +153,7 @@ def create_query_set(
         organization_id=organization_id,
         project_id=project_id,
         slug=payload.slug,
-        name=payload.name.strip(),
+        name=payload.name,
         created_by_user_id=principal.user.id,
     )
     db.add(row)
