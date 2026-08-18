@@ -6,7 +6,7 @@ import re
 import sys
 from html.parser import HTMLParser
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
 PUBLIC = Path(os.environ.get("PUBLIC_DIR", str(ROOT / "public"))).resolve()
@@ -187,8 +187,25 @@ def validate_robots(errors: list[str]) -> None:
     if not path.is_file():
         return
     text = path.read_text(encoding="utf-8")
-    if "Sitemap: https://aisearcharab.com/sitemap.xml" not in text:
-        errors.append("robots.txt does not reference the canonical sitemap")
+
+    document = homepage_document()
+    if document is not None:
+        parser, _ = document
+        if parser.canonical_href:
+            base_url = parser.canonical_href
+            if not base_url.endswith("/"):
+                base_url += "/"
+            expected_sitemap = urljoin(base_url, "sitemap.xml")
+            sitemap_values = {
+                match.group(1).strip()
+                for match in re.finditer(r"(?im)^\s*Sitemap:\s*(\S+)\s*$", text)
+            }
+            if expected_sitemap not in sitemap_values:
+                errors.append(
+                    "robots.txt sitemap does not match the generated canonical base: "
+                    f"expected {expected_sitemap!r}, got {sorted(sitemap_values)!r}"
+                )
+
     if re.search(r"(?im)^\s*Disallow:\s*/\s*$", text):
         errors.append("robots.txt blocks the entire website")
 

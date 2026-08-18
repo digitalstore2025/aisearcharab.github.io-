@@ -16,6 +16,7 @@ from . import __version__
 from .arabic import normalize_text
 from .config import Settings, get_settings
 from .database import get_db
+from .geo.routes import router as geo_router
 from .middleware import RequestBodyLimitMiddleware, SecurityHeadersMiddleware
 from .models import SearchQueryEvent
 from .privacy import hash_query
@@ -29,7 +30,7 @@ from .search import rank_items
 
 ADMIN_STATIC = Path(__file__).resolve().parent / "admin_static"
 _PUBLIC_CLAIM_STATES = {"reviewed", "published"}
-EXPECTED_ALEMBIC_REVISION = "20260816_0006"
+EXPECTED_ALEMBIC_REVISION = "20260816_0008"
 
 
 def _public_content(item) -> PublicContentDetail:
@@ -82,6 +83,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(mfa_router, prefix=runtime_settings.api_prefix)
     app.include_router(admin_router, prefix=runtime_settings.api_prefix)
     app.include_router(admin_detail_router, prefix=runtime_settings.api_prefix)
+    app.include_router(geo_router, prefix=runtime_settings.api_prefix)
 
     @app.get("/health/live", response_model=HealthResponse, tags=["health"])
     def liveness() -> HealthResponse:

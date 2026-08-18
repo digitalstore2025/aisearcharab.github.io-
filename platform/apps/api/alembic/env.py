@@ -8,6 +8,8 @@ from sqlalchemy import engine_from_config, pool
 from aisearcharab_api.config import get_settings
 from aisearcharab_api.database import Base
 from aisearcharab_api import models  # noqa: F401
+from aisearcharab_api.geo import models as geo_models  # noqa: F401
+from aisearcharab_api.geo import evidence_models as geo_evidence_models  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:
@@ -15,6 +17,20 @@ if config.config_file_name is not None:
 
 config.set_main_option("sqlalchemy.url", get_settings().database_url)
 target_metadata = Base.metadata
+
+# This PostgreSQL expression index is intentionally migration-managed because it
+# depends on dialect-specific GIN/to_tsvector/translate expressions. It is
+# verified independently by scripts/verify_postgres_search.py. Excluding only
+# this known reflected index prevents Alembic autogenerate from proposing a
+# destructive removal merely because the ORM metadata cannot represent it
+# portably.
+_MANAGED_OUT_OF_BAND_INDEXES = {"ix_content_items_search_fts"}
+
+
+def include_object(object_, name: str | None, type_: str, reflected: bool, compare_to) -> bool:  # noqa: ANN001
+    if type_ == "index" and reflected and compare_to is None and name in _MANAGED_OUT_OF_BAND_INDEXES:
+        return False
+    return True
 
 
 def run_migrations_offline() -> None:
@@ -24,6 +40,7 @@ def run_migrations_offline() -> None:
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
         compare_type=True,
+        include_object=include_object,
     )
     with context.begin_transaction():
         context.run_migrations()
@@ -36,7 +53,12 @@ def run_migrations_online() -> None:
         poolclass=pool.NullPool,
     )
     with connectable.connect() as connection:
-        context.configure(connection=connection, target_metadata=target_metadata, compare_type=True)
+        context.configure(
+            connection=connection,
+            target_metadata=target_metadata,
+            compare_type=True,
+            include_object=include_object,
+        )
         with context.begin_transaction():
             context.run_migrations()
 

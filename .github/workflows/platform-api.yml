@@ -149,25 +149,65 @@ jobs:
           expected="$(tr -d '[:space:]' < ../../contracts/openapi.sha256)"
           actual="$(sha256sum ../../contracts/openapi.generated.json | awk '{print $1}')"
           test -n "$expected"
-          test "$actual" = "$expected"
+          if [ "$actual" != "$expected" ]; then
+            echo "OpenAPI contract drift detected; review and intentionally update platform/contracts/openapi.sha256." >&2
+            echo "expected=$expected" >&2
+            echo "actual=$actual" >&2
+            exit 1
+          fi
 
-      - name: Verify migrations, Arabic FTS and MFA concurrency on PostgreSQL
+      - name: Verify PostgreSQL migrations, rollback and re-upgrade
         env:
           APP_ENV: test
           DATABASE_URL: postgresql+psycopg://aisearcharab_ci:ci-only-password@127.0.0.1:5432/aisearcharab_ci
           ALLOWED_ORIGINS: http://localhost:8000
         run: |
+          set -euo pipefail
           alembic upgrade head
+          alembic current | grep 20260816_0008
+          python - <<'PY'
+          from sqlalchemy import create_engine, text
+          engine = create_engine("postgresql+psycopg://aisearcharab_ci:ci-only-password@127.0.0.1:5432/aisearcharab_ci")
+          with engine.connect() as connection:
+              assert connection.scalar(text("select version_num from alembic_version")) == "20260816_0008"
+              for table in (
+                  "ix_content_items_search_fts",
+                  "mfa_recovery_codes",
+                  "login_throttles",
+                  "organizations",
+                  "geo_projects",
+                  "geo_query_sets",
+                  "geo_queries",
+                  "geo_provider_runs",
+                  "geo_citations",
+              ):
+                  assert connection.scalar(text("select to_regclass(:table)"), {"table": f"public.{table}"}) is not None, table
+          PY
+
+          alembic downgrade 20260816_0006
           alembic current | grep 20260816_0006
           python - <<'PY'
           from sqlalchemy import create_engine, text
           engine = create_engine("postgresql+psycopg://aisearcharab_ci:ci-only-password@127.0.0.1:5432/aisearcharab_ci")
           with engine.connect() as connection:
               assert connection.scalar(text("select version_num from alembic_version")) == "20260816_0006"
-              assert connection.scalar(text("select to_regclass('public.ix_content_items_search_fts')")) == "ix_content_items_search_fts"
-              assert connection.scalar(text("select to_regclass('public.mfa_recovery_codes')")) == "mfa_recovery_codes"
-              assert connection.scalar(text("select to_regclass('public.login_throttles')")) == "login_throttles"
+              for table in (
+                  "organizations",
+                  "organization_memberships",
+                  "geo_projects",
+                  "geo_query_sets",
+                  "geo_queries",
+                  "geo_provider_runs",
+                  "geo_evidence_snapshots",
+                  "geo_mentions",
+                  "geo_citations",
+              ):
+                  assert connection.scalar(text("select to_regclass(:table)"), {"table": f"public.{table}"}) is None, table
           PY
+
+          alembic upgrade head
+          alembic current | grep 20260816_0008
+          alembic check
           python scripts/verify_postgres_search.py
           python scripts/verify_postgres_mfa_concurrency.py
 
@@ -226,9 +266,11 @@ jobs:
           print(f"runtime package={aisearcharab_api.__version__}")
           PY
 
-      - name: Smoke test liveness, migration-aware readiness and capabilities
+      - name: Verify runtime migration and health endpoints
+        working-directory: platform
         run: |
           set -euo pipefail
+          docker compose exec -T api alembic current | grep 20260816_0008
           curl --retry 8 --retry-connrefused --retry-delay 1 --fail --silent --show-error http://127.0.0.1:8000/health/live
           curl --retry 8 --retry-connrefused --retry-delay 1 --fail --silent --show-error http://127.0.0.1:8000/health/ready
           curl --retry 8 --retry-connrefused --retry-delay 1 --fail --silent --show-error http://127.0.0.1:8000/v1/meta/capabilities
@@ -245,6 +287,7 @@ jobs:
 
   release-evidence:
     needs: [site-quality, api-quality, container-smoke]
+    if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -253,18 +296,28 @@ jobs:
           persist-credentials: false
           fetch-depth: 2
 
-      - name: Verify pull-request merge provenance
+      - name: Verify tested pull-request merge provenance
         if: github.event_name == 'pull_request'
         shell: bash
         env:
-          EXPECTED_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          parents="$(git show -s --format='%P' "$GITHUB_SHA")"
-          test "$(wc -w <<< "$parents" | tr -d ' ')" = "2"
-          grep -qw "$EXPECTED_BASE_SHA" <<< "$parents"
-          grep -qw "$EXPECTED_HEAD_SHA" <<< "$parents"
+          read -r actual_base_sha actual_head_sha extra <<< "$(git show -s --format='%P' "$GITHUB_SHA")"
+          test -n "$actual_base_sha"
+          test -n "$actual_head_sha"
+          test -z "${extra:-}"
+          test "$actual_head_sha" = "$EXPECTED_HEAD_SHA"
+          test "$(git rev-parse "$actual_base_sha")" = "$actual_base_sha"
+          test "$(git rev-parse "$actual_head_sha")" = "$actual_head_sha"
+          echo "event_base_sha=$EVENT_BASE_SHA"
+          echo "tested_base_sha=$actual_base_sha"
+          echo "tested_head_sha=$actual_head_sha"
+          echo "tested_merge_sha=$GITHUB_SHA"
+          echo "RELEASE_BASE_SHA=$actual_base_sha" >> "$GITHUB_ENV"
+          echo "RELEASE_SOURCE_HEAD_SHA=$actual_head_sha" >> "$GITHUB_ENV"
+          echo "RELEASE_TESTED_SHA=$GITHUB_SHA" >> "$GITHUB_ENV"
 
       - name: Prepare immutable release identifiers
         shell: bash
@@ -274,38 +327,63 @@ jobs:
           echo "DEPENDENCY_LOCK_SHA256=$(awk '{print $1}' platform/apps/api/requirements-runtime.lock.sha256)" >> "$GITHUB_ENV"
 
       - name: Generate fail-closed release evidence
+        shell: bash
         env:
-          RELEASE_STATUS: INTEGRATED_NOT_TESTED
-          RELEASE_MIGRATION: "20260816_0006"
+          SITE_RESULT: ${{ needs.site-quality.result }}
+          API_RESULT: ${{ needs.api-quality.result }}
+          CONTAINER_RESULT: ${{ needs.container-smoke.result }}
           RELEASE_PR: ${{ github.event.pull_request.number }}
-          RELEASE_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          RELEASE_TESTED_SHA: ${{ github.sha }}
-          RELEASE_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          CI_SITE_STATUS: pass
-          CI_API_STATUS: pass
-          CI_CONTAINER_STATUS: pass
-          DEPENDENCY_AUDIT_PASSED: "true"
-          SECRET_SCAN_PASSED: "true"
-          MFA_VERIFIED: "false"
-          DISTRIBUTED_RATE_LIMIT_VERIFIED: "false"
-          SEARCH_BENCHMARK_VERIFIED: "false"
-          LOAD_TEST_VERIFIED: "false"
-          LOAD_SLO_ACCEPTED: "false"
-          MANAGED_POSTGRES_VERIFIED: "false"
-          PITR_VERIFIED: "false"
-          BACKUP_VERIFIED: "false"
-          RESTORE_VERIFIED: "false"
-          WCAG_22_AA_VERIFIED: "false"
-          EXTERNAL_SECURITY_REVIEW_VERIFIED: "false"
-          EXTERNAL_ACCESSIBILITY_REVIEW_VERIFIED: "false"
-          STAGING_VERIFIED: "false"
-          DNS_TLS_VERIFIED: "false"
-          ROLLBACK_VERIFIED: "false"
-          OBSERVABILITY_VERIFIED: "false"
-          INCIDENT_DRILL_VERIFIED: "false"
-          SECRETS_MANAGEMENT_VERIFIED: "false"
-          BRANCH_GOVERNANCE_VERIFIED: "false"
-        run: python platform/apps/api/scripts/release_evidence.py --output /tmp/release-evidence.json
+        run: |
+          set -euo pipefail
+          site_status=fail
+          api_status=fail
+          container_status=fail
+          dependency_audit=false
+          secret_scan=false
+          release_status=BLOCKED
+
+          if [ "$SITE_RESULT" = success ]; then
+            site_status=pass
+            secret_scan=true
+          fi
+          if [ "$API_RESULT" = success ]; then
+            api_status=pass
+            dependency_audit=true
+          fi
+          if [ "$CONTAINER_RESULT" = success ]; then
+            container_status=pass
+          fi
+          if [ "$SITE_RESULT" = success ] && [ "$API_RESULT" = success ] && [ "$CONTAINER_RESULT" = success ]; then
+            release_status=INTEGRATED_NOT_TESTED
+          fi
+
+          RELEASE_STATUS="$release_status" \
+          RELEASE_MIGRATION="20260816_0008" \
+          CI_SITE_STATUS="$site_status" \
+          CI_API_STATUS="$api_status" \
+          CI_CONTAINER_STATUS="$container_status" \
+          DEPENDENCY_AUDIT_PASSED="$dependency_audit" \
+          SECRET_SCAN_PASSED="$secret_scan" \
+          MFA_VERIFIED="false" \
+          DISTRIBUTED_RATE_LIMIT_VERIFIED="false" \
+          SEARCH_BENCHMARK_VERIFIED="false" \
+          LOAD_TEST_VERIFIED="false" \
+          LOAD_SLO_ACCEPTED="false" \
+          MANAGED_POSTGRES_VERIFIED="false" \
+          PITR_VERIFIED="false" \
+          BACKUP_VERIFIED="false" \
+          RESTORE_VERIFIED="false" \
+          WCAG_22_AA_VERIFIED="false" \
+          EXTERNAL_SECURITY_REVIEW_VERIFIED="false" \
+          EXTERNAL_ACCESSIBILITY_REVIEW_VERIFIED="false" \
+          STAGING_VERIFIED="false" \
+          DNS_TLS_VERIFIED="false" \
+          ROLLBACK_VERIFIED="true" \
+          OBSERVABILITY_VERIFIED="false" \
+          INCIDENT_DRILL_VERIFIED="false" \
+          SECRETS_MANAGEMENT_VERIFIED="false" \
+          BRANCH_GOVERNANCE_VERIFIED="false" \
+          python platform/apps/api/scripts/release_evidence.py --output /tmp/release-evidence.json
 
       - name: Validate release evidence JSON
         run: python -m json.tool /tmp/release-evidence.json > /dev/null
@@ -317,3 +395,16 @@ jobs:
           path: /tmp/release-evidence.json
           if-no-files-found: error
           retention-days: 30
+
+      - name: Enforce release gates
+        shell: bash
+        env:
+          SITE_RESULT: ${{ needs.site-quality.result }}
+          API_RESULT: ${{ needs.api-quality.result }}
+          CONTAINER_RESULT: ${{ needs.container-smoke.result }}
+        run: |
+          set -euo pipefail
+          printf 'site-quality=%s\napi-quality=%s\ncontainer-smoke=%s\n' "$SITE_RESULT" "$API_RESULT" "$CONTAINER_RESULT"
+          test "$SITE_RESULT" = success
+          test "$API_RESULT" = success
+          test "$CONTAINER_RESULT" = success
