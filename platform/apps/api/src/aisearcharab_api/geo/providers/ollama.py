@@ -12,10 +12,23 @@ from .base import ProviderResult
 DEFAULT_TIMEOUT_SECONDS = 120.0
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 DEFAULT_ALLOWED_HOSTS = frozenset({"ollama", "localhost", "127.0.0.1"})
+DEFAULT_ALLOWED_PORTS = frozenset({11434})
 
 
 class OllamaProviderError(RuntimeError):
     """Raised when the local Ollama runtime returns an invalid or failed response."""
+
+
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Reject redirects so an allowlisted Ollama endpoint cannot pivot to another target."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001, ANN201 - urllib override
+        raise urllib.error.HTTPError(newurl, code, "Ollama redirects are forbidden", headers, fp)
+
+
+def _open_no_redirect(request: urllib.request.Request, *, timeout: float):
+    opener = urllib.request.build_opener(_NoRedirectHandler())
+    return opener.open(request, timeout=timeout)
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,19 +36,23 @@ class OllamaProvider:
     """Minimal, self-hosted Ollama provider using only the Python standard library.
 
     The endpoint is configuration-controlled rather than user-controlled. By default
-    it may only target the local Docker service or loopback interfaces so this
-    adapter cannot become a generic SSRF primitive.
+    it may only target the local Docker service or loopback interfaces on Ollama's
+    expected port. Redirects are rejected so this adapter cannot be used to pivot
+    from an allowlisted local endpoint to an arbitrary network destination.
     """
 
     model: str
     base_url: str = "http://ollama:11434"
     timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS
     allowed_hosts: frozenset[str] = DEFAULT_ALLOWED_HOSTS
+    allowed_ports: frozenset[int] = DEFAULT_ALLOWED_PORTS
     name: str = "ollama"
 
     def __post_init__(self) -> None:
-        if not self.model.strip():
+        if not isinstance(self.model, str) or not self.model.strip():
             raise ValueError("Ollama model must be non-empty")
+        if not isinstance(self.timeout_seconds, (int, float)) or isinstance(self.timeout_seconds, bool):
+            raise ValueError("Ollama timeout_seconds must be numeric")
         if not 1 <= self.timeout_seconds <= 600:
             raise ValueError("Ollama timeout_seconds must be between 1 and 600")
 
@@ -44,6 +61,12 @@ class OllamaProvider:
             raise ValueError("Ollama base_url must use http or https")
         if not parsed.hostname or parsed.hostname not in self.allowed_hosts:
             raise ValueError("Ollama base_url host is not allowlisted")
+        try:
+            port = parsed.port
+        except ValueError as exc:
+            raise ValueError("Ollama base_url contains an invalid port") from exc
+        if port is None or port not in self.allowed_ports:
+            raise ValueError("Ollama base_url port is not allowlisted")
         if parsed.username is not None or parsed.password is not None:
             raise ValueError("Ollama base_url credentials are forbidden")
         if parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
@@ -53,6 +76,8 @@ class OllamaProvider:
         return ("local-inference", "open-source-runtime", "no-native-citations")
 
     def run_query(self, query: str, *, locale: str = "ar") -> ProviderResult:
+        if not isinstance(query, str):
+            raise ValueError("query must be a string")
         normalized_query = query.strip()
         if not normalized_query:
             raise ValueError("query must be non-empty")
@@ -87,7 +112,7 @@ class OllamaProvider:
 
         started = time.monotonic()
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:  # noqa: S310 -- host is allowlisted above
+            with _open_no_redirect(request, timeout=float(self.timeout_seconds)) as response:
                 raw_bytes = response.read(MAX_RESPONSE_BYTES + 1)
         except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, OSError) as exc:
             raise OllamaProviderError("Ollama request failed") from exc
