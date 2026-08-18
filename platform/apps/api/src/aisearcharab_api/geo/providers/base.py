@@ -12,6 +12,13 @@ class ProviderCitation:
 
 
 @dataclass(frozen=True, slots=True)
+class ProviderMention:
+    entity_key: str
+    display_text: str
+    position: int | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class ProviderResult:
     provider: str
     model: str
@@ -19,6 +26,7 @@ class ProviderResult:
     answer_text: str
     citations: tuple[ProviderCitation, ...]
     raw_payload: str
+    mentions: tuple[ProviderMention, ...] = ()
     raw_reference: str | None = None
     latency_ms: int | None = None
 
@@ -31,7 +39,7 @@ class GeoProvider(Protocol):
 
         Implementations must keep credentials server-side, preserve enough raw
         upstream payload for hashing/reproducibility, and must not silently
-        fabricate citations when the upstream provider returns none.
+        fabricate citations or mentions when the upstream provider returns none.
         """
         ...
 
