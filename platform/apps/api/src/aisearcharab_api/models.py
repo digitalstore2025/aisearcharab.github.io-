@@ -157,7 +157,7 @@ class User(Base):
 class AdminSession(Base):
     __tablename__ = "admin_sessions"
     __table_args__ = (
-        UniqueConstraint("token_hash", name="admin_sessions_token_hash_key"),
+        UniqueConstraint("token_hash"),
         Index("ix_admin_sessions_token_hash", "token_hash", unique=True),
         Index("ix_admin_sessions_user_active", "user_id", "revoked_at", "expires_at"),
     )
