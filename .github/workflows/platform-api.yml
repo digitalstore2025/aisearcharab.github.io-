@@ -296,18 +296,28 @@ jobs:
           persist-credentials: false
           fetch-depth: 2
 
-      - name: Verify pull-request merge provenance
+      - name: Verify tested pull-request merge provenance
         if: github.event_name == 'pull_request'
         shell: bash
         env:
-          EXPECTED_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          parents="$(git show -s --format='%P' "$GITHUB_SHA")"
-          test "$(wc -w <<< "$parents" | tr -d ' ')" = "2"
-          grep -qw "$EXPECTED_BASE_SHA" <<< "$parents"
-          grep -qw "$EXPECTED_HEAD_SHA" <<< "$parents"
+          read -r actual_base_sha actual_head_sha extra <<< "$(git show -s --format='%P' "$GITHUB_SHA")"
+          test -n "$actual_base_sha"
+          test -n "$actual_head_sha"
+          test -z "${extra:-}"
+          test "$actual_head_sha" = "$EXPECTED_HEAD_SHA"
+          test "$(git rev-parse "$actual_base_sha")" = "$actual_base_sha"
+          test "$(git rev-parse "$actual_head_sha")" = "$actual_head_sha"
+          echo "event_base_sha=$EVENT_BASE_SHA"
+          echo "tested_base_sha=$actual_base_sha"
+          echo "tested_head_sha=$actual_head_sha"
+          echo "tested_merge_sha=$GITHUB_SHA"
+          echo "RELEASE_BASE_SHA=$actual_base_sha" >> "$GITHUB_ENV"
+          echo "RELEASE_SOURCE_HEAD_SHA=$actual_head_sha" >> "$GITHUB_ENV"
+          echo "RELEASE_TESTED_SHA=$GITHUB_SHA" >> "$GITHUB_ENV"
 
       - name: Prepare immutable release identifiers
         shell: bash
@@ -323,9 +333,6 @@ jobs:
           API_RESULT: ${{ needs.api-quality.result }}
           CONTAINER_RESULT: ${{ needs.container-smoke.result }}
           RELEASE_PR: ${{ github.event.pull_request.number }}
-          RELEASE_SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          RELEASE_TESTED_SHA: ${{ github.sha }}
-          RELEASE_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
           site_status=fail
