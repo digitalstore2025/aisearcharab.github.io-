@@ -4,14 +4,15 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
-from aisearcharab_api.geo.evidence_models import Citation, GeoQuery, ProviderRun
+from aisearcharab_api.geo.evidence_models import Citation, GeoQuery, Mention, ProviderRun
 from aisearcharab_api.geo.evidence_store import (
     MAX_CITATIONS,
+    MAX_MENTIONS,
     MAX_RAW_PAYLOAD_BYTES,
     MalformedProviderOutput,
     append_provider_result,
 )
-from aisearcharab_api.geo.providers.base import ProviderCitation, ProviderResult
+from aisearcharab_api.geo.providers.base import ProviderCitation, ProviderMention, ProviderResult
 from conftest import csrf_from_client
 
 
@@ -40,13 +41,13 @@ def _query_id(client: TestClient, owner_credentials: dict[str, str]) -> tuple[st
     return org_id, project_id, query.json()["id"]
 
 
-def test_append_provider_result_is_hashed_raw_payload_is_retained_and_citations_are_preserved(
+def test_append_provider_result_preserves_hash_mentions_and_citations(
     client: TestClient,
     owner_credentials: dict[str, str],
     session_factory: sessionmaker[Session],
 ) -> None:
     org_id, project_id, query_id = _query_id(client, owner_credentials)
-    raw = '{"answer":"Example","citations":["https://example.org/source"]}'
+    raw = '{"answer":"Example","mentions":["AISearcharab"],"citations":["https://example.org/source"]}'
     result = ProviderResult(
         provider="test-provider",
         model="test-model-1",
@@ -54,6 +55,7 @@ def test_append_provider_result_is_hashed_raw_payload_is_retained_and_citations_
         answer_text="Example answer",
         citations=(ProviderCitation(url="https://example.org/source", title="Primary source", position=1),),
         raw_payload=raw,
+        mentions=(ProviderMention(entity_key="aisearcharab", display_text="AISearcharab", position=0),),
         latency_ms=123,
     )
     with session_factory() as db:
@@ -69,6 +71,10 @@ def test_append_provider_result_is_hashed_raw_payload_is_retained_and_citations_
         assert stored.provider == "test-provider"
         assert stored.raw_response_payload == raw
         assert hashlib.sha256(stored.raw_response_payload.encode()).hexdigest() == stored.raw_response_sha256
+        mentions = db.query(Mention).filter_by(run_id=run.id).all()
+        assert [(m.entity_key, m.display_text, m.position) for m in mentions] == [
+            ("aisearcharab", "AISearcharab", 0)
+        ]
         citations = db.query(Citation).filter_by(run_id=run.id).all()
         assert [(c.url, c.position) for c in citations] == [("https://example.org/source", 1)]
 
@@ -114,7 +120,7 @@ def test_missing_raw_payload_is_rejected(
             append_provider_result(db, organization_id=org_id, project_id=project_id, query_id=query_id, result=bad)
 
 
-def test_oversized_raw_payload_and_citation_fanout_are_rejected(
+def test_oversized_raw_payload_citation_and_mention_fanout_are_rejected(
     client: TestClient,
     owner_credentials: dict[str, str],
     session_factory: sessionmaker[Session],
@@ -133,7 +139,7 @@ def test_oversized_raw_payload_and_citation_fanout_are_rejected(
         with pytest.raises(MalformedProviderOutput, match="payload exceeds"):
             append_provider_result(db, organization_id=org_id, project_id=project_id, query_id=query_id, result=too_large)
 
-        too_many = ProviderResult(
+        too_many_citations = ProviderResult(
             provider="provider",
             model="model",
             query=query.text,
@@ -142,7 +148,34 @@ def test_oversized_raw_payload_and_citation_fanout_are_rejected(
             raw_payload="{}",
         )
         with pytest.raises(MalformedProviderOutput, match="citation count"):
-            append_provider_result(db, organization_id=org_id, project_id=project_id, query_id=query_id, result=too_many)
+            append_provider_result(
+                db,
+                organization_id=org_id,
+                project_id=project_id,
+                query_id=query_id,
+                result=too_many_citations,
+            )
+
+        too_many_mentions = ProviderResult(
+            provider="provider",
+            model="model",
+            query=query.text,
+            answer_text="answer",
+            citations=(),
+            raw_payload="{}",
+            mentions=tuple(
+                ProviderMention(entity_key=f"entity-{i}", display_text=f"Entity {i}")
+                for i in range(MAX_MENTIONS + 1)
+            ),
+        )
+        with pytest.raises(MalformedProviderOutput, match="mention count"):
+            append_provider_result(
+                db,
+                organization_id=org_id,
+                project_id=project_id,
+                query_id=query_id,
+                result=too_many_mentions,
+            )
 
 
 def test_provider_and_model_identifier_bounds_are_enforced(
@@ -195,6 +228,18 @@ def test_wrong_runtime_types_fail_closed_as_malformed_output(
         )
         with pytest.raises(MalformedProviderOutput, match="citation URL must be a string"):
             append_provider_result(db, organization_id=org_id, project_id=project_id, query_id=query_id, result=bad_citation)
+
+        bad_mention = ProviderResult(
+            provider="provider",
+            model="model",
+            query=query.text,
+            answer_text="answer",
+            citations=(),
+            raw_payload="{}",
+            mentions=(ProviderMention(entity_key=123, display_text="Entity"),),  # type: ignore[arg-type]
+        )
+        with pytest.raises(MalformedProviderOutput, match="mention entity key must be a string"):
+            append_provider_result(db, organization_id=org_id, project_id=project_id, query_id=query_id, result=bad_mention)
 
         bad_latency = ProviderResult(
             provider="provider",
