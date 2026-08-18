@@ -15,6 +15,12 @@ def _slug(value: str) -> str:
     return normalized
 
 
+def _display_name(value: object) -> str:
+    if not isinstance(value, str):
+        raise ValueError("name must be a string")
+    return value.strip()
+
+
 def _domain(value: str) -> str:
     normalized = value.strip().rstrip(".").lower()
     if not normalized or "/" in normalized or ":" in normalized or "@" in normalized:
@@ -38,6 +44,7 @@ class OrganizationCreate(BaseModel):
     name: str = Field(min_length=2, max_length=180)
 
     _normalize_slug = field_validator("slug")(_slug)
+    _normalize_name = field_validator("name", mode="before")(_display_name)
 
 
 class OrganizationPublic(BaseModel):
@@ -55,6 +62,7 @@ class GeoProjectCreate(BaseModel):
     domain: str = Field(min_length=3, max_length=253)
 
     _normalize_slug = field_validator("slug")(_slug)
+    _normalize_name = field_validator("name", mode="before")(_display_name)
     _normalize_domain = field_validator("domain")(_domain)
 
 
