@@ -191,12 +191,20 @@ def build_grounded_prompt(case: ArabicBenchmarkCase) -> str:
     )
 
 
+def _contains_normalized(normalized_answer: str, term: str) -> bool:
+    normalized_term = normalize_text(term)
+    if not normalized_term:
+        return False
+    pattern = rf"(?<!\w){re.escape(normalized_term)}(?!\w)"
+    return re.search(pattern, normalized_answer) is not None
+
+
 def _coverage(groups: Sequence[Sequence[str]], normalized_answer: str) -> float:
     if not groups:
         return 1.0
     hits = 0
     for group in groups:
-        if any(normalize_text(term) in normalized_answer for term in group):
+        if any(_contains_normalized(normalized_answer, term) for term in group):
             hits += 1
     return hits / len(groups)
 
@@ -223,12 +231,14 @@ def score_answer(
     normalized_answer = normalize_text(answer_text)
     term_coverage = _coverage(case.required_term_groups, normalized_answer)
     entity_recall = _coverage(tuple((entity,) for entity in case.required_entities), normalized_answer)
-    forbidden_hits = tuple(term for term in case.forbidden_terms if normalize_text(term) in normalized_answer)
+    forbidden_hits = tuple(
+        term for term in case.forbidden_terms if _contains_normalized(normalized_answer, term)
+    )
     urls = extract_urls(answer_text)
     citation_safe = case.allow_urls or not urls
     ratio = arabic_letter_ratio(answer_text)
     arabic_ok = ratio >= case.min_arabic_ratio
-    abstained = any(normalize_text(marker) in normalized_answer for marker in _ABSTENTION_MARKERS)
+    abstained = any(_contains_normalized(normalized_answer, marker) for marker in _ABSTENTION_MARKERS)
     forbidden_clear = not forbidden_hits
 
     if case.must_abstain:
@@ -272,9 +282,9 @@ def score_answer(
     )
 
 
-def _mean(values: Sequence[float], *, default: float = 1.0) -> float:
+def _mean(values: Sequence[float]) -> float | None:
     if not values:
-        return default
+        return None
     return sum(values) / len(values)
 
 
@@ -310,19 +320,24 @@ def aggregate_scores(
     forbidden_claim_cases = sum(1 for score in scores if score.forbidden_hits)
     latencies = [score.latency_ms for score in scores if score.latency_ms is not None]
 
+    grounded_term_recall = _mean([score.term_coverage for score in non_abstention])
+    entity_recall = _mean(entity_scores)
+    abstention_accuracy = _mean(abstention_scores)
     total = len(scores)
     return {
         "cases": total,
-        "mean_score": round(_mean([score.score for score in scores], default=0.0), 4),
+        "mean_score": round(sum(score.score for score in scores) / total, 4),
         "pass_rate": round(sum(1 for score in scores if score.passed) / total, 4),
         "arabic_locale_rate": round(sum(1 for score in scores if score.arabic_ok) / total, 4),
-        "grounded_term_recall": round(
-            _mean([score.term_coverage for score in non_abstention], default=1.0), 4
+        "grounded_term_recall": (
+            round(grounded_term_recall, 4) if grounded_term_recall is not None else None
         ),
-        "entity_recall": round(_mean(entity_scores, default=1.0), 4),
+        "entity_recall": round(entity_recall, 4) if entity_recall is not None else None,
         "unsupported_url_rate": round(unsupported_url_cases / total, 4),
         "forbidden_claim_rate": round(forbidden_claim_cases / total, 4),
-        "abstention_accuracy": round(_mean(abstention_scores, default=1.0), 4),
+        "abstention_accuracy": (
+            round(abstention_accuracy, 4) if abstention_accuracy is not None else None
+        ),
         "latency_p50_ms": _percentile_nearest_rank(latencies, 0.50),
         "latency_p95_ms": _percentile_nearest_rank(latencies, 0.95),
     }
@@ -346,6 +361,8 @@ def gate_failures(
 ) -> tuple[str, ...]:
     failures: list[str] = []
     for metric, (operator, threshold) in gates.items():
+        if operator not in {">=", "<="}:
+            raise ValueError(f"unsupported gate operator for {metric}: {operator!r}")
         value = metrics.get(metric)
         if not isinstance(value, (int, float)) or isinstance(value, bool):
             failures.append(f"{metric}: missing numeric metric")
