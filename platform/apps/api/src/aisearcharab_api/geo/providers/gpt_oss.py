@@ -27,7 +27,8 @@ class GptOssOllamaProvider(OllamaProvider):
         normalized_model = self.model.strip()
         if normalized_model not in SUPPORTED_GPT_OSS_MODELS:
             allowed = ", ".join(sorted(SUPPORTED_GPT_OSS_MODELS))
-            raise ValueError(f"gpt-oss model must be one of: {allowed}")
+            raise ValueError(f"Invalid gpt-oss model {normalized_model!r}. Must be one of: {allowed}")
+        object.__setattr__(self, "model", normalized_model)
 
     def capabilities(self) -> tuple[str, ...]:
         return (
