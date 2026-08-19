@@ -40,13 +40,19 @@
         <span class="brand-mark" aria-hidden="true">AI</span>
         <span class="brand-copy"><strong>مرصد الذكاء الاصطناعي العربي</strong><small>AI Search Arab</small></span>
       </a>
+      {{ $homeURL := "./" | relURL }}
+      {{ $investigationsURL := "investigations/" | relURL }}
+      {{ $toolkitsURL := "toolkits/" | relURL }}
+      {{ $methodologyURL := "methodology/" | relURL }}
+      {{ $correctionsURL := "corrections/" | relURL }}
+      {{ $searchURL := "search/" | relURL }}
       <nav class="primary-nav" aria-label="التنقل الرئيسي">
-        <a href="{{ "./" | relURL }}">الرئيسية</a>
-        <a href="{{ "investigations/" | relURL }}">تحقيقات</a>
-        <a href="{{ "toolkits/" | relURL }}">أدوات</a>
-        <a href="{{ "methodology/" | relURL }}">المنهجية</a>
-        <a href="{{ "corrections/" | relURL }}">التصحيحات</a>
-        <a class="nav-search" href="{{ "search/" | relURL }}">ابدأ البحث</a>
+        <a href="{{ $homeURL }}"{{ if .IsHome }} aria-current="page"{{ end }}>الرئيسية</a>
+        <a href="{{ $investigationsURL }}"{{ if eq .RelPermalink $investigationsURL }} aria-current="page"{{ end }}>تحقيقات</a>
+        <a href="{{ $toolkitsURL }}"{{ if eq .RelPermalink $toolkitsURL }} aria-current="page"{{ end }}>أدوات</a>
+        <a href="{{ $methodologyURL }}"{{ if eq .RelPermalink $methodologyURL }} aria-current="page"{{ end }}>المنهجية</a>
+        <a href="{{ $correctionsURL }}"{{ if eq .RelPermalink $correctionsURL }} aria-current="page"{{ end }}>التصحيحات</a>
+        <a class="nav-search" href="{{ $searchURL }}"{{ if eq .RelPermalink $searchURL }} aria-current="page"{{ end }}>ابدأ البحث</a>
       </nav>
     </div>
   </header>
