@@ -1,0 +1,60 @@
+name: Validate gpt-oss Arabic benchmark
+
+on:
+  push:
+    paths:
+      - "platform/apps/api/src/aisearcharab_api/evals/**"
+      - "platform/apps/api/scripts/benchmark_gpt_oss_ar.py"
+      - "platform/apps/api/tests/fixtures/gpt_oss_ar_benchmark.json"
+      - "platform/apps/api/tests/test_gpt_oss_ar_benchmark.py"
+      - "docs/GPT_OSS_ARABIC_BENCHMARK.md"
+      - ".github/workflows/gpt-oss-arabic-benchmark.yml"
+  pull_request:
+    paths:
+      - "platform/apps/api/src/aisearcharab_api/evals/**"
+      - "platform/apps/api/scripts/benchmark_gpt_oss_ar.py"
+      - "platform/apps/api/tests/fixtures/gpt_oss_ar_benchmark.json"
+      - "platform/apps/api/tests/test_gpt_oss_ar_benchmark.py"
+      - "docs/GPT_OSS_ARABIC_BENCHMARK.md"
+      - ".github/workflows/gpt-oss-arabic-benchmark.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: gpt-oss-arabic-benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark-fixture:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Compile benchmark code
+        run: >-
+          python -m compileall -q
+          platform/apps/api/src/aisearcharab_api/evals
+          platform/apps/api/scripts/benchmark_gpt_oss_ar.py
+
+      - name: Validate versioned benchmark fixture and golden gates
+        working-directory: platform/apps/api
+        run: python scripts/benchmark_gpt_oss_ar.py --validate-only > /tmp/gpt-oss-ar-benchmark-validation.json
+
+      - name: Validate benchmark evidence JSON
+        run: python -m json.tool /tmp/gpt-oss-ar-benchmark-validation.json > /dev/null
+
+      - name: Upload benchmark validation evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: gpt-oss-arabic-benchmark-validation
+          path: /tmp/gpt-oss-ar-benchmark-validation.json
+          if-no-files-found: error
+          retention-days: 14
