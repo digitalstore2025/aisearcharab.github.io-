@@ -6,10 +6,12 @@ Core rules:
 
 - proprietary AI services are not required for the local critical path;
 - Ollama is optional and isolated from the public network by loopback port binding;
-- the API adapter is `aisearcharab_api.geo.providers.ollama.OllamaProvider`;
+- the generic API adapter is `aisearcharab_api.geo.providers.ollama.OllamaProvider`;
+- the constrained OpenAI open-weight adapter is `aisearcharab_api.geo.providers.gpt_oss.GptOssOllamaProvider`;
+- the gpt-oss adapter accepts only the official Ollama identifiers `gpt-oss:20b` and `gpt-oss:120b`, defaulting to `gpt-oss:20b`;
 - the provider endpoint is allowlisted and configuration-controlled;
 - local models must not fabricate citations or mentions;
-- the selected model is deliberately not hard-coded: license, Arabic quality, memory, latency, and safety must be reviewed per deployment;
+- arbitrary local models remain deliberately opt-in through the generic Ollama adapter: license, Arabic quality, memory, latency, and safety must be reviewed per deployment;
 - production deployments must pin the Ollama container by immutable digest and re-run release evidence.
 
-Full design and production boundaries: `../docs/OPEN_SOURCE_BUILD.md`.
+Full design, gpt-oss usage, and production boundaries: `../docs/OPEN_SOURCE_BUILD.md`.
