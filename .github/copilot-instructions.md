@@ -17,7 +17,8 @@ Follow these references in order:
 
 1. `docs/EXECUTIVE_BLUEPRINT.md`
 2. `AGENTS.md`
-3. Existing schemas, tests, and repository policies.
+3. `docs/UI_PROMPTOPS_SYSTEM.md` for AI-assisted UI/frontend design or refinement tasks.
+4. Existing schemas, tests, and repository policies.
 
 ## Core rules
 
@@ -109,6 +110,20 @@ A claim record should distinguish verified facts, estimates, inferences, and thi
 - Use responsive, optimized images.
 - Do not add client-side frameworks for isolated UI behavior.
 - Structured data must match visible page content.
+
+### AI-assisted UI PromptOps
+
+For UI/frontend work generated or refined with an AI tool:
+
+- read `docs/UI_PROMPTOPS_SYSTEM.md` before proposing or implementing a change;
+- use the narrowest valid mode (`AUDIT`, `SCREEN`, `COMPONENT`, `REFINE`, `RTL`, `RESPONSIVE`, `ACCESSIBILITY`, `DESIGN_TO_CODE`, or `RED_TEAM`);
+- prefer one major change per iteration;
+- identify the exact target page/component and explicit `DO NOT MODIFY` scope;
+- preserve an approved baseline instead of reconstructing unrelated layout or components;
+- define observable acceptance criteria before implementation;
+- separate layout, component, content, imagery, typography, and responsive changes unless tightly coupled;
+- leave unobserved quality dimensions as `N/A` rather than guessing;
+- never claim visual fidelity, accessibility compliance, performance success, browser compatibility, or regression safety without the corresponding rendered/test evidence.
 
 ## Security requirements
 
