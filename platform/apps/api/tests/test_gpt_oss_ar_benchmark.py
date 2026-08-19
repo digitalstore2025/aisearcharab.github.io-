@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from aisearcharab_api.evals.gpt_oss_ar import (
     aggregate_scores,
     arabic_letter_ratio,
@@ -76,6 +78,48 @@ def test_abstention_requires_explicit_uncertainty() -> None:
     assert invented.passed is False
     assert invented.abstained is False
     assert invented.forbidden_hits == ("100 دولار",)
+
+
+def test_boundary_aware_matching_rejects_substrings() -> None:
+    cases = _cases()
+    ranking = next(case for case in cases if case.case_id == "ordered-ranking")
+    ranking_score = score_answer(
+        ranking,
+        "الترتيب: جيم 0.91، ثم المعين 0.82، ثم باء 0.76.",
+    )
+    assert ranking_score.term_coverage == pytest.approx(2 / 3, abs=0.0001)
+    assert ranking_score.entity_recall == pytest.approx(2 / 3, abs=0.0001)
+
+    arithmetic = next(case for case in cases if case.case_id == "arithmetic-total-mentions")
+    arithmetic_score = score_answer(arithmetic, "المجموع 150 إجابة للجهة ألف.")
+    assert arithmetic_score.term_coverage == 0.0
+
+
+def test_aggregate_scores_fails_closed_on_length_and_id_mismatch() -> None:
+    cases = _cases()
+    first = score_answer(cases[0], cases[0].reference_answer)
+    second = score_answer(cases[1], cases[1].reference_answer)
+
+    with pytest.raises(ValueError, match="matching lengths"):
+        aggregate_scores(cases[:2], [first])
+
+    with pytest.raises(ValueError, match="ids"):
+        aggregate_scores(cases[:1], [second])
+
+
+def test_undefined_metrics_do_not_look_perfect_and_fail_default_gate() -> None:
+    case = next(case for case in _cases() if not case.must_abstain and case.required_entities)
+    score = score_answer(case, case.reference_answer)
+    metrics = aggregate_scores([case], [score])
+
+    assert metrics["abstention_accuracy"] is None
+    failures = gate_failures(metrics)
+    assert any(failure.startswith("abstention_accuracy:") for failure in failures)
+
+
+def test_gate_operator_validation_fails_fast() -> None:
+    with pytest.raises(ValueError, match="unsupported gate operator"):
+        gate_failures({"example": 1.0}, {"example": ("=>", 0.5)})
 
 
 def test_arabic_normalization_ratio_and_url_extraction() -> None:
