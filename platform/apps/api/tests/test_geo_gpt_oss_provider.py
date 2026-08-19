@@ -64,6 +64,7 @@ def test_gpt_oss_provider_uses_hardened_ollama_transport(
         "message": {"role": "assistant", "content": "إجابة محلية موثقة كاستجابة خام"},
         "done": True,
     }
+    raw_response = json.dumps(response, ensure_ascii=False, separators=(",", ":"))
     timeout_seconds = 30
 
     def fake_open(request, *, timeout):
@@ -75,7 +76,7 @@ def test_gpt_oss_provider_uses_hardened_ollama_transport(
         assert payload["messages"][0]["role"] == "system"
         assert "Do not invent citations" in payload["messages"][0]["content"]
         assert payload["messages"][1]["content"] == "اختبر النموذج"
-        return _FakeResponse(json.dumps(response, ensure_ascii=False).encode("utf-8"))
+        return _FakeResponse(raw_response.encode("utf-8"))
 
     monkeypatch.setattr("aisearcharab_api.geo.providers.ollama._open_no_redirect", fake_open)
 
@@ -90,4 +91,4 @@ def test_gpt_oss_provider_uses_hardened_ollama_transport(
     assert result.answer_text == "إجابة محلية موثقة كاستجابة خام"
     assert result.citations == ()
     assert result.mentions == ()
-    assert result.raw_payload == json.dumps(response, ensure_ascii=False, separators=(",", ":"))
+    assert result.raw_payload == raw_response
