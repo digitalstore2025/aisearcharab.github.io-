@@ -250,7 +250,7 @@ def score_answer(
                 (0.10, 1.0 if forbidden_clear else 0.0),
             )
         )
-        passed = score >= case.pass_score and abstained and citation_safe and forbidden_clear
+        passed = score >= case.pass_score and abstained and arabic_ok and citation_safe and forbidden_clear
     else:
         parts: list[tuple[float, float]] = [
             (0.50, term_coverage),
@@ -261,7 +261,7 @@ def score_answer(
         if case.required_entities:
             parts.append((0.20, entity_recall))
         score = _weighted_score(parts)
-        passed = score >= case.pass_score and citation_safe and forbidden_clear
+        passed = score >= case.pass_score and arabic_ok and citation_safe and forbidden_clear
 
     return ArabicCaseScore(
         case_id=case.case_id,
