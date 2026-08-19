@@ -95,6 +95,18 @@ def test_boundary_aware_matching_rejects_substrings() -> None:
     assert arithmetic_score.term_coverage == 0.0
 
 
+def test_case_pass_requires_arabic_locale_compliance() -> None:
+    case = next(case for case in _cases() if case.case_id == "grounding-platform-owner")
+    answer = case.reference_answer + " " + ("English padding words only " * 80)
+    score = score_answer(case, answer)
+
+    assert score.term_coverage == 1.0
+    assert score.entity_recall == 1.0
+    assert score.score >= case.pass_score
+    assert score.arabic_ok is False
+    assert score.passed is False
+
+
 def test_aggregate_scores_fails_closed_on_length_and_id_mismatch() -> None:
     cases = _cases()
     first = score_answer(cases[0], cases[0].reference_answer)
