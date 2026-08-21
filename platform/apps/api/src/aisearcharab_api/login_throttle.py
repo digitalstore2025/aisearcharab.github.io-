@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, Request, status
@@ -18,11 +19,65 @@ def _aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
+def _trusted_proxy_networks(request: Request) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+    networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
+    for cidr in request.app.state.settings.trusted_proxy_cidrs:
+        # Settings.validate() rejects malformed and /0 networks. Parsing again here
+        # keeps this helper independent from mutable environment state.
+        networks.append(ipaddress.ip_network(cidr, strict=False))
+    return tuple(networks)
+
+
+def _in_trusted_proxy_networks(
+    address: ipaddress.IPv4Address | ipaddress.IPv6Address,
+    networks: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...],
+) -> bool:
+    return any(address.version == network.version and address in network for network in networks)
+
+
 def _source(request: Request) -> str:
-    # Deliberately use the ASGI peer address, not X-Forwarded-For. Forwarded
-    # headers are attacker-controlled unless a trusted proxy has normalized them.
+    """Return a stable pre-auth source identity without trusting arbitrary headers.
+
+    The direct ASGI peer remains authoritative unless it belongs to an explicitly
+    configured trusted proxy CIDR. Only then do we walk X-Forwarded-For from the
+    right, discard known proxy hops, and use the nearest untrusted address.
+
+    This prevents a reverse proxy from collapsing all clients into one throttle
+    identity while still preventing direct clients from spoofing X-Forwarded-For.
+    """
     client = request.client
-    return client.host if client and client.host else "unknown-peer"
+    peer = client.host if client and client.host else "unknown-peer"
+    networks = _trusted_proxy_networks(request)
+    if not networks:
+        return peer
+
+    try:
+        peer_ip = ipaddress.ip_address(peer)
+    except ValueError:
+        return peer
+    if not _in_trusted_proxy_networks(peer_ip, networks):
+        return peer_ip.compressed
+
+    forwarded = request.headers.get("x-forwarded-for", "")
+    if not forwarded:
+        return peer_ip.compressed
+
+    # A conforming trusted proxy appends its observed client address. Walking
+    # from the right means attacker-supplied entries to the left cannot override
+    # the nearest untrusted hop that the trusted proxy observed.
+    chain = [item.strip() for item in forwarded.split(",") if item.strip()]
+    chain.append(peer_ip.compressed)
+    for raw in reversed(chain):
+        try:
+            candidate = ipaddress.ip_address(raw)
+        except ValueError:
+            # Malformed data from the trusted chain is not used as identity.
+            return peer_ip.compressed
+        if _in_trusted_proxy_networks(candidate, networks):
+            continue
+        return candidate.compressed
+
+    return peer_ip.compressed
 
 
 def throttle_key(request: Request, normalized_email: str) -> str:
