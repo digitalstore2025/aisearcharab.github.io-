@@ -51,9 +51,21 @@ def _valid_proxy_cidr(value: str) -> bool:
         network = ipaddress.ip_network(value, strict=False)
     except ValueError:
         return False
-    # A /0 makes every direct client a trusted proxy and would allow spoofed
-    # forwarding headers to control the authentication throttle identity.
+    # A direct /0 is always unsafe; the aggregate-set check below also rejects
+    # multiple narrower networks that collapse to the same trust-everywhere set.
     return network.prefixlen > 0
+
+
+def _proxy_cidrs_cover_entire_family(values: tuple[str, ...]) -> bool:
+    networks = tuple(ipaddress.ip_network(value, strict=False) for value in values)
+    for version in (4, 6):
+        family = tuple(network for network in networks if network.version == version)
+        if not family:
+            continue
+        collapsed = tuple(ipaddress.collapse_addresses(family))
+        if len(collapsed) == 1 and collapsed[0].prefixlen == 0:
+            return True
+    return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,6 +152,8 @@ class Settings:
             raise ConfigurationError("LOGIN_THROTTLE_KEY must contain at least 32 bytes")
         if any(not _valid_proxy_cidr(cidr) for cidr in self.trusted_proxy_cidrs):
             raise ConfigurationError("TRUSTED_PROXY_CIDRS must contain explicit IP networks and must not include /0")
+        if self.trusted_proxy_cidrs and _proxy_cidrs_cover_entire_family(self.trusted_proxy_cidrs):
+            raise ConfigurationError("TRUSTED_PROXY_CIDRS must not collectively trust an entire IP address family")
         if not 12 <= self.password_min_length <= 128:
             raise ConfigurationError("PASSWORD_MIN_LENGTH must be between 12 and 128")
         if not 2 <= self.mfa_enrollment_ttl_minutes <= 30:
