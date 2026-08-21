@@ -102,8 +102,9 @@ def test_trusted_proxy_cidr_must_be_valid_network() -> None:
         settings.validate()
 
 
-def test_trusted_proxy_cidr_rejects_trust_everywhere() -> None:
-    settings = production_settings(trusted_proxy_cidrs=("0.0.0.0/0",))
+@pytest.mark.parametrize("cidr", ["0.0.0.0/0", "::/0"])
+def test_trusted_proxy_cidr_rejects_trust_everywhere(cidr: str) -> None:
+    settings = production_settings(trusted_proxy_cidrs=(cidr,))
     with pytest.raises(ConfigurationError, match="TRUSTED_PROXY_CIDRS"):
         settings.validate()
 
