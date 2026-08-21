@@ -24,9 +24,9 @@ def _aware(value: datetime) -> datetime:
 def _parse_trusted_proxy_networks(
     cidrs: tuple[str, ...],
 ) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
-    # Settings.validate() rejects malformed and /0 networks. The tuple is
-    # immutable configuration, so parsed networks can be safely reused on the
-    # pre-authentication hot path.
+    # Settings.validate() rejects malformed and trust-everywhere networks. The
+    # tuple is immutable configuration, so parsed networks can be safely reused
+    # on the pre-authentication hot path.
     return tuple(ipaddress.ip_network(cidr, strict=False) for cidr in cidrs)
 
 
@@ -41,12 +41,26 @@ def _in_trusted_proxy_networks(
     return any(address.version == network.version and address in network for network in networks)
 
 
+def _forwarded_chain(request: Request) -> list[str]:
+    """Flatten every X-Forwarded-For field in wire order.
+
+    A trusted proxy may append a second header field instead of rewriting an
+    attacker-supplied field. Reading all values ensures the authoritative hop
+    appended by the trusted proxy remains the right-most forwarded address.
+    """
+    chain: list[str] = []
+    for field in request.headers.getlist("x-forwarded-for"):
+        chain.extend(item.strip() for item in field.split(",") if item.strip())
+    return chain
+
+
 def _source(request: Request) -> str:
     """Return a stable pre-auth source identity without trusting arbitrary headers.
 
     The direct ASGI peer remains authoritative unless it belongs to an explicitly
-    configured trusted proxy CIDR. Only then do we walk X-Forwarded-For from the
-    right, discard known proxy hops, and use the nearest untrusted address.
+    configured trusted proxy CIDR. Only then do we walk all X-Forwarded-For
+    fields from the right, discard known proxy hops, and use the nearest
+    untrusted address.
 
     This prevents a reverse proxy from collapsing all clients into one throttle
     identity while still preventing direct clients from spoofing X-Forwarded-For.
@@ -64,14 +78,13 @@ def _source(request: Request) -> str:
     if not _in_trusted_proxy_networks(peer_ip, networks):
         return peer_ip.compressed
 
-    forwarded = request.headers.get("x-forwarded-for", "")
-    if not forwarded:
+    chain = _forwarded_chain(request)
+    if not chain:
         return peer_ip.compressed
 
     # A conforming trusted proxy appends its observed client address. Walking
     # from the right means attacker-supplied entries to the left cannot override
     # the nearest untrusted hop that the trusted proxy observed.
-    chain = [item.strip() for item in forwarded.split(",") if item.strip()]
     chain.append(peer_ip.compressed)
     for raw in reversed(chain):
         try:
