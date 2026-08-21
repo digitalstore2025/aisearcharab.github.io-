@@ -4,6 +4,7 @@ import hashlib
 import hmac
 import ipaddress
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 
 from fastapi import HTTPException, Request, status
 from sqlalchemy import delete, select
@@ -19,13 +20,18 @@ def _aware(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=timezone.utc)
 
 
+@lru_cache(maxsize=32)
+def _parse_trusted_proxy_networks(
+    cidrs: tuple[str, ...],
+) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
+    # Settings.validate() rejects malformed and /0 networks. The tuple is
+    # immutable configuration, so parsed networks can be safely reused on the
+    # pre-authentication hot path.
+    return tuple(ipaddress.ip_network(cidr, strict=False) for cidr in cidrs)
+
+
 def _trusted_proxy_networks(request: Request) -> tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...]:
-    networks: list[ipaddress.IPv4Network | ipaddress.IPv6Network] = []
-    for cidr in request.app.state.settings.trusted_proxy_cidrs:
-        # Settings.validate() rejects malformed and /0 networks. Parsing again here
-        # keeps this helper independent from mutable environment state.
-        networks.append(ipaddress.ip_network(cidr, strict=False))
-    return tuple(networks)
+    return _parse_trusted_proxy_networks(request.app.state.settings.trusted_proxy_cidrs)
 
 
 def _in_trusted_proxy_networks(
