@@ -96,6 +96,23 @@ def test_login_throttle_key_must_be_strong() -> None:
         settings.validate()
 
 
+def test_trusted_proxy_cidr_must_be_valid_network() -> None:
+    settings = production_settings(trusted_proxy_cidrs=("not-a-network",))
+    with pytest.raises(ConfigurationError, match="TRUSTED_PROXY_CIDRS"):
+        settings.validate()
+
+
+def test_trusted_proxy_cidr_rejects_trust_everywhere() -> None:
+    settings = production_settings(trusted_proxy_cidrs=("0.0.0.0/0",))
+    with pytest.raises(ConfigurationError, match="TRUSTED_PROXY_CIDRS"):
+        settings.validate()
+
+
+def test_trusted_proxy_cidr_accepts_explicit_proxy_network() -> None:
+    settings = production_settings(trusted_proxy_cidrs=("10.0.0.0/24", "2001:db8:1::/64"))
+    settings.validate()
+
+
 def test_idle_timeout_must_be_lower_than_absolute_timeout() -> None:
     settings = Settings(
         environment="test",
