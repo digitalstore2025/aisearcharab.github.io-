@@ -109,6 +109,19 @@ def test_trusted_proxy_cidr_rejects_trust_everywhere(cidr: str) -> None:
         settings.validate()
 
 
+@pytest.mark.parametrize(
+    "cidrs",
+    [
+        ("0.0.0.0/1", "128.0.0.0/1"),
+        ("::/1", "8000::/1"),
+    ],
+)
+def test_trusted_proxy_cidrs_reject_aggregate_trust_everywhere(cidrs: tuple[str, ...]) -> None:
+    settings = production_settings(trusted_proxy_cidrs=cidrs)
+    with pytest.raises(ConfigurationError, match="entire IP address family"):
+        settings.validate()
+
+
 def test_trusted_proxy_cidr_accepts_explicit_proxy_network() -> None:
     settings = production_settings(trusted_proxy_cidrs=("10.0.0.0/24", "2001:db8:1::/64"))
     settings.validate()
