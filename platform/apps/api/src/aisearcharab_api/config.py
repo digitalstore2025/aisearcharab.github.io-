@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ipaddress
 import os
 from dataclasses import dataclass
 from functools import lru_cache
@@ -45,6 +46,16 @@ def _valid_host(value: str) -> bool:
     return all(part and part.replace("-", "").isalnum() for part in candidate.split("."))
 
 
+def _valid_proxy_cidr(value: str) -> bool:
+    try:
+        network = ipaddress.ip_network(value, strict=False)
+    except ValueError:
+        return False
+    # A /0 makes every direct client a trusted proxy and would allow spoofed
+    # forwarding headers to control the authentication throttle identity.
+    return network.prefixlen > 0
+
+
 @dataclass(frozen=True, slots=True)
 class Settings:
     environment: str
@@ -66,6 +77,7 @@ class Settings:
     login_throttle_max_failures: int = 8
     login_throttle_window_seconds: int = 300
     login_throttle_block_seconds: int = 300
+    trusted_proxy_cidrs: tuple[str, ...] = ()
     password_min_length: int = 14
     enforce_separation_of_duties: bool = False
     require_mfa_for_privileged: bool = False
@@ -126,6 +138,8 @@ class Settings:
             raise ConfigurationError("LOGIN_THROTTLE_BLOCK_SECONDS must be between 30 and 3600")
         if self.login_throttle_key is not None and len(self.login_throttle_key.encode("utf-8")) < 32:
             raise ConfigurationError("LOGIN_THROTTLE_KEY must contain at least 32 bytes")
+        if any(not _valid_proxy_cidr(cidr) for cidr in self.trusted_proxy_cidrs):
+            raise ConfigurationError("TRUSTED_PROXY_CIDRS must contain explicit IP networks and must not include /0")
         if not 12 <= self.password_min_length <= 128:
             raise ConfigurationError("PASSWORD_MIN_LENGTH must be between 12 and 128")
         if not 2 <= self.mfa_enrollment_ttl_minutes <= 30:
@@ -184,6 +198,7 @@ def get_settings() -> Settings:
         login_throttle_max_failures=_int("LOGIN_THROTTLE_MAX_FAILURES", os.getenv("LOGIN_THROTTLE_MAX_FAILURES", "8")),
         login_throttle_window_seconds=_int("LOGIN_THROTTLE_WINDOW_SECONDS", os.getenv("LOGIN_THROTTLE_WINDOW_SECONDS", "300")),
         login_throttle_block_seconds=_int("LOGIN_THROTTLE_BLOCK_SECONDS", os.getenv("LOGIN_THROTTLE_BLOCK_SECONDS", "300")),
+        trusted_proxy_cidrs=_csv(os.getenv("TRUSTED_PROXY_CIDRS", "")),
         password_min_length=_int("PASSWORD_MIN_LENGTH", os.getenv("PASSWORD_MIN_LENGTH", "14")),
         enforce_separation_of_duties=_bool(os.getenv("ENFORCE_SEPARATION_OF_DUTIES", "false")),
         require_mfa_for_privileged=_bool(os.getenv("REQUIRE_MFA_FOR_PRIVILEGED", "false")),
