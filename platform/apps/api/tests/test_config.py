@@ -59,16 +59,31 @@ def test_production_rejects_wildcard_cors() -> None:
         settings.validate()
 
 
-def test_production_rejects_wildcard_hosts() -> None:
-    settings = production_settings(allowed_hosts=("*",))
+@pytest.mark.parametrize("host", ["*", "*.example.com"])
+def test_production_rejects_wildcard_hosts(host: str) -> None:
+    settings = production_settings(allowed_hosts=(host,))
     with pytest.raises(ConfigurationError, match="Wildcard hosts"):
         settings.validate()
 
 
-def test_staging_rejects_wildcard_hosts() -> None:
-    settings = staging_settings(allowed_hosts=("*",))
+@pytest.mark.parametrize("host", ["*", "*.example.com"])
+def test_staging_rejects_wildcard_hosts(host: str) -> None:
+    settings = staging_settings(allowed_hosts=(host,))
     with pytest.raises(ConfigurationError, match="Wildcard hosts"):
         settings.validate()
+
+
+def test_development_can_explicitly_use_wildcard_subdomain_host() -> None:
+    settings = Settings(
+        environment="development",
+        database_url="sqlite+pysqlite:///:memory:",
+        allowed_origins=("http://localhost:3000",),
+        allowed_hosts=("*.example.test",),
+        api_prefix="/v1",
+        max_search_limit=20,
+        log_queries=False,
+    )
+    settings.validate()
 
 
 def test_query_logging_requires_keyed_hash_secret() -> None:
