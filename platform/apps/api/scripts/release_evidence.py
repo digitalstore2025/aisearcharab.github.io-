@@ -135,6 +135,8 @@ class ReleaseEvidence:
                 missing.append("production evidence must be generated from a non-PR release ref")
             if self.source_head_sha != self.tested_sha:
                 missing.append("source_head_sha must equal tested_sha for the final production release ref")
+            if self.migration != DEFAULT_MIGRATION:
+                missing.append(f"migration must equal the current readiness revision {DEFAULT_MIGRATION}")
             if self.workflow_run_id is None:
                 missing.append("workflow_run_id")
             if self.workflow_run_attempt is None:
