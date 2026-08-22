@@ -99,12 +99,15 @@ def record_generation_result(
         "model": model,
         "latency_ms": round(max(0.0, latency_ms), 3),
     }
+    # audit.sanitize_metadata intentionally drops keys containing "token" to
+    # protect credentials. Store numeric model-usage counters under neutral names
+    # rather than weakening that repository-wide secret filter.
     if input_tokens is not None:
-        metadata["input_tokens"] = max(0, input_tokens)
+        metadata["input_units"] = max(0, input_tokens)
     if output_tokens is not None:
-        metadata["output_tokens"] = max(0, output_tokens)
+        metadata["output_units"] = max(0, output_tokens)
     if total_tokens is not None:
-        metadata["total_tokens"] = max(0, total_tokens)
+        metadata["total_units"] = max(0, total_tokens)
     if uncertainty is not None:
         metadata["uncertainty"] = uncertainty
     if failure_class is not None:
