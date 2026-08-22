@@ -46,6 +46,9 @@ POST /v1/answers/grounded
 - تتحقق محلياً من JSON ومن أن كل `evidence_id` أعاده النموذج موجود فعلاً في مجموعة الأدلة المسترجعة.
 - تضيف `model`, `request_id`, `usage` وبيانات الروابط على الخادم بدلاً من الوثوق بأن النموذج سيولدها بصورة صحيحة.
 - تفشل مغلقةً إذا كانت الأدلة غير كافية أو إذا أعاد النموذج citation غير معروف أو output لا يطابق العقد.
+- تطبق quota دائمة لكل مستخدم عبر `audit_events`. في PostgreSQL تُسلسل الحجوزات لنفس المستخدم بقفل row-level قبل تسجيل الحجز، ثم يتم `commit` قبل أي اتصال بالشبكة.
+- تسجل نتائج generation كـaudit events مع `model`, latency, uncertainty وعدادات الاستخدام العددية (`input_units`, `output_units`, `total_units`) من دون تسجيل نص السؤال أو الأسرار.
+- تُحوّل حالات provider غير المتوقعة إلى أخطاء API محكومة بدلاً من تسريبها كـ500 غير مصنف.
 
 ### تفعيلها
 
@@ -55,11 +58,13 @@ POST /v1/answers/grounded
 GENERATED_ANSWERS_ENABLED=true
 OPENAI_API_KEY=<secret-manager-value>
 OPENAI_MODEL=gpt-5.6-terra
+GENERATED_ANSWER_MAX_REQUESTS=20
+GENERATED_ANSWER_WINDOW_SECONDS=3600
 ```
 
-الحدود التشغيلية الافتراضية موثقة في `platform/.env.example`: مهلة، retries، أقصى output tokens، عدد مصادر، وحجم evidence لكل مصدر.
+الحدود التشغيلية الافتراضية موثقة في `platform/.env.example`: مهلة، retries، أقصى output tokens، عدد مصادر، حجم evidence لكل مصدر، وعدد requests لكل نافذة زمنية.
 
-> **Production activation محظور برمجياً في هذه النسخة.** `Settings.validate()` يفشل مغلقاً إذا كانت `GENERATED_ANSWERS_ENABLED=true` في `production`. إزالة هذا الحاجز تتطلب أولاً distributed generation rate limiting، cost/error observability، secret injection خارج Git، ومرور CI والمراجعة الأمنية. فتح endpoint للعامة يحتاج ضوابط abuse مستقلة قبل إزالة المصادقة/CSRF.
+> **Production activation محظور برمجياً في هذه النسخة.** تم تنفيذ distributed per-user request limiting وaudit-based cost/error observability، لكن `Settings.validate()` يظل fail-closed في production إلى أن تمر هذه الضوابط عبر CI/security/runtime verification ويتم حقن السر من Secret Manager. فتح endpoint للعامة يحتاج طبقة abuse policy مستقلة قبل إزالة المصادقة/CSRF.
 
 ## خصوصية تحليلات البحث
 
