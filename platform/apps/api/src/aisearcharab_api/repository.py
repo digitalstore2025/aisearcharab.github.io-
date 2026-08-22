@@ -67,17 +67,24 @@ def list_indexed_content(session: Session, query: str | None = None, *, candidat
         tsquery = _postgres_tsquery(query)
         statement = (
             statement.where(document.op("@@")(tsquery))
-            .order_by(func.ts_rank_cd(document, tsquery).desc(), ContentItem.published_at.desc().nullslast(), ContentItem.slug.asc())
+            .order_by(
+                func.ts_rank_cd(document, tsquery).desc(),
+                ContentItem.published_at.desc().nullslast(),
+                ContentItem.slug.asc(),
+            )
             .limit(candidate_limit)
         )
     elif query and bind.dialect.name == "sqlite":
-        # The SQLite compatibility path is used only for local development and
-        # tests. Filter by the same normalized token-intersection predicate as
-        # the Python ranker before LIMIT so recent non-matches cannot evict an
-        # older true match. The SQL result set remains bounded by candidate_limit.
+        score = func.ais_lexical_score(
+            ContentItem.title,
+            ContentItem.summary,
+            ContentItem.body,
+            ContentItem.section,
+            query,
+        )
         statement = (
-            statement.where(func.ais_has_token_match(_combined_search_text(), query) == 1)
-            .order_by(ContentItem.published_at.desc().nullslast(), ContentItem.slug.asc())
+            statement.where(score > 0)
+            .order_by(score.desc(), ContentItem.published_at.desc().nullslast(), ContentItem.slug.asc())
             .limit(candidate_limit)
         )
     else:
