@@ -24,9 +24,32 @@ def production_settings(**overrides) -> Settings:
     return Settings(**values)
 
 
+def staging_settings(**overrides) -> Settings:
+    values = {
+        "environment": "staging",
+        "database_url": "postgresql+psycopg://app:secret@db/app",
+        "allowed_origins": ("https://staging.aisearcharab.com",),
+        "allowed_hosts": ("staging.aisearcharab.com",),
+        "api_prefix": "/v1",
+        "max_search_limit": 20,
+        "log_queries": False,
+        "require_mfa_for_privileged": True,
+        "mfa_encryption_key": MFA_KEY,
+        "login_throttle_key": THROTTLE_KEY,
+    }
+    values.update(overrides)
+    return Settings(**values)
+
+
 def test_production_rejects_sqlite() -> None:
     settings = production_settings(database_url="sqlite:///unsafe.db")
     with pytest.raises(ConfigurationError):
+        settings.validate()
+
+
+def test_staging_rejects_sqlite() -> None:
+    settings = staging_settings(database_url="sqlite:///unsafe.db")
+    with pytest.raises(ConfigurationError, match="SQLite is not allowed in staging or production"):
         settings.validate()
 
 
@@ -38,6 +61,12 @@ def test_production_rejects_wildcard_cors() -> None:
 
 def test_production_rejects_wildcard_hosts() -> None:
     settings = production_settings(allowed_hosts=("*",))
+    with pytest.raises(ConfigurationError, match="Wildcard hosts"):
+        settings.validate()
+
+
+def test_staging_rejects_wildcard_hosts() -> None:
+    settings = staging_settings(allowed_hosts=("*",))
     with pytest.raises(ConfigurationError, match="Wildcard hosts"):
         settings.validate()
 
@@ -63,6 +92,18 @@ def test_query_logging_requires_keyed_hash_secret() -> None:
 def test_production_rejects_insecure_or_path_cors_origin() -> None:
     settings = production_settings(allowed_origins=("http://aisearcharab.com/path",))
     with pytest.raises(ConfigurationError):
+        settings.validate()
+
+
+def test_staging_requires_https_origin() -> None:
+    settings = staging_settings(allowed_origins=("http://staging.aisearcharab.com",))
+    with pytest.raises(ConfigurationError, match="staging and production origins must use HTTPS"):
+        settings.validate()
+
+
+def test_staging_rejects_placeholder_database_credential() -> None:
+    settings = staging_settings(database_url="postgresql+psycopg://app:change-me@db/app")
+    with pytest.raises(ConfigurationError, match="placeholder credential"):
         settings.validate()
 
 
