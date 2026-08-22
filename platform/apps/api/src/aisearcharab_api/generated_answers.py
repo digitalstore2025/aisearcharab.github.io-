@@ -8,6 +8,7 @@ from openai import APIConnectionError, APIError, APITimeoutError, InternalServer
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from sqlalchemy.orm import Session
 
+from .arabic import normalize_text, tokenize
 from .repository import list_indexed_content
 from .search import rank_items
 
@@ -115,6 +116,7 @@ _CLAIM_LABELS = {
     "inference": "INFERENCE",
     "third-party-claim": "THIRD-PARTY CLAIM",
 }
+_CONFIDENCE_RANK = {"high": 0, "medium": 1, "low": 2, "unverified": 3}
 
 
 def _bounded_source_urls(urls: list[str]) -> tuple[str, ...]:
@@ -134,16 +136,29 @@ def _bounded_source_urls(urls: list[str]) -> tuple[str, ...]:
     return tuple(bounded)
 
 
-def _bounded_claims(item: object, max_evidence_chars: int) -> tuple[EvidenceClaim, ...]:
+def _claim_relevance(query: str, claim: object) -> tuple[int, int, int, str]:
+    """Sort reviewed claims by lexical relevance before applying the hard cap."""
+    normalized_query = normalize_text(query)
+    text = str(getattr(claim, "text", ""))
+    normalized_text = normalize_text(text)
+    query_tokens = set(tokenize(query))
+    claim_tokens = set(tokenize(text))
+    phrase_match = int(bool(normalized_query and normalized_query in normalized_text))
+    token_hits = len(query_tokens & claim_tokens)
+    confidence_rank = _CONFIDENCE_RANK.get(str(getattr(claim, "confidence", "unverified")), 3)
+    return (-phrase_match, -token_hits, confidence_rank, str(getattr(claim, "claim_key", "")))
+
+
+def _bounded_claims(item: object, query: str, max_evidence_chars: int) -> tuple[EvidenceClaim, ...]:
     claims: list[EvidenceClaim] = []
     total_chars = 0
-    item_claims = sorted(getattr(item, "claims", ()), key=lambda claim: claim.claim_key)
-    for claim in item_claims:
-        if claim.review_status not in _APPROVED_CLAIM_STATES or claim.confidence == "unverified":
-            continue
+    approved = [
+        claim
+        for claim in getattr(item, "claims", ())
+        if claim.review_status in _APPROVED_CLAIM_STATES and claim.confidence != "unverified" and claim.text.strip()
+    ]
+    for claim in sorted(approved, key=lambda value: _claim_relevance(query, value)):
         text = claim.text.strip()
-        if not text:
-            continue
         projected = total_chars + len(text)
         if projected > max_evidence_chars:
             continue
@@ -161,39 +176,8 @@ def _bounded_claims(item: object, max_evidence_chars: int) -> tuple[EvidenceClai
     return tuple(claims)
 
 
-def retrieve_evidence(
-    session: Session,
-    query: str,
-    *,
-    candidate_limit: int,
-    max_sources: int,
-    max_evidence_chars: int,
-) -> list[EvidenceItem]:
-    candidates = list_indexed_content(session, query, candidate_limit=candidate_limit)
-    ranked = rank_items(query, candidates)
-    evidence: list[EvidenceItem] = []
-    for result in ranked:
-        item = result.item
-        claims = _bounded_claims(item, max_evidence_chars)
-        if not claims:
-            continue
-        source_urls = _bounded_source_urls([source.url for source in item.sources if source.url])
-        evidence.append(
-            EvidenceItem(
-                evidence_id=f"E{len(evidence) + 1}",
-                title=item.title,
-                url=item.url_path,
-                claims=claims,
-                source_urls=source_urls,
-            )
-        )
-        if len(evidence) >= max_sources:
-            break
-    return evidence
-
-
-def _input_payload(query: str, evidence: list[EvidenceItem]) -> str:
-    payload = json.dumps(
+def _serialize_input(query: str, evidence: list[EvidenceItem]) -> str:
+    return json.dumps(
         {
             "query": query,
             "evidence": [
@@ -216,6 +200,45 @@ def _input_payload(query: str, evidence: list[EvidenceItem]) -> str:
         ensure_ascii=False,
         separators=(",", ":"),
     )
+
+
+def retrieve_evidence(
+    session: Session,
+    query: str,
+    *,
+    candidate_limit: int,
+    max_sources: int,
+    max_evidence_chars: int,
+) -> list[EvidenceItem]:
+    candidates = list_indexed_content(session, query, candidate_limit=candidate_limit)
+    ranked = rank_items(query, candidates)
+    evidence: list[EvidenceItem] = []
+    for result in ranked:
+        item = result.item
+        claims = _bounded_claims(item, query, max_evidence_chars)
+        if not claims:
+            continue
+        source_urls = _bounded_source_urls([source.url for source in item.sources if source.url])
+        candidate = EvidenceItem(
+            evidence_id=f"E{len(evidence) + 1}",
+            title=item.title,
+            url=item.url_path,
+            claims=claims,
+            source_urls=source_urls,
+        )
+        # Enforce the exact serialized aggregate budget during retrieval, before
+        # quota reservation or any provider call. A configuration-valid request
+        # therefore cannot consume quota only to fail on local prompt size.
+        if len(_serialize_input(query, [*evidence, candidate])) > _MAX_MODEL_INPUT_CHARS:
+            continue
+        evidence.append(candidate)
+        if len(evidence) >= max_sources:
+            break
+    return evidence
+
+
+def _input_payload(query: str, evidence: list[EvidenceItem]) -> str:
+    payload = _serialize_input(query, evidence)
     if len(payload) > _MAX_MODEL_INPUT_CHARS:
         raise UpstreamInvalidResponseError("bounded model input exceeded the local serialized-size ceiling")
     return payload
