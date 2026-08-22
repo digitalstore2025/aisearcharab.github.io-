@@ -149,6 +149,12 @@ def test_production_ready_requires_final_sha_to_match_tested_sha() -> None:
         evidence.validate()
 
 
+def test_production_ready_rejects_migration_mismatch() -> None:
+    evidence = complete_evidence(migration="20260808_0005")
+    with pytest.raises(ValueError, match="migration must equal the current readiness revision"):
+        evidence.validate()
+
+
 def test_production_ready_requires_evidence_reference_for_true_control() -> None:
     refs = {path: f"artifact://{path}" for path in REQUIRED_CONTROLS}
     refs.pop("database.restore_verified")
