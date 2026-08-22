@@ -51,8 +51,6 @@ def _valid_proxy_cidr(value: str) -> bool:
         network = ipaddress.ip_network(value, strict=False)
     except ValueError:
         return False
-    # A direct /0 is always unsafe; the aggregate-set check below also rejects
-    # multiple narrower networks that collapse to the same trust-everywhere set.
     return network.prefixlen > 0
 
 
@@ -200,6 +198,10 @@ class Settings:
             if not self.login_throttle_key:
                 raise ConfigurationError("LOGIN_THROTTLE_KEY is required in staging and production")
         if self.is_production:
+            if self.generated_answers_enabled:
+                raise ConfigurationError(
+                    "Generated answers cannot be enabled in production until distributed rate limiting and observability are verified"
+                )
             if self.database_url.startswith("sqlite"):
                 raise ConfigurationError("SQLite is not allowed in production")
             if "*" in self.allowed_origins:
