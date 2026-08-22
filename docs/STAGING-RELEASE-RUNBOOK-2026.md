@@ -31,7 +31,7 @@ Set at minimum:
 APP_ENV=staging
 DATABASE_URL=postgresql+psycopg://<staging-user>:<secret>@<host>/<db>
 ALLOWED_ORIGINS=https://<frontend-staging-origin>
-ALLOWED_HOSTS=<api-staging-host>
+ALLOWED_HOSTS=<exact-api-staging-host>
 API_PREFIX=/v1
 MAX_SEARCH_LIMIT=20
 SEARCH_CANDIDATE_LIMIT=300
@@ -41,6 +41,7 @@ SESSION_IDLE_MINUTES=30
 STEP_UP_TTL_MINUTES=10
 LOGIN_MAX_FAILURES=5
 LOGIN_LOCK_MINUTES=15
+LOGIN_THROTTLE_KEY=<secret-manager value, minimum 32 random bytes>
 PASSWORD_MIN_LENGTH=14
 MAX_REQUEST_BODY_BYTES=524288
 ENFORCE_SEPARATION_OF_DUTIES=true
@@ -50,9 +51,13 @@ MFA_ENROLLMENT_TTL_MINUTES=10
 MFA_ISSUER=AISearcharab.com
 ```
 
+`ALLOWED_HOSTS` must list exact Staging API hostnames. Do not use `*` or wildcard-subdomain patterns such as `*.example.com` in Staging/Production.
+
+If the API is behind a reverse proxy, set `TRUSTED_PROXY_CIDRS` only to the explicit ingress/proxy networks actually controlled by the deployment. Leave it empty when no trusted proxy network has been verified. Never use `/0` or an aggregate set that trusts an entire IP family.
+
 If query logging is explicitly enabled for a reviewed test, provide a random `QUERY_HASH_KEY` of at least 32 bytes and define retention/access rules before enabling it.
 
-`MFA_ENCRYPTION_KEY` must come from the Staging secret manager or protected environment injection. Never place the real value in Git, screenshots, CI comments or release evidence. The application uses it to protect TOTP secrets at rest.
+`MFA_ENCRYPTION_KEY` and `LOGIN_THROTTLE_KEY` must come from the Staging secret manager or protected environment injection. Never place real values in Git, screenshots, CI comments or release evidence. The application uses the MFA key to protect TOTP secrets at rest and the throttle key to derive privacy-preserving pre-authentication throttle identities.
 
 `STEP_UP_TTL_MINUTES` controls a separate short-lived current-password re-authentication window for privileged mutations. Keep it between 2 and 30 minutes and shorter than the absolute session TTL. Password Step-up is defense-in-depth in addition to TOTP MFA; it is not itself MFA.
 
@@ -84,10 +89,10 @@ alembic current
 4. The expected revision for this release line is:
 
 ```text
-20260808_0005
+20260816_0008
 ```
 
-5. Verify the migration added:
+5. Verify the schema includes the MFA state introduced by `20260808_0005`:
 
 ```text
 users.mfa_secret_encrypted
@@ -99,8 +104,35 @@ admin_sessions.mfa_verified_at
 mfa_recovery_codes
 ```
 
-6. Verify `mfa_last_counter` has no permanent server default after migration; the temporary `-1` default is migration-only to backfill existing rows.
-7. Do not start accepting Staging traffic if `/health/ready` reports a schema revision mismatch.
+6. Verify `20260816_0006` added the persistent pre-authentication throttle state:
+
+```text
+login_throttles
+ix_login_throttles_updated_at
+```
+
+7. Verify `20260816_0007` added GEO tenancy structures:
+
+```text
+organizations
+organization_memberships
+geo_projects
+```
+
+8. Verify `20260816_0008` added GEO query/evidence structures:
+
+```text
+geo_query_sets
+geo_queries
+geo_provider_runs
+geo_evidence_snapshots
+geo_mentions
+geo_citations
+```
+
+9. Verify `users.mfa_last_counter` has no permanent server default after migration; the temporary `-1` default is migration-only to backfill existing rows.
+10. Do not start accepting Staging traffic if `/health/ready` reports a schema revision mismatch.
+11. The release-evidence record for a `PRODUCTION_READY` candidate must identify the same `20260816_0008` revision; a custom/stale migration identifier is not acceptable production evidence.
 
 ## 5. API deployment verification
 
@@ -130,7 +162,8 @@ Check representative API/admin responses. At minimum validate:
 - `Cache-Control: no-store` for API/admin/auth;
 - `X-Robots-Tag: noindex, nofollow` for API/admin;
 - valid `X-Request-ID` correlation;
-- untrusted Host values are rejected.
+- untrusted Host values are rejected;
+- wildcard and wildcard-subdomain host configuration is rejected before Staging/Production startup.
 
 Do not put authentication cookies, tokens, TOTP secrets, recovery codes, raw search queries or request/response bodies into release evidence.
 
@@ -226,4 +259,4 @@ A production approval requires an actual rollback/restore drill, not only this w
 
 Use the project status vocabulary exactly. Staging deployment alone is not `PRODUCTION_READY`.
 
-TOTP MFA is now a code-level control and must be proven in the real Staging environment and included in the independent security review. Promotion beyond `TESTED_IN_STAGING` additionally requires independent accessibility evidence, real search-quality evidence, managed backup/restore evidence, distributed rate limiting/WAF, external observability, DNS/TLS/live-header verification, rollback evidence, verified branch governance and explicit human release approval.
+TOTP MFA is a code-level control and must be proven in the real Staging environment and included in the independent security review. Promotion beyond `TESTED_IN_STAGING` additionally requires independent accessibility evidence, real search-quality evidence, managed backup/restore evidence, distributed rate limiting/WAF, external observability, DNS/TLS/live-header verification, rollback evidence, verified branch governance and explicit human release approval.
