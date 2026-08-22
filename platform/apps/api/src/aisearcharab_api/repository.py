@@ -24,10 +24,8 @@ _TRANSLATE_FROM_SQL = literal_column("'" + _POSTGRES_TRANSLATE_FROM.replace("'",
 _TRANSLATE_TO_SQL = literal_column("'" + _POSTGRES_TRANSLATE_TO.replace("'", "''") + "'")
 
 
-def _postgres_search_document():
-    # All expression constants are rendered literally so PostgreSQL can match this
-    # query expression exactly to the functional GIN index created by Alembic.
-    combined = (
+def _combined_search_text():
+    return (
         func.coalesce(ContentItem.title, _EMPTY_SQL)
         + _SPACE_SQL
         + func.coalesce(ContentItem.summary, _EMPTY_SQL)
@@ -36,7 +34,10 @@ def _postgres_search_document():
         + _SPACE_SQL
         + func.coalesce(ContentItem.section, _EMPTY_SQL)
     )
-    normalized = func.translate(func.lower(combined), _TRANSLATE_FROM_SQL, _TRANSLATE_TO_SQL)
+
+
+def _postgres_search_document():
+    normalized = func.translate(func.lower(_combined_search_text()), _TRANSLATE_FROM_SQL, _TRANSLATE_TO_SQL)
     return func.to_tsvector(_SIMPLE_REGCONFIG, normalized)
 
 
@@ -60,16 +61,30 @@ def count_indexed_matches(session: Session, query: str) -> int | None:
 def list_indexed_content(session: Session, query: str | None = None, *, candidate_limit: int = 300) -> list[ContentItem]:
     statement = select(ContentItem).where(ContentItem.status == "published", ContentItem.is_indexed.is_(True))
 
-    # Production is PostgreSQL-only. Use a GIN-backed, Arabic-normalized full-text
-    # index to bound the more expensive transparent application ranking stage.
-    # SQLite remains a deterministic dev/test fallback.
     bind = session.get_bind()
     if query and bind.dialect.name == "postgresql":
         document = _postgres_search_document()
         tsquery = _postgres_tsquery(query)
         statement = (
             statement.where(document.op("@@")(tsquery))
-            .order_by(func.ts_rank_cd(document, tsquery).desc(), ContentItem.published_at.desc().nullslast(), ContentItem.slug.asc())
+            .order_by(
+                func.ts_rank_cd(document, tsquery).desc(),
+                ContentItem.published_at.desc().nullslast(),
+                ContentItem.slug.asc(),
+            )
+            .limit(candidate_limit)
+        )
+    elif query and bind.dialect.name == "sqlite":
+        score = func.ais_lexical_score(
+            ContentItem.title,
+            ContentItem.summary,
+            ContentItem.body,
+            ContentItem.section,
+            query,
+        )
+        statement = (
+            statement.where(score > 0)
+            .order_by(score.desc(), ContentItem.published_at.desc().nullslast(), ContentItem.slug.asc())
             .limit(candidate_limit)
         )
     else:

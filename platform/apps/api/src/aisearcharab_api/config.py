@@ -51,8 +51,6 @@ def _valid_proxy_cidr(value: str) -> bool:
         network = ipaddress.ip_network(value, strict=False)
     except ValueError:
         return False
-    # A direct /0 is always unsafe; the aggregate-set check below also rejects
-    # multiple narrower networks that collapse to the same trust-everywhere set.
     return network.prefixlen > 0
 
 
@@ -96,6 +94,16 @@ class Settings:
     mfa_encryption_key: str | None = None
     mfa_enrollment_ttl_minutes: int = 10
     mfa_issuer: str = "AISearcharab.com"
+    generated_answers_enabled: bool = False
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-5.6-terra"
+    openai_timeout_seconds: int = 20
+    openai_max_retries: int = 2
+    openai_max_output_tokens: int = 1200
+    generated_answer_max_sources: int = 5
+    generated_answer_max_evidence_chars: int = 6000
+    generated_answer_max_requests: int = 20
+    generated_answer_window_seconds: int = 3600
 
     @property
     def is_production(self) -> bool:
@@ -170,6 +178,24 @@ class Settings:
             raise ConfigurationError("ALLOWED_ORIGINS must contain valid origins without paths, credentials, queries, or fragments")
         if self.log_queries and (self.query_hash_key is None or len(self.query_hash_key.encode("utf-8")) < 32):
             raise ConfigurationError("QUERY_HASH_KEY must contain at least 32 bytes when query logging is enabled")
+        if not 5 <= self.openai_timeout_seconds <= 120:
+            raise ConfigurationError("OPENAI_TIMEOUT_SECONDS must be between 5 and 120")
+        if not 0 <= self.openai_max_retries <= 5:
+            raise ConfigurationError("OPENAI_MAX_RETRIES must be between 0 and 5")
+        if not 256 <= self.openai_max_output_tokens <= 4000:
+            raise ConfigurationError("OPENAI_MAX_OUTPUT_TOKENS must be between 256 and 4000")
+        if not 1 <= self.generated_answer_max_sources <= 8:
+            raise ConfigurationError("GENERATED_ANSWER_MAX_SOURCES must be between 1 and 8")
+        if not 500 <= self.generated_answer_max_evidence_chars <= 20_000:
+            raise ConfigurationError("GENERATED_ANSWER_MAX_EVIDENCE_CHARS must be between 500 and 20000")
+        if not 1 <= self.generated_answer_max_requests <= 1_000:
+            raise ConfigurationError("GENERATED_ANSWER_MAX_REQUESTS must be between 1 and 1000")
+        if not 60 <= self.generated_answer_window_seconds <= 86_400:
+            raise ConfigurationError("GENERATED_ANSWER_WINDOW_SECONDS must be between 60 and 86400")
+        if not 2 <= len(self.openai_model.strip()) <= 100:
+            raise ConfigurationError("OPENAI_MODEL must contain between 2 and 100 characters")
+        if self.generated_answers_enabled and not self.openai_api_key:
+            raise ConfigurationError("OPENAI_API_KEY is required when generated answers are enabled")
         if self.environment in {"staging", "production"}:
             if not self.require_mfa_for_privileged:
                 raise ConfigurationError("REQUIRE_MFA_FOR_PRIVILEGED must be enabled in staging and production")
@@ -178,6 +204,10 @@ class Settings:
             if not self.login_throttle_key:
                 raise ConfigurationError("LOGIN_THROTTLE_KEY is required in staging and production")
         if self.is_production:
+            if self.generated_answers_enabled:
+                raise ConfigurationError(
+                    "Generated answers cannot be enabled in production until distributed rate limiting and observability are verified"
+                )
             if self.database_url.startswith("sqlite"):
                 raise ConfigurationError("SQLite is not allowed in production")
             if "*" in self.allowed_origins:
@@ -219,6 +249,24 @@ def get_settings() -> Settings:
         mfa_encryption_key=os.getenv("MFA_ENCRYPTION_KEY") or None,
         mfa_enrollment_ttl_minutes=_int("MFA_ENROLLMENT_TTL_MINUTES", os.getenv("MFA_ENROLLMENT_TTL_MINUTES", "10")),
         mfa_issuer=os.getenv("MFA_ISSUER", "AISearcharab.com").strip(),
+        generated_answers_enabled=_bool(os.getenv("GENERATED_ANSWERS_ENABLED", "false")),
+        openai_api_key=os.getenv("OPENAI_API_KEY") or None,
+        openai_model=os.getenv("OPENAI_MODEL", "gpt-5.6-terra").strip(),
+        openai_timeout_seconds=_int("OPENAI_TIMEOUT_SECONDS", os.getenv("OPENAI_TIMEOUT_SECONDS", "20")),
+        openai_max_retries=_int("OPENAI_MAX_RETRIES", os.getenv("OPENAI_MAX_RETRIES", "2")),
+        openai_max_output_tokens=_int("OPENAI_MAX_OUTPUT_TOKENS", os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "1200")),
+        generated_answer_max_sources=_int(
+            "GENERATED_ANSWER_MAX_SOURCES", os.getenv("GENERATED_ANSWER_MAX_SOURCES", "5")
+        ),
+        generated_answer_max_evidence_chars=_int(
+            "GENERATED_ANSWER_MAX_EVIDENCE_CHARS", os.getenv("GENERATED_ANSWER_MAX_EVIDENCE_CHARS", "6000")
+        ),
+        generated_answer_max_requests=_int(
+            "GENERATED_ANSWER_MAX_REQUESTS", os.getenv("GENERATED_ANSWER_MAX_REQUESTS", "20")
+        ),
+        generated_answer_window_seconds=_int(
+            "GENERATED_ANSWER_WINDOW_SECONDS", os.getenv("GENERATED_ANSWER_WINDOW_SECONDS", "3600")
+        ),
     )
     settings.validate()
     return settings

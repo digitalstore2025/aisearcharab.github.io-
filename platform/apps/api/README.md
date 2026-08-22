@@ -1,6 +1,6 @@
-# AISearcharab API — Phase 2
+# AISearcharab API
 
-واجهة API فعلية لمرحلة الاسترجاع والبحث المعجمي القابل للقياس. هذه المرحلة لا تولّد إجابات، ولا تنفّذ RAG، ولا مدفوعات، ولا حسابات مستخدمين.
+واجهة API للاسترجاع التحريري المحكوم والبحث المعجمي، مع **Grounded Generated Answers** كقدرة Beta اختيارية ومعطلة افتراضياً. المدفوعات والزحف الخارجي غير مفعّلين.
 
 ## التشغيل المحلي
 
@@ -20,12 +20,54 @@ pytest
 python scripts/evaluate_search.py
 ```
 
-## حدود المرحلة
+## البحث والاسترجاع
 
-- البحث: lexical retrieval فقط، مع تطبيع عربي ودرجات شفافة.
+- البحث العام: lexical retrieval مع تطبيع عربي ودرجات شفافة.
 - البيانات: PostgreSQL إنتاجياً وSQLite للاختبارات المحلية.
 - لا تُستخدم بيانات الاختبار خارج `tests/fixtures/`.
-- لا يوجد توليد نصوص أو استدعاء نموذج لغوي في هذا الإصدار.
+- واجهة Hugo تبقى قادرة على الرجوع إلى الفهرس المحلي إذا تعطل الـAPI.
+
+## Grounded Generated Answers — Beta
+
+المسار:
+
+```text
+POST /v1/answers/grounded
+```
+
+هذه القدرة:
+
+- **معطلة افتراضياً** عبر `GENERATED_ANSWERS_ENABLED=false`.
+- تتطلب جلسة مصادقاً عليها تحمل `content:read`، إضافة إلى CSRF token صالح لأن الاستدعاء يستهلك مورداً مدفوعاً؛ ليست endpoint عامة مجهولة حالياً.
+- تسترجع فقط محتوى AISearcharab المنشور والمفهرس، ولا تقوم بجلب URLs خارجية.
+- لا ترسل للنموذج corpus حراً كي يصوغ حقائق؛ ترسل فقط claims مراجَعة (`reviewed`/`published`) ذات confidence معروف من المواد المسترجعة.
+- دور النموذج هو **اختيار `claim_key` فقط**. لا يُقبل منه answer factual حر أو paraphrase، وStructured Output يمنع الحقول الإضافية.
+- يبني الخادم نص الإجابة من `Claim.text` الأصلي كما هو، مع إظهار `claim_type` و`confidence`، ويشتق citations من المادة التي تملك الـclaim المختار.
+- تعامل claims المسترجعة كبيانات غير موثوقة داخل prompt؛ أي تعليمات أو prompt injection داخلها لا تصبح تعليمات تنفيذية.
+- تستخدم OpenAI Responses API مع Structured Outputs و`store=False`، ولا تقبل إلا Response مكتملة (`status=completed`).
+- تتحقق محلياً من أن كل `claim_key` أعاده النموذج موجود ضمن مجموعة claims المراجَعة المسترجعة، وتفشل مغلقةً عند claim مجهول، أو selection غير متسق مع حالة `insufficient`.
+- لا تُرسل `source_urls` إلى النموذج. وتُقيد metadata المعادة للمستخدم بعدد URLs وحجم إجمالي محليين؛ كما يُقيد عدد claims وحجم نص claims المرسل لكل evidence وحجم serialized input الكلي.
+- provenance الخاص بالموديل يأتي من `response.model` الذي يعيده المزود، لا من alias المطلوب. غياب/فساد resolved model identifier يؤدي إلى fail-closed بدلاً من ادعاء نسخة غير مثبتة.
+- تضيف `request_id`, `usage` وبيانات الروابط على الخادم بدلاً من الوثوق بأن النموذج سيولدها بصورة صحيحة.
+- تطبق quota دائمة لكل مستخدم عبر `audit_events`. في PostgreSQL تُسلسل الحجوزات لنفس المستخدم بقفل row-level قبل تسجيل الحجز، ثم يتم `commit` قبل أي اتصال بالشبكة.
+- تسجل نتائج generation كـaudit events مع `model`, latency, uncertainty وعدادات الاستخدام العددية (`input_units`, `output_units`, `total_units`) من دون تسجيل نص السؤال أو الأسرار.
+- تُحوّل حالات provider غير المتوقعة إلى أخطاء API محكومة بدلاً من تسريبها كـ500 غير مصنف.
+
+### تفعيلها
+
+ضع القيم عبر بيئة التشغيل/Secret Manager، لا داخل Git:
+
+```bash
+GENERATED_ANSWERS_ENABLED=true
+OPENAI_API_KEY=<secret-manager-value>
+OPENAI_MODEL=gpt-5.6-terra
+GENERATED_ANSWER_MAX_REQUESTS=20
+GENERATED_ANSWER_WINDOW_SECONDS=3600
+```
+
+الحدود التشغيلية الافتراضية موثقة في `platform/.env.example`: مهلة، retries، أقصى output tokens، عدد مصادر، حجم evidence لكل مصدر، وعدد requests لكل نافذة زمنية. توجد أيضاً حدود دفاعية داخلية لعدد claims وروابط المصادر وحجم serialized model input.
+
+> **Production activation محظور برمجياً في هذه النسخة.** تم تنفيذ distributed per-user request limiting وaudit-based cost/error observability، لكن `Settings.validate()` يظل fail-closed في production إلى أن تمر هذه الضوابط عبر CI/security/runtime verification ويتم حقن السر من Secret Manager. فتح endpoint للعامة يحتاج طبقة abuse policy مستقلة قبل إزالة المصادقة/CSRF.
 
 ## خصوصية تحليلات البحث
 
