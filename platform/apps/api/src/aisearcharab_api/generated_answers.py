@@ -89,20 +89,9 @@ _MODEL_SCHEMA: dict[str, object] = {
     "type": "object",
     "properties": {
         "answer": {"type": "string", "minLength": 1, "maxLength": 8000},
-        "citation_ids": {
-            "type": "array",
-            "items": {"type": "string"},
-            "maxItems": 8,
-        },
-        "uncertainty": {
-            "type": "string",
-            "enum": ["low", "medium", "high", "insufficient"],
-        },
-        "limitations": {
-            "type": "array",
-            "items": {"type": "string"},
-            "maxItems": 8,
-        },
+        "citation_ids": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
+        "uncertainty": {"type": "string", "enum": ["low", "medium", "high", "insufficient"]},
+        "limitations": {"type": "array", "items": {"type": "string"}, "maxItems": 8},
     },
     "required": ["answer", "citation_ids", "uncertainty", "limitations"],
     "additionalProperties": False,
@@ -215,11 +204,7 @@ def generate_grounded_answer(
         raise NoEvidenceError("no indexed evidence matched the query")
 
     request_id = str(uuid.uuid4())
-    openai_client = client or OpenAI(
-        api_key=api_key,
-        timeout=timeout_seconds,
-        max_retries=max_retries,
-    )
+    openai_client = client or OpenAI(api_key=api_key, timeout=timeout_seconds, max_retries=max_retries)
     try:
         response = openai_client.responses.create(
             model=model,
@@ -240,6 +225,9 @@ def generate_grounded_answer(
         raise UpstreamUnavailableError("OpenAI is temporarily unavailable") from exc
     except (AuthenticationError, PermissionDeniedError, BadRequestError, NotFoundError) as exc:
         raise UpstreamUnavailableError("OpenAI request configuration was rejected") from exc
+
+    if getattr(response, "status", None) != "completed":
+        raise UpstreamInvalidResponseError("OpenAI response did not complete")
 
     output_text = getattr(response, "output_text", "") or ""
     try:
