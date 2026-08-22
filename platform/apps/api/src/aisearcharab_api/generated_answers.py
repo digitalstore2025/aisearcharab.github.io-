@@ -283,17 +283,23 @@ def _effective_uncertainty(
     model_uncertainty: Literal["low", "medium", "high"],
     selected: list[tuple[EvidenceItem, EvidenceClaim]],
 ) -> Literal["low", "medium", "high"]:
-    floor_rank = max(_UNCERTAINTY_RANK[_claim_uncertainty_floor(claim)] for _item, claim in selected)
+    floor_rank = max(
+        _UNCERTAINTY_RANK[_claim_uncertainty_floor(claim)]
+        for _item, claim in selected
+    )
     effective_rank = max(_UNCERTAINTY_RANK[model_uncertainty], floor_rank)
     return _UNCERTAINTY_BY_RANK[effective_rank]
 
 
 def _render_answer(selected: list[tuple[EvidenceItem, EvidenceClaim]]) -> str:
-    return "\n".join(
-        f"- {_CLAIM_LABELS[claim.claim_type]} [{claim.confidence}] "
-        f"[{item.evidence_id}:{claim.claim_key}]: {claim.text}"
-        for item, claim in selected
-    )
+    multi_source = len({item.evidence_id for item, _claim in selected}) > 1
+    rendered: list[str] = []
+    for item, claim in selected:
+        marker = f" [{item.evidence_id}:{claim.claim_key}]" if multi_source else ""
+        rendered.append(
+            f"- {_CLAIM_LABELS[claim.claim_type]} [{claim.confidence}]{marker}: {claim.text}"
+        )
+    return "\n".join(rendered)
 
 
 def _citations_from_selection(selected: list[tuple[EvidenceItem, EvidenceClaim]]) -> list[GroundedCitation]:
@@ -333,7 +339,9 @@ def _model_from_response(response: object) -> str:
     if not isinstance(provider_model, str):
         raise UpstreamInvalidResponseError("OpenAI response omitted resolved model provenance")
     resolved = provider_model.strip()
-    if not resolved or len(resolved) > 200 or any(ord(character) < 32 or ord(character) == 127 for character in resolved):
+    if not resolved or len(resolved) > 200 or any(
+        ord(character) < 32 or ord(character) == 127 for character in resolved
+    ):
         raise UpstreamInvalidResponseError("OpenAI response returned invalid model provenance")
     return resolved
 
@@ -400,7 +408,8 @@ def generate_grounded_answer(
         uncertainty=uncertainty,
         limitations=[
             "Only reviewed repository claims are rendered; model-authored factual prose is not accepted.",
-            "Claim text is preserved verbatim and labeled by claim type, confidence, and evidence marker.",
+            "Claim text is preserved verbatim and labeled by claim type and confidence.",
+            "Multi-source answers include an evidence_id:claim_key marker on every rendered assertion.",
             "Reported uncertainty is never lower than the server-derived floor for selected claim types and confidence.",
         ],
         model=_model_from_response(response),
