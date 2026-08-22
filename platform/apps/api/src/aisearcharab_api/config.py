@@ -183,7 +183,7 @@ class Settings:
                 raise ConfigurationError("LOGIN_THROTTLE_KEY is required in staging and production")
             if self.database_url.startswith("sqlite"):
                 raise ConfigurationError("SQLite is not allowed in staging or production")
-            if "*" in self.allowed_hosts:
+            if any("*" in host for host in self.allowed_hosts):
                 raise ConfigurationError("Wildcard hosts are not allowed in staging or production")
             if "change-me" in self.database_url.lower():
                 raise ConfigurationError("DATABASE_URL contains a placeholder credential")
