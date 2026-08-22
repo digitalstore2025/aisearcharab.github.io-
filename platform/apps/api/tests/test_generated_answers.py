@@ -20,6 +20,7 @@ from aisearcharab_api.generated_answers import (
     generate_grounded_answer,
     retrieve_evidence,
 )
+from conftest import csrf_from_client
 
 
 class FakeResponses:
@@ -52,7 +53,7 @@ def _model_json(*, citation_ids: list[str] | None = None, uncertainty: str = "lo
     )
 
 
-def test_generated_answers_are_disabled_and_require_authentication(
+def test_generated_answers_are_disabled_and_require_authentication_and_csrf(
     client: TestClient,
     owner_credentials: dict[str, str],
 ) -> None:
@@ -60,7 +61,15 @@ def test_generated_answers_are_disabled_and_require_authentication(
     assert unauthenticated.status_code == 401
 
     assert client.post("/v1/auth/login", json=owner_credentials).status_code == 200
-    disabled = client.post("/v1/answers/grounded", json={"query": "GPT-5"})
+    missing_csrf = client.post("/v1/answers/grounded", json={"query": "GPT-5"})
+    assert missing_csrf.status_code == 403
+    assert missing_csrf.json()["detail"] == "csrf validation failed"
+
+    disabled = client.post(
+        "/v1/answers/grounded",
+        headers={"X-CSRF-Token": csrf_from_client(client)},
+        json={"query": "GPT-5"},
+    )
     assert disabled.status_code == 503
     assert disabled.json()["detail"] == "generated answers are disabled"
 
