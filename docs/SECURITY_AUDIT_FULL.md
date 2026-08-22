@@ -1,40 +1,96 @@
-# AISearcharab — Full Security Audit
+# AISearcharab — Current Security & Reality Audit
 
-Audit target: `main` after merge `cf2ddb76149b07a4b3214082e9102e7e8e5b7946`, plus hardening branch `audit/ultimate-a-to-z-2026-08-11`.
+Audit date: `2026-08-22`
 
-Actual stack: Hugo + browser JavaScript, FastAPI/Python 3.12, Pydantic, SQLAlchemy/Alembic, PostgreSQL, Docker Compose, GitHub Actions.
+Verified base: `main@aaa93892a8cad75ec3b9bd418364928690259888`
 
-| Layer | Problem / attack | Severity | File / surface | Reproduction / evidence | Impact | Fix | Status |
-|---|---|---:|---|---|---|---|---|
-| Frontend | DOM XSS through dangerous HTML execution sinks | High if present | `platform/apps/api/src/aisearcharab_api/admin_static/admin.js`, `static/js/search.js` | Repository search found no `innerHTML`, `outerHTML`, `insertAdjacentHTML`, `eval`, `new Function`; regression test scans privileged JS | Session/admin compromise | DOM construction remains `textContent`/DOM APIs; CI rejects dangerous sinks | FIXED_PENDING_CI |
-| Frontend | CSP bypass / inline execution | High if permissive | `middleware.py` | Admin CSP contains no `unsafe-inline`/`unsafe-eval`; API defaults to `default-src 'none'` | Script execution | CSP tightened with `object-src 'none'`, `worker-src 'none'`, `frame-src 'none'`, `base-uri 'none'` | FIXED_PENDING_CI |
-| Frontend | Token persistence in LocalStorage | High if present | Admin console | Repository scan found no `localStorage`/`sessionStorage`; opaque session is HttpOnly cookie | Token theft persistence | Secure source gate forbids privileged browser storage | FIXED_PENDING_CI |
-| API | IDOR/BOLA on privileged resources | High | `/v1/admin/users/{id}`, editorial routes | RBAC dependencies precede mutation; new regression creates an editor, permits draft creation, denies owner mutation | Cross-user privilege abuse | Existing RBAC/CSRF/step-up retained; explicit negative BOLA test added | FIXED_PENDING_CI |
-| API | Request-body limit bypass through chunked transfer | High | ASGI request pipeline | Prior implementation checked only `Content-Length`; chunked bodies could bypass that pre-check | Memory/CPU DoS and oversized parser input | Dedicated ASGI `RequestBodyLimitMiddleware` buffers only to configured hard ceiling and rejects streamed overage with 413 | FIXED_PENDING_CI |
-| API | SSRF | N/A current surface | Source metadata | No `httpx`, `requests`, `urllib/urlopen`, `aiohttp` outbound fetch path found; source URLs are stored, not fetched | None in current runtime | No outbound-fetch capability is exposed | VERIFIED_BY_CODE_SEARCH |
-| API | Distributed abuse/rate limiting | Release blocker | Edge + API | Application has account lockout and bounded search; no distributed edge/WAF evidence exists | Distributed brute force / resource abuse | Must be provided and tested in Staging before production; release evidence already fails closed on this control | EXTERNAL_BLOCKED |
-| Database | Browser/service-role database bypass | High if present | DB connectivity | No Supabase service role or browser DB credential found; DB access is server-only | Direct table bypass | Keep DB credentials server-side only; secret scanning remains enforced | VERIFIED_BY_CODE_SEARCH |
-| Database | PostgreSQL RLS absent | Medium defense-in-depth | PostgreSQL | No `CREATE POLICY` / RLS migration found | Backend compromise would retain DB-role authority | Current model relies on API RBAC and private DB role. RLS is not claimed; no direct client DB surface exists | ACCEPTED_ARCHITECTURE_LIMIT |
-| Auth | Session fixation | High | `/v1/auth/login` | Login creates new random session + CSRF secrets and stores only digests | Session takeover | Opaque fresh token per login; old supplied token is not reused | VERIFIED_BY_CODE_REVIEW |
-| Auth | CSRF on mutations | High | Admin/auth/MFA mutation routes | `require_mutation`, `require_sensitive_mutation`, `require_csrf` compare CSRF digest with constant-time HMAC | Unauthorized state changes | SameSite=Strict + double-submit-style CSRF binding + explicit header | VERIFIED_BY_TEST_SUITE |
-| Auth | Privileged MFA bypass | High | owner/admin/publisher | `get_principal` requires completed MFA for privileged roles when configured | Privilege compromise | TOTP + recovery + replay protection remain mandatory in staging/production configuration | VERIFIED_IN_CI_CODE_PATH; STAGING_PENDING |
-| Storage | MIME spoof / malicious SVG / CSV / GeoJSON | N/A current surface | `/v1/admin/upload` | No upload endpoint or storage adapter exists; adversarial request receives 404 | No file persistence attack surface | Keep absent until a separately reviewed file service exists | FIXED_PENDING_CI |
-| Infra | Missing hardening headers | Medium | API/admin responses | Existing headers plus new DNS prefetch/origin isolation controls | Browser policy weakening | `nosniff`, DENY framing, CSP, referrer, permissions, COOP/CORP, HSTS in secure env, no-store | FIXED_PENDING_CI |
-| Infra | Host/CORS confusion | High | `config.py`, middleware | Explicit origins/hosts; wildcard forbidden in production; untrusted Host test exists | Cache poisoning / cross-origin credential abuse | TrustedHost + strict origin parser + credentialed explicit CORS | VERIFIED_BY_TEST_SUITE |
-| Supply chain | Unpinned actions/dependencies | High | GitHub Actions, Python runtime | Core Actions and container image use immutable SHAs/digests; runtime dependency graph hash + SBOM/VEX audit | Build compromise | Existing supply-chain gates retained; new Ruff dependency is dev-only and pinned | PENDING_CI_AUDIT |
-| Supply chain | `npm audit` | N/A | Repository | No Node package manifest/runtime dependency tree exists | None | Do not add npm solely for auditing a non-Node stack | N/A |
-| Secrets | Secrets committed in Git/history | Critical if present | Repository/history | Existing working-tree and reachable-history scanners run in CI | Credential compromise | Existing secret scanners retained; workflow checkout has `persist-credentials: false` | VERIFIED_BY_EXISTING_CI |
+Hardening branch: `hardening/reality-cleanup-2026-08-22`
 
-## Adversarial tests added
+Actual repository stack: Hugo/browser JavaScript plus a dynamic `platform/` containing FastAPI/Python 3.12, SQLAlchemy/Alembic, PostgreSQL, Docker Compose, tenant-scoped GEO tooling and controlled local-model provider adapters.
 
-- streamed/chunked body exceeds `MAX_REQUEST_BODY_BYTES` → `413`;
-- privileged admin JavaScript contains no executable HTML sinks;
-- mismatched MIME malicious SVG sent to absent upload endpoint → `404`;
-- newly created editor completes allowed draft-creation journey;
-- the same editor cannot PATCH the owner account → `403`;
-- admin CSP rejects inline/eval/object execution patterns;
-- hardened runtime exposes required headers through `curl -I`.
+> This document deliberately separates code/CI evidence from external-environment evidence. A green repository workflow is not proof that Production infrastructure exists or is secure.
 
-## Launch classification
+## Executive classification
 
-Code-level hardening does not change the external release vocabulary. Until HTTPS Staging, distributed edge limits/WAF, managed PostgreSQL/PITR/restore, external observability, independent security/accessibility review and rollback evidence exist, the release remains `INTEGRATED_NOT_TESTED` / production blocked.
+- **No claim of `PRODUCTION_READY`.**
+- Current code line is eligible only for repository integration testing until Staging/external gates are evidenced.
+- The most important live governance blocker is outside the code tree: GitHub currently reports `main` as `protected=false`.
+- This hardening branch also removes stale documentation claims, closes Staging configuration gaps, and prevents release-evidence migration drift. Those branch-local fixes remain `PENDING_CI` until the PR workflows complete successfully.
+
+## Findings and controls
+
+| Layer | Problem / attack | Severity | Current evidence | Current disposition |
+|---|---|---:|---|---|
+| Repository governance | `main` is not protected and required checks are not enforced at the branch layer | **Critical** | Live GitHub branch API reports `protected=false`; Issue #65 remains open; PR #66 intentionally fails closed until protection exists | **EXTERNAL_BLOCKED** — enable Branch Protection/Ruleset; do not simulate this in code |
+| Documentation / operational truth | Root README described Backend/Auth/DB as absent even though `platform/` implements them | Medium governance risk | Current source contains FastAPI, PostgreSQL/Alembic, Admin/Auth/MFA/GEO | **FIXED_IN_BRANCH_PENDING_CI** |
+| Documentation / SSRF model | Previous audit claimed there was no `urllib/urlopen` outbound path | Medium governance risk | `geo/providers/ollama.py` performs a controlled outbound call to a configured Ollama endpoint | **FIXED_IN_BRANCH_PENDING_CI** — audit now describes the real surface |
+| Staging configuration | Staging could accept HTTP CORS origins | High if treated as release-equivalent Staging | `secure_cookies` already treats Staging as secure, while prior origin validation required HTTPS only in Production | **FIXED_IN_BRANCH_PENDING_CI** — Staging and Production now require HTTPS origins |
+| Staging database parity | Staging could validate with SQLite | High release-integrity risk | Production architecture requires PostgreSQL-family Staging; prior code rejected SQLite only in Production | **FIXED_IN_BRANCH_PENDING_CI** — SQLite rejected in Staging and Production |
+| Staging host policy | Staging could validate with wildcard hosts | High | Prior wildcard-host rejection was Production-only | **FIXED_IN_BRANCH_PENDING_CI** — wildcard hosts rejected in Staging and Production |
+| Staging placeholder credentials | Staging could pass configuration with `change-me` embedded in `DATABASE_URL` | High operational risk | Prior placeholder check was Production-only | **FIXED_IN_BRANCH_PENDING_CI** |
+| Release evidence | Manual/local release evidence defaulted to migration `20260808_0005` while readiness/CI use `20260816_0008` | Medium integrity risk | `main.py` expects `20260816_0008`; canonical workflow overrides to that revision, but script default was stale | **FIXED_IN_BRANCH_PENDING_CI** with regression test binding default evidence to runtime readiness revision |
+| Authentication | Session fixation | High if present | Login creates fresh random session/CSRF secrets; only digests are persisted | **IMPLEMENTED_AND_TESTED_IN_REPOSITORY** |
+| Authentication | Unauthenticated account-lockout DoS / brute force | High | Pre-auth throttle key is HMAC(source, account); failures are persisted; global account failure counter is not mutated by ordinary pre-auth failures | **IMPLEMENTED_AND_TESTED_IN_REPOSITORY**; distributed edge limits still external |
+| Trusted proxies | Spoofed or duplicate `X-Forwarded-For` | High | `TRUSTED_PROXY_CIDRS` is explicit/fail-closed; duplicate header fields are flattened in wire order; nearest untrusted hop selected from trusted chain | **IMPLEMENTED_AND_TESTED_IN_REPOSITORY** |
+| MFA | Privileged MFA bypass | High | Owner/admin/publisher require completed MFA when configured; Staging/Production require privileged-MFA configuration and encryption key | **IMPLEMENTED_IN_CODE; STAGING_VERIFICATION_PENDING** |
+| MFA replay | Reuse of accepted TOTP / recovery codes | High | Counter/recovery state is persisted and concurrency regression coverage exists | **IMPLEMENTED_AND_TESTED_IN_REPOSITORY** |
+| CSRF | Cross-site privileged mutations | High | SameSite=Strict cookies plus CSRF token binding; privileged/sensitive routes use CSRF and step-up dependencies | **IMPLEMENTED_AND_TESTED_IN_REPOSITORY** |
+| Authorization | IDOR/BOLA / cross-tenant access | High | RBAC and tenant access checks are server-side; GEO project/query paths scope organization/project/query-set identifiers | **IMPLEMENTED_AND_TESTED_IN_REPOSITORY**; PostgreSQL RLS is not claimed |
+| Request handling | Chunked/streamed request-body limit bypass | High | ASGI middleware buffers only up to a configured hard ceiling and rejects overage | **IMPLEMENTED_AND_TESTED_IN_REPOSITORY** |
+| Browser execution | DOM XSS / dynamic-code sinks in privileged JS | High if present | Security regression scanning rejects dangerous HTML/dynamic execution patterns; admin CSP is restrictive | **IMPLEMENTED_AND_TESTED_IN_REPOSITORY** |
+| Browser policy | Public caching/framing/content sniffing of admin/API | Medium | `no-store`, CSP, frame denial, `nosniff`, no-referrer, Permissions-Policy, COOP/CORP and HSTS in secure environments | **IMPLEMENTED_AND_TESTED_IN_REPOSITORY** |
+| SSRF / outbound providers | Internal model adapter pivots to arbitrary network targets | High | Ollama adapter accepts only configured allowlisted hosts (`ollama`, loopback by default), port 11434 by default, forbids credentials/path/query/fragment, rejects redirects, bounds timeout and response size | **CONSTRAINED_CURRENT_SURFACE** — no arbitrary user-supplied URL fetch is established by current code evidence |
+| External fetching | Future crawler/source fetch introduces arbitrary URL retrieval | High future risk | Current public source metadata storage is not a general crawler | **NOT_IMPLEMENTED / DESIGN REQUIRED BEFORE EXPOSURE** |
+| Database | Direct browser/service-role DB bypass | High if present | DB credentials remain server-side; no direct browser DB surface is claimed | **CURRENT BOUNDARY ACCEPTED** |
+| Database | PostgreSQL RLS absent | Medium defense-in-depth | Authorization boundary is API RBAC/tenant checks; RLS is not claimed | **ACCEPTED_ARCHITECTURE_LIMIT** — becomes blocker if direct client DB access is introduced |
+| Files/storage | Malicious upload/MIME polyglot | N/A current surface | No application upload/storage endpoint is part of the current runtime contract | **NOT_EXPOSED**; separate design required before adding uploads |
+| Supply chain | Dependency/action compromise | High | Python graph digest, `pip-audit --require-hashes --strict`, VEX-aware audit, CycloneDX SBOM, SHA-pinned Actions and digest-pinned container images are present in canonical CI | **IMPLEMENTED_AND_TESTED_IN_REPOSITORY** |
+| Secrets | Credentials committed to tree/history | Critical if present | Working-tree and reachable-history scans are release gates; checkout credentials are not persisted | **CI-GATED**; never treat scanner success as proof that external secret management exists |
+| Edge abuse controls | Distributed brute force/search/resource abuse | High | Application-level controls exist; no live WAF/distributed edge evidence is attached | **EXTERNAL_BLOCKED** |
+| Production database | PITR/backups/restore/least privilege/TLS | High operational | Architecture requires them, but repository CI cannot prove a managed live database or restore drill | **EXTERNAL_BLOCKED** |
+| Observability | No externally verified alerting/incident path | Medium/High operational | Privacy-minimized structured request logs exist in application code | **EXTERNAL_BLOCKED** for aggregation, alerts, uptime and incident drill |
+| Accessibility | Repository tests mistaken for independent WCAG proof | Medium release-integrity | Semantic/accessibility checks exist, but independent/manual AT verification is not complete | **EXTERNAL_BLOCKED** for final WCAG claim |
+
+## Current Ollama SSRF boundary
+
+The current outbound-network statement is intentionally narrow:
+
+- The Ollama provider is **not** a generic fetch proxy.
+- Its endpoint is configuration-controlled, not supplied by a public request parameter.
+- Default hosts are restricted to `ollama`, `localhost`, and `127.0.0.1`.
+- Default port is `11434`.
+- URL credentials, extra path, query and fragment are rejected during provider construction.
+- HTTP redirects are rejected rather than followed.
+- Response size and request timeout are bounded.
+
+This is materially different from the previous audit statement that no outbound `urllib` path existed. Future additions that resolve arbitrary domains, follow redirects, fetch user-provided URLs or accept configurable wide host allowlists require a fresh SSRF threat model including private/link-local ranges and DNS rebinding.
+
+## Production blockers that cannot be “cleaned away” in source code
+
+The following controls need real environment evidence; replacing them with booleans, mocks or documentation would be unrealistic:
+
+1. GitHub Branch Protection/Ruleset on `main` with required checks and no routine bypass.
+2. HTTPS Staging with the intended ingress/forwarding configuration.
+3. WAF and distributed rate limiting with observed 429 behavior.
+4. Managed PostgreSQL with TLS, backups, PITR and a successful restore drill.
+5. External secret injection/rotation procedure.
+6. Real Arabic retrieval benchmark and load/SLO evidence.
+7. External observability, alert routing and incident drill.
+8. Independent security and accessibility review.
+9. Rollback verification against the exact release artifact and schema strategy.
+10. Explicit human GO for Production.
+
+## Status vocabulary
+
+Use only evidence-backed states:
+
+- `NOT_STARTED`
+- `DESIGNED`
+- `IMPLEMENTED_NOT_INTEGRATED`
+- `INTEGRATED_NOT_TESTED`
+- `TESTED_IN_STAGING`
+- `EXTERNALLY_VERIFIED`
+- `BLOCKED`
+- `PRODUCTION_READY`
+
+No document title containing words such as “Perfect”, “Master”, “Ultimate”, or “Hardened” overrides these evidence states.
