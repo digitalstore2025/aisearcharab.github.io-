@@ -5,10 +5,12 @@ from dataclasses import dataclass
 from typing import Literal
 
 from openai import APIConnectionError, APIError, APITimeoutError, InternalServerError, OpenAI, RateLimitError
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from sqlalchemy.orm import Session
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
 
 from .arabic import normalize_text, tokenize
+from .models import ContentItem
 from .repository import list_indexed_content
 from .search import rank_items
 
@@ -42,6 +44,8 @@ class GroundedAnswerResponse(BaseModel):
     retrieval_algorithm: str = "lexical-v1"
     generated: bool = True
 
+    _selected_claim_refs: tuple[tuple[str, str], ...] = PrivateAttr(default=())
+
 
 class ModelAnswerDraft(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -65,6 +69,8 @@ class EvidenceItem:
     url: str
     claims: tuple[EvidenceClaim, ...]
     source_urls: tuple[str, ...]
+    content_id: str | None = None
+    content_revision: int | None = None
 
 
 class GeneratedAnswerError(RuntimeError):
@@ -231,10 +237,9 @@ def retrieve_evidence(
             url=item.url_path,
             claims=claims,
             source_urls=source_urls,
+            content_id=item.id,
+            content_revision=item.revision,
         )
-        # Enforce the exact serialized aggregate budget during retrieval, before
-        # quota reservation or any provider call. A configuration-valid request
-        # therefore cannot consume quota only to fail on local prompt size.
         if len(_serialize_input(query, [*evidence, candidate])) > _MAX_MODEL_INPUT_CHARS:
             continue
         evidence.append(candidate)
@@ -346,6 +351,63 @@ def _model_from_response(response: object) -> str:
     return resolved
 
 
+def revalidate_selected_evidence(
+    session: Session,
+    evidence: list[EvidenceItem],
+    result: GroundedAnswerResponse,
+) -> bool:
+    """Confirm selected claims remain publishable after provider latency.
+
+    The request releases its original read transaction before calling OpenAI.
+    This function intentionally opens a fresh, short transaction afterwards and
+    verifies the exact content revision and reviewed claim snapshot used to
+    render the response. A concurrent archive/edit therefore fails closed.
+    """
+    refs = result._selected_claim_refs
+    if result.uncertainty == "insufficient":
+        return not refs
+    if not refs:
+        return False
+
+    snapshot_by_evidence = {item.evidence_id: item for item in evidence}
+    selected_snapshots: dict[str, EvidenceItem] = {}
+    for evidence_id, _claim_key in refs:
+        snapshot = snapshot_by_evidence.get(evidence_id)
+        if snapshot is None or snapshot.content_id is None or snapshot.content_revision is None:
+            return False
+        selected_snapshots[evidence_id] = snapshot
+
+    content_ids = {snapshot.content_id for snapshot in selected_snapshots.values() if snapshot.content_id is not None}
+    statement = (
+        select(ContentItem)
+        .where(ContentItem.id.in_(content_ids))
+        .options(selectinload(ContentItem.claims))
+    )
+    current_by_id = {item.id: item for item in session.scalars(statement).all()}
+
+    for evidence_id, claim_key in refs:
+        snapshot = selected_snapshots[evidence_id]
+        current = current_by_id.get(snapshot.content_id or "")
+        if current is None:
+            return False
+        if current.status != "published" or not current.is_indexed or current.revision != snapshot.content_revision:
+            return False
+
+        snapshot_claim = next((claim for claim in snapshot.claims if claim.claim_key == claim_key), None)
+        current_claim = next((claim for claim in current.claims if claim.claim_key == claim_key), None)
+        if snapshot_claim is None or current_claim is None:
+            return False
+        if current_claim.review_status not in _APPROVED_CLAIM_STATES or current_claim.confidence == "unverified":
+            return False
+        if (
+            current_claim.text.strip() != snapshot_claim.text
+            or current_claim.claim_type != snapshot_claim.claim_type
+            or current_claim.confidence != snapshot_claim.confidence
+        ):
+            return False
+    return True
+
+
 def generate_grounded_answer(
     query: str,
     evidence: list[EvidenceItem],
@@ -402,7 +464,7 @@ def generate_grounded_answer(
         citations = _citations_from_selection(selected)
         uncertainty = _effective_uncertainty(draft.uncertainty, selected)
 
-    return GroundedAnswerResponse(
+    result = GroundedAnswerResponse(
         answer=answer,
         citations=citations,
         uncertainty=uncertainty,
@@ -416,3 +478,5 @@ def generate_grounded_answer(
         request_id=request_id,
         usage=_usage_from_response(response),
     )
+    result._selected_claim_refs = tuple((item.evidence_id, claim.claim_key) for item, claim in selected)
+    return result
