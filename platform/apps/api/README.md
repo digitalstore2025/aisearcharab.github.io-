@@ -38,10 +38,11 @@ POST /v1/answers/grounded
 هذه القدرة:
 
 - **معطلة افتراضياً** عبر `GENERATED_ANSWERS_ENABLED=false`.
-- تتطلب جلسة مصادقاً عليها تحمل `content:read`؛ ليست endpoint عامة مجهولة حالياً.
+- تتطلب جلسة مصادقاً عليها تحمل `content:read`، إضافة إلى CSRF token صالح لأن الاستدعاء يستهلك مورداً مدفوعاً؛ ليست endpoint عامة مجهولة حالياً.
 - تسترجع فقط محتوى AISearcharab المنشور والمفهرس، ولا تقوم بجلب URLs خارجية.
 - تعامل محتوى الأدلة كبيانات غير موثوقة، لا كتعليمات للنموذج.
 - تستخدم OpenAI Responses API مع Structured Outputs و`store=False`.
+- لا تقبل إلا Response مكتملة (`status=completed`).
 - تتحقق محلياً من JSON ومن أن كل `evidence_id` أعاده النموذج موجود فعلاً في مجموعة الأدلة المسترجعة.
 - تضيف `model`, `request_id`, `usage` وبيانات الروابط على الخادم بدلاً من الوثوق بأن النموذج سيولدها بصورة صحيحة.
 - تفشل مغلقةً إذا كانت الأدلة غير كافية أو إذا أعاد النموذج citation غير معروف أو output لا يطابق العقد.
@@ -58,7 +59,7 @@ OPENAI_MODEL=gpt-5.6-terra
 
 الحدود التشغيلية الافتراضية موثقة في `platform/.env.example`: مهلة، retries، أقصى output tokens، عدد مصادر، وحجم evidence لكل مصدر.
 
-> لا يكفي وجود الكود لتسمية القدرة Production-Ready. التفعيل الإنتاجي يتطلب مرور CI، مراجعة dependency/OpenAPI digests، مراجعة أمنية، secret injection خارج Git، ومراقبة التكلفة/الأخطاء. فتحها للعامة يتطلب أيضاً rate limiting مخصصاً للـgeneration قبل إزالة بوابة المصادقة.
+> **Production activation محظور برمجياً في هذه النسخة.** `Settings.validate()` يفشل مغلقاً إذا كانت `GENERATED_ANSWERS_ENABLED=true` في `production`. إزالة هذا الحاجز تتطلب أولاً distributed generation rate limiting، cost/error observability، secret injection خارج Git، ومرور CI والمراجعة الأمنية. فتح endpoint للعامة يحتاج ضوابط abuse مستقلة قبل إزالة المصادقة/CSRF.
 
 ## خصوصية تحليلات البحث
 
