@@ -40,12 +40,15 @@ POST /v1/answers/grounded
 - **معطلة افتراضياً** عبر `GENERATED_ANSWERS_ENABLED=false`.
 - تتطلب جلسة مصادقاً عليها تحمل `content:read`، إضافة إلى CSRF token صالح لأن الاستدعاء يستهلك مورداً مدفوعاً؛ ليست endpoint عامة مجهولة حالياً.
 - تسترجع فقط محتوى AISearcharab المنشور والمفهرس، ولا تقوم بجلب URLs خارجية.
-- تعامل محتوى الأدلة كبيانات غير موثوقة، لا كتعليمات للنموذج.
-- تستخدم OpenAI Responses API مع Structured Outputs و`store=False`.
-- لا تقبل إلا Response مكتملة (`status=completed`).
-- تتحقق محلياً من JSON ومن أن كل `evidence_id` أعاده النموذج موجود فعلاً في مجموعة الأدلة المسترجعة.
-- تضيف `model`, `request_id`, `usage` وبيانات الروابط على الخادم بدلاً من الوثوق بأن النموذج سيولدها بصورة صحيحة.
-- تفشل مغلقةً إذا كانت الأدلة غير كافية أو إذا أعاد النموذج citation غير معروف أو output لا يطابق العقد.
+- لا ترسل للنموذج corpus حراً كي يصوغ حقائق؛ ترسل فقط claims مراجَعة (`reviewed`/`published`) ذات confidence معروف من المواد المسترجعة.
+- دور النموذج هو **اختيار `claim_key` فقط**. لا يُقبل منه answer factual حر أو paraphrase، وStructured Output يمنع الحقول الإضافية.
+- يبني الخادم نص الإجابة من `Claim.text` الأصلي كما هو، مع إظهار `claim_type` و`confidence`، ويشتق citations من المادة التي تملك الـclaim المختار.
+- تعامل claims المسترجعة كبيانات غير موثوقة داخل prompt؛ أي تعليمات أو prompt injection داخلها لا تصبح تعليمات تنفيذية.
+- تستخدم OpenAI Responses API مع Structured Outputs و`store=False`، ولا تقبل إلا Response مكتملة (`status=completed`).
+- تتحقق محلياً من أن كل `claim_key` أعاده النموذج موجود ضمن مجموعة claims المراجَعة المسترجعة، وتفشل مغلقةً عند claim مجهول، أو selection غير متسق مع حالة `insufficient`.
+- لا تُرسل `source_urls` إلى النموذج. وتُقيد metadata المعادة للمستخدم بعدد URLs وحجم إجمالي محليين؛ كما يُقيد عدد claims وحجم نص claims المرسل لكل evidence وحجم serialized input الكلي.
+- provenance الخاص بالموديل يأتي من `response.model` الذي يعيده المزود، لا من alias المطلوب. غياب/فساد resolved model identifier يؤدي إلى fail-closed بدلاً من ادعاء نسخة غير مثبتة.
+- تضيف `request_id`, `usage` وبيانات الروابط على الخادم بدلاً من الوثوق بأن النموذج سيولدها بصورة صحيحة.
 - تطبق quota دائمة لكل مستخدم عبر `audit_events`. في PostgreSQL تُسلسل الحجوزات لنفس المستخدم بقفل row-level قبل تسجيل الحجز، ثم يتم `commit` قبل أي اتصال بالشبكة.
 - تسجل نتائج generation كـaudit events مع `model`, latency, uncertainty وعدادات الاستخدام العددية (`input_units`, `output_units`, `total_units`) من دون تسجيل نص السؤال أو الأسرار.
 - تُحوّل حالات provider غير المتوقعة إلى أخطاء API محكومة بدلاً من تسريبها كـ500 غير مصنف.
@@ -62,7 +65,7 @@ GENERATED_ANSWER_MAX_REQUESTS=20
 GENERATED_ANSWER_WINDOW_SECONDS=3600
 ```
 
-الحدود التشغيلية الافتراضية موثقة في `platform/.env.example`: مهلة، retries، أقصى output tokens، عدد مصادر، حجم evidence لكل مصدر، وعدد requests لكل نافذة زمنية.
+الحدود التشغيلية الافتراضية موثقة في `platform/.env.example`: مهلة، retries، أقصى output tokens، عدد مصادر، حجم evidence لكل مصدر، وعدد requests لكل نافذة زمنية. توجد أيضاً حدود دفاعية داخلية لعدد claims وروابط المصادر وحجم serialized model input.
 
 > **Production activation محظور برمجياً في هذه النسخة.** تم تنفيذ distributed per-user request limiting وaudit-based cost/error observability، لكن `Settings.validate()` يظل fail-closed في production إلى أن تمر هذه الضوابط عبر CI/security/runtime verification ويتم حقن السر من Secret Manager. فتح endpoint للعامة يحتاج طبقة abuse policy مستقلة قبل إزالة المصادقة/CSRF.
 
