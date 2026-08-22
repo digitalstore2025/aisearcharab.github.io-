@@ -102,6 +102,8 @@ class Settings:
     openai_max_output_tokens: int = 1200
     generated_answer_max_sources: int = 5
     generated_answer_max_evidence_chars: int = 6000
+    generated_answer_max_requests: int = 20
+    generated_answer_window_seconds: int = 3600
 
     @property
     def is_production(self) -> bool:
@@ -186,6 +188,10 @@ class Settings:
             raise ConfigurationError("GENERATED_ANSWER_MAX_SOURCES must be between 1 and 8")
         if not 500 <= self.generated_answer_max_evidence_chars <= 20_000:
             raise ConfigurationError("GENERATED_ANSWER_MAX_EVIDENCE_CHARS must be between 500 and 20000")
+        if not 1 <= self.generated_answer_max_requests <= 1_000:
+            raise ConfigurationError("GENERATED_ANSWER_MAX_REQUESTS must be between 1 and 1000")
+        if not 60 <= self.generated_answer_window_seconds <= 86_400:
+            raise ConfigurationError("GENERATED_ANSWER_WINDOW_SECONDS must be between 60 and 86400")
         if not 2 <= len(self.openai_model.strip()) <= 100:
             raise ConfigurationError("OPENAI_MODEL must contain between 2 and 100 characters")
         if self.generated_answers_enabled and not self.openai_api_key:
@@ -254,6 +260,12 @@ def get_settings() -> Settings:
         ),
         generated_answer_max_evidence_chars=_int(
             "GENERATED_ANSWER_MAX_EVIDENCE_CHARS", os.getenv("GENERATED_ANSWER_MAX_EVIDENCE_CHARS", "6000")
+        ),
+        generated_answer_max_requests=_int(
+            "GENERATED_ANSWER_MAX_REQUESTS", os.getenv("GENERATED_ANSWER_MAX_REQUESTS", "20")
+        ),
+        generated_answer_window_seconds=_int(
+            "GENERATED_ANSWER_WINDOW_SECONDS", os.getenv("GENERATED_ANSWER_WINDOW_SECONDS", "3600")
         ),
     )
     settings.validate()
