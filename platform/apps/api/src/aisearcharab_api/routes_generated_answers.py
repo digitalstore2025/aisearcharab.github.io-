@@ -5,7 +5,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy.orm import Session
 
-from .auth import Principal, require_permissions
+from .auth import Principal, require_mutation
 from .database import get_db
 from .generated_answers import (
     GroundedAnswerRequest,
@@ -24,7 +24,7 @@ def grounded_answer(
     payload: GroundedAnswerRequest,
     request: Request,
     session: Annotated[Session, Depends(get_db)],
-    _: Annotated[Principal, Depends(require_permissions("content:read"))],
+    _: Annotated[Principal, Depends(require_mutation("content:read"))],
 ) -> GroundedAnswerResponse:
     settings = request.app.state.settings
     if not settings.generated_answers_enabled:
