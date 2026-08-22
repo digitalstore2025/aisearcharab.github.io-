@@ -1,18 +1,26 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Generator
+from dataclasses import replace
 
 import pytest
+from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
+import aisearcharab_api.routes_generated_answers as generated_routes
+from aisearcharab_api.config import Settings
+from aisearcharab_api.database import get_db
+from aisearcharab_api.generated_answers import GroundedAnswerResponse, GroundedCitation, TokenUsage
 from aisearcharab_api.generation_quota import (
     GenerationQuotaExceeded,
     record_generation_result,
     reserve_generation_quota,
 )
+from aisearcharab_api.main import create_app
 from aisearcharab_api.models import AuditEvent, User
-from conftest import OWNER_EMAIL
+from conftest import OWNER_EMAIL, csrf_from_client
 
 
 def test_generation_quota_is_persistent_per_user(session_factory: sessionmaker[Session]) -> None:
@@ -93,3 +101,66 @@ def test_generation_result_audit_keeps_safe_usage_metrics(session_factory: sessi
         assert metadata["model"] == "gpt-5.6-terra"
         assert metadata["uncertainty"] == "low"
         assert "input_tokens" not in metadata
+
+
+def test_http_generation_quota_blocks_before_second_provider_call(
+    session_factory: sessionmaker[Session],
+    settings: Settings,
+    owner_credentials: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    runtime_settings = replace(
+        settings,
+        generated_answers_enabled=True,
+        openai_api_key="test-key-not-a-production-secret",
+        generated_answer_max_requests=1,
+        generated_answer_window_seconds=3600,
+    )
+    app = create_app(runtime_settings)
+
+    def override_get_db() -> Generator[Session, None, None]:
+        session = session_factory()
+        try:
+            yield session
+        finally:
+            session.close()
+
+    calls = 0
+
+    def fake_generate(query: str, evidence, **kwargs) -> GroundedAnswerResponse:
+        nonlocal calls
+        calls += 1
+        first = evidence[0]
+        return GroundedAnswerResponse(
+            answer="إجابة اختبارية مرتبطة بالدليل.",
+            citations=[
+                GroundedCitation(
+                    evidence_id=first.evidence_id,
+                    title=first.title,
+                    url=first.url,
+                    source_urls=list(first.source_urls),
+                )
+            ],
+            uncertainty="low",
+            limitations=[],
+            model=kwargs["model"],
+            request_id=kwargs["request_id"],
+            usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15),
+        )
+
+    app.dependency_overrides[get_db] = override_get_db
+    monkeypatch.setattr(generated_routes, "generate_grounded_answer", fake_generate)
+
+    with TestClient(app) as client:
+        assert client.post("/v1/auth/login", json=owner_credentials).status_code == 200
+        headers = {"X-CSRF-Token": csrf_from_client(client)}
+
+        first = client.post("/v1/answers/grounded", headers=headers, json={"query": "GPT-5"})
+        assert first.status_code == 200
+
+        second = client.post("/v1/answers/grounded", headers=headers, json={"query": "GPT-5"})
+        assert second.status_code == 429
+        assert second.json()["detail"] == "generated answer quota exceeded"
+        assert int(second.headers["Retry-After"]) >= 1
+
+    assert calls == 1
