@@ -24,6 +24,7 @@ from .repository import count_indexed_matches, get_published_content, list_index
 from .routes_admin import router as admin_router
 from .routes_admin_detail import router as admin_detail_router
 from .routes_auth import router as auth_router
+from .routes_generated_answers import router as generated_answers_router
 from .routes_mfa import router as mfa_router
 from .schemas import CapabilitiesResponse, HealthResponse, PublicClaimSummary, PublicContentDetail, SearchResponse, SearchResult, SourceSummary
 from .search import rank_items
@@ -60,7 +61,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(
         title="AISearcharab API",
         version=__version__,
-        description="Arabic-first retrieval and governed editorial API. Generated answers and payments are not enabled.",
+        description=(
+            "Arabic-first retrieval and governed editorial API. "
+            "Grounded generated answers are gated and disabled by default; payments are not enabled."
+        ),
         docs_url="/docs" if not runtime_settings.is_production else None,
         redoc_url=None,
         openapi_url="/openapi.json" if not runtime_settings.is_production else None,
@@ -84,6 +88,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(admin_router, prefix=runtime_settings.api_prefix)
     app.include_router(admin_detail_router, prefix=runtime_settings.api_prefix)
     app.include_router(geo_router, prefix=runtime_settings.api_prefix)
+    app.include_router(generated_answers_router, prefix=runtime_settings.api_prefix)
 
     @app.get("/health/live", response_model=HealthResponse, tags=["health"])
     def liveness() -> HealthResponse:
@@ -109,7 +114,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get(f"{runtime_settings.api_prefix}/meta/capabilities", response_model=CapabilitiesResponse, tags=["meta"])
     def capabilities() -> CapabilitiesResponse:
-        return CapabilitiesResponse(api_version=__version__)
+        return CapabilitiesResponse(
+            api_version=__version__,
+            generated_answers=runtime_settings.generated_answers_enabled,
+            rag=runtime_settings.generated_answers_enabled,
+        )
 
     @app.get(f"{runtime_settings.api_prefix}/content/{{slug}}", response_model=PublicContentDetail, tags=["content"])
     def content_detail(slug: str, session: Session = Depends(get_db)) -> PublicContentDetail:
