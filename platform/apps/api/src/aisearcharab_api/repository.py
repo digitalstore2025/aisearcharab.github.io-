@@ -25,8 +25,6 @@ _TRANSLATE_TO_SQL = literal_column("'" + _POSTGRES_TRANSLATE_TO.replace("'", "''
 
 
 def _postgres_search_document():
-    # All expression constants are rendered literally so PostgreSQL can match this
-    # query expression exactly to the functional GIN index created by Alembic.
     combined = (
         func.coalesce(ContentItem.title, _EMPTY_SQL)
         + _SPACE_SQL
@@ -60,9 +58,6 @@ def count_indexed_matches(session: Session, query: str) -> int | None:
 def list_indexed_content(session: Session, query: str | None = None, *, candidate_limit: int = 300) -> list[ContentItem]:
     statement = select(ContentItem).where(ContentItem.status == "published", ContentItem.is_indexed.is_(True))
 
-    # Production is PostgreSQL-only. Use a GIN-backed, Arabic-normalized full-text
-    # index to bound the more expensive transparent application ranking stage.
-    # SQLite remains a deterministic dev/test fallback.
     bind = session.get_bind()
     if query and bind.dialect.name == "postgresql":
         document = _postgres_search_document()
@@ -74,6 +69,8 @@ def list_indexed_content(session: Session, query: str | None = None, *, candidat
         )
     else:
         statement = statement.order_by(ContentItem.published_at.desc().nullslast(), ContentItem.slug.asc())
+        if query:
+            statement = statement.limit(candidate_limit)
 
     return list(session.scalars(statement).all())
 
