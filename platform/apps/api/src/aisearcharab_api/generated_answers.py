@@ -173,7 +173,9 @@ def _validate_citation_ids(draft: ModelAnswerDraft, evidence: list[EvidenceItem]
     if any(citation_id not in valid for citation_id in citation_ids):
         raise UpstreamInvalidResponseError("model returned an unknown evidence identifier")
     if draft.uncertainty == "insufficient":
-        return citation_ids
+        if citation_ids:
+            raise UpstreamInvalidResponseError("insufficient answer must not assert citations")
+        return []
     if not citation_ids:
         raise UpstreamInvalidResponseError("grounded answer omitted citations")
     return citation_ids
