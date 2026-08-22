@@ -117,6 +117,12 @@ _CLAIM_LABELS = {
     "third-party-claim": "THIRD-PARTY CLAIM",
 }
 _CONFIDENCE_RANK = {"high": 0, "medium": 1, "low": 2, "unverified": 3}
+_UNCERTAINTY_RANK = {"low": 0, "medium": 1, "high": 2}
+_UNCERTAINTY_BY_RANK: dict[int, Literal["low", "medium", "high"]] = {
+    0: "low",
+    1: "medium",
+    2: "high",
+}
 
 
 def _bounded_source_urls(urls: list[str]) -> tuple[str, ...]:
@@ -265,10 +271,28 @@ def _validated_claim_selection(
     return [by_key[claim_key] for claim_key in claim_keys]
 
 
+def _claim_uncertainty_floor(claim: EvidenceClaim) -> Literal["low", "medium", "high"]:
+    if claim.claim_type == "verified-fact":
+        return {"high": "low", "medium": "medium", "low": "high"}[claim.confidence]
+    if claim.confidence == "high":
+        return "medium"
+    return "high"
+
+
+def _effective_uncertainty(
+    model_uncertainty: Literal["low", "medium", "high"],
+    selected: list[tuple[EvidenceItem, EvidenceClaim]],
+) -> Literal["low", "medium", "high"]:
+    floor_rank = max(_UNCERTAINTY_RANK[_claim_uncertainty_floor(claim)] for _item, claim in selected)
+    effective_rank = max(_UNCERTAINTY_RANK[model_uncertainty], floor_rank)
+    return _UNCERTAINTY_BY_RANK[effective_rank]
+
+
 def _render_answer(selected: list[tuple[EvidenceItem, EvidenceClaim]]) -> str:
     return "\n".join(
-        f"- {_CLAIM_LABELS[claim.claim_type]} [{claim.confidence}]: {claim.text}"
-        for _item, claim in selected
+        f"- {_CLAIM_LABELS[claim.claim_type]} [{claim.confidence}] "
+        f"[{item.evidence_id}:{claim.claim_key}]: {claim.text}"
+        for item, claim in selected
     )
 
 
@@ -292,11 +316,16 @@ def _citations_from_selection(selected: list[tuple[EvidenceItem, EvidenceClaim]]
 
 def _usage_from_response(response: object) -> TokenUsage:
     usage = getattr(response, "usage", None)
-    return TokenUsage(
-        input_tokens=int(getattr(usage, "input_tokens", 0) or 0),
-        output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
-        total_tokens=int(getattr(usage, "total_tokens", 0) or 0),
-    )
+    if usage is None:
+        raise UpstreamInvalidResponseError("OpenAI response omitted token usage provenance")
+
+    values: dict[str, int] = {}
+    for name in ("input_tokens", "output_tokens", "total_tokens"):
+        value = getattr(usage, name, None)
+        if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+            raise UpstreamInvalidResponseError(f"OpenAI response returned invalid {name} provenance")
+        values[name] = value
+    return TokenUsage(**values)
 
 
 def _model_from_response(response: object) -> str:
@@ -359,17 +388,20 @@ def generate_grounded_answer(
     if draft.uncertainty == "insufficient":
         answer = "The reviewed repository claims available for this query are insufficient to produce a grounded answer."
         citations: list[GroundedCitation] = []
+        uncertainty: Literal["low", "medium", "high", "insufficient"] = "insufficient"
     else:
         answer = _render_answer(selected)
         citations = _citations_from_selection(selected)
+        uncertainty = _effective_uncertainty(draft.uncertainty, selected)
 
     return GroundedAnswerResponse(
         answer=answer,
         citations=citations,
-        uncertainty=draft.uncertainty,
+        uncertainty=uncertainty,
         limitations=[
             "Only reviewed repository claims are rendered; model-authored factual prose is not accepted.",
-            "Claim text is preserved verbatim and labeled by claim type and confidence.",
+            "Claim text is preserved verbatim and labeled by claim type, confidence, and evidence marker.",
+            "Reported uncertainty is never lower than the server-derived floor for selected claim types and confidence.",
         ],
         model=_model_from_response(response),
         request_id=request_id,
