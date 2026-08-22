@@ -131,7 +131,7 @@ def test_http_generation_quota_blocks_before_second_provider_call(
         nonlocal calls
         calls += 1
         first = evidence[0]
-        return GroundedAnswerResponse(
+        result = GroundedAnswerResponse(
             answer="إجابة اختبارية مرتبطة بالدليل.",
             citations=[
                 GroundedCitation(
@@ -147,6 +147,8 @@ def test_http_generation_quota_blocks_before_second_provider_call(
             request_id=kwargs["request_id"],
             usage=TokenUsage(input_tokens=10, output_tokens=5, total_tokens=15),
         )
+        result._selected_claim_refs = ((first.evidence_id, first.claims[0].claim_key),)
+        return result
 
     app.dependency_overrides[get_db] = override_get_db
     monkeypatch.setattr(generated_routes, "generate_grounded_answer", fake_generate)
