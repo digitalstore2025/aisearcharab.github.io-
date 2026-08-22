@@ -24,8 +24,8 @@ _TRANSLATE_FROM_SQL = literal_column("'" + _POSTGRES_TRANSLATE_FROM.replace("'",
 _TRANSLATE_TO_SQL = literal_column("'" + _POSTGRES_TRANSLATE_TO.replace("'", "''") + "'")
 
 
-def _postgres_search_document():
-    combined = (
+def _combined_search_text():
+    return (
         func.coalesce(ContentItem.title, _EMPTY_SQL)
         + _SPACE_SQL
         + func.coalesce(ContentItem.summary, _EMPTY_SQL)
@@ -34,7 +34,10 @@ def _postgres_search_document():
         + _SPACE_SQL
         + func.coalesce(ContentItem.section, _EMPTY_SQL)
     )
-    normalized = func.translate(func.lower(combined), _TRANSLATE_FROM_SQL, _TRANSLATE_TO_SQL)
+
+
+def _postgres_search_document():
+    normalized = func.translate(func.lower(_combined_search_text()), _TRANSLATE_FROM_SQL, _TRANSLATE_TO_SQL)
     return func.to_tsvector(_SIMPLE_REGCONFIG, normalized)
 
 
@@ -67,10 +70,18 @@ def list_indexed_content(session: Session, query: str | None = None, *, candidat
             .order_by(func.ts_rank_cd(document, tsquery).desc(), ContentItem.published_at.desc().nullslast(), ContentItem.slug.asc())
             .limit(candidate_limit)
         )
+    elif query and bind.dialect.name == "sqlite":
+        # The SQLite compatibility path is used only for local development and
+        # tests. Filter by the same normalized token-intersection predicate as
+        # the Python ranker before LIMIT so recent non-matches cannot evict an
+        # older true match. The SQL result set remains bounded by candidate_limit.
+        statement = (
+            statement.where(func.ais_has_token_match(_combined_search_text(), query) == 1)
+            .order_by(ContentItem.published_at.desc().nullslast(), ContentItem.slug.asc())
+            .limit(candidate_limit)
+        )
     else:
         statement = statement.order_by(ContentItem.published_at.desc().nullslast(), ContentItem.slug.asc())
-        if query:
-            statement = statement.limit(candidate_limit)
 
     return list(session.scalars(statement).all())
 
