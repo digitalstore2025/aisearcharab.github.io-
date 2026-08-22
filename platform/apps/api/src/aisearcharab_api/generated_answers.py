@@ -96,6 +96,10 @@ If the evidence cannot support a useful answer, set uncertainty to "insufficient
 Return only the requested structured output.
 """
 
+_MODEL_PROVENANCE_FALLBACK = (
+    "Provider response omitted a valid resolved model identifier; model provenance falls back to the requested model alias."
+)
+
 
 def retrieve_evidence(
     session: Session,
@@ -167,6 +171,16 @@ def _usage_from_response(response: object) -> TokenUsage:
     )
 
 
+def _model_from_response(response: object, requested_model: str) -> tuple[str, bool]:
+    """Return provider-resolved model id and whether alias fallback was required."""
+    provider_model = getattr(response, "model", None)
+    if isinstance(provider_model, str):
+        resolved = provider_model.strip()
+        if resolved and len(resolved) <= 200 and all(ord(character) >= 32 and ord(character) != 127 for character in resolved):
+            return resolved, False
+    return requested_model, True
+
+
 def generate_grounded_answer(
     query: str,
     evidence: list[EvidenceItem],
@@ -224,12 +238,17 @@ def generate_grounded_answer(
         )
         for evidence_id in citation_ids
     ]
+    resolved_model, used_fallback = _model_from_response(response, model)
+    limitations = list(draft.limitations)
+    if used_fallback:
+        limitations.append(_MODEL_PROVENANCE_FALLBACK)
+
     return GroundedAnswerResponse(
         answer=draft.answer,
         citations=citations,
         uncertainty=draft.uncertainty,
-        limitations=draft.limitations,
-        model=model,
+        limitations=limitations,
+        model=resolved_model,
         request_id=request_id,
         usage=_usage_from_response(response),
     )
