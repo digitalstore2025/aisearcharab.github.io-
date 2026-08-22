@@ -1,21 +1,10 @@
 from __future__ import annotations
 
 import json
-import uuid
 from dataclasses import dataclass
 from typing import Literal
 
-from openai import (
-    APIConnectionError,
-    APITimeoutError,
-    AuthenticationError,
-    BadRequestError,
-    InternalServerError,
-    NotFoundError,
-    OpenAI,
-    PermissionDeniedError,
-    RateLimitError,
-)
+from openai import APIConnectionError, APIError, APITimeoutError, InternalServerError, OpenAI, RateLimitError
 from pydantic import BaseModel, Field, ValidationError
 from sqlalchemy.orm import Session
 
@@ -78,7 +67,7 @@ class NoEvidenceError(GeneratedAnswerError):
 
 
 class UpstreamUnavailableError(GeneratedAnswerError):
-    """Raised when OpenAI is unavailable or rejects server credentials/config."""
+    """Raised when OpenAI is unavailable or rejects the request."""
 
 
 class UpstreamInvalidResponseError(GeneratedAnswerError):
@@ -122,14 +111,13 @@ def retrieve_evidence(
     for index, result in enumerate(ranked, start=1):
         item = result.item
         combined = "\n\n".join(part.strip() for part in (item.summary, item.body) if part and part.strip())
-        snippet = combined[:max_evidence_chars]
         source_urls = tuple(source.url for source in item.sources if source.url)
         evidence.append(
             EvidenceItem(
                 evidence_id=f"E{index}",
                 title=item.title,
                 url=item.url_path,
-                snippet=snippet,
+                snippet=combined[:max_evidence_chars],
                 source_urls=source_urls,
             )
         )
@@ -180,30 +168,20 @@ def _usage_from_response(response: object) -> TokenUsage:
 
 
 def generate_grounded_answer(
-    session: Session,
     query: str,
+    evidence: list[EvidenceItem],
     *,
+    request_id: str,
     api_key: str,
     model: str,
     timeout_seconds: int,
     max_retries: int,
     max_output_tokens: int,
-    candidate_limit: int,
-    max_sources: int,
-    max_evidence_chars: int,
     client: OpenAI | None = None,
 ) -> GroundedAnswerResponse:
-    evidence = retrieve_evidence(
-        session,
-        query,
-        candidate_limit=candidate_limit,
-        max_sources=max_sources,
-        max_evidence_chars=max_evidence_chars,
-    )
     if not evidence:
         raise NoEvidenceError("no indexed evidence matched the query")
 
-    request_id = str(uuid.uuid4())
     openai_client = client or OpenAI(api_key=api_key, timeout=timeout_seconds, max_retries=max_retries)
     try:
         response = openai_client.responses.create(
@@ -223,8 +201,8 @@ def generate_grounded_answer(
         )
     except (RateLimitError, APITimeoutError, APIConnectionError, InternalServerError) as exc:
         raise UpstreamUnavailableError("OpenAI is temporarily unavailable") from exc
-    except (AuthenticationError, PermissionDeniedError, BadRequestError, NotFoundError) as exc:
-        raise UpstreamUnavailableError("OpenAI request configuration was rejected") from exc
+    except APIError as exc:
+        raise UpstreamUnavailableError("OpenAI request failed") from exc
 
     if getattr(response, "status", None) != "completed":
         raise UpstreamInvalidResponseError("OpenAI response did not complete")
