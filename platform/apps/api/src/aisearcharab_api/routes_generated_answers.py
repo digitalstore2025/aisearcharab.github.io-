@@ -18,6 +18,7 @@ from .generated_answers import (
     UpstreamUnavailableError,
     generate_grounded_answer,
     retrieve_evidence,
+    revalidate_selected_evidence,
 )
 from .generation_quota import GenerationQuotaExceeded, record_generation_result, reserve_generation_quota
 
@@ -137,6 +138,50 @@ def grounded_answer(
             failure_class="invalid_provider_output",
         )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="generation provider returned invalid output") from exc
+
+    # Reacquire the database only after provider latency and verify that every
+    # selected claim is still on the same published/indexed content revision.
+    try:
+        evidence_is_current = revalidate_selected_evidence(session, evidence, result)
+    except SQLAlchemyError as exc:
+        session.rollback()
+        _record_result_safely(
+            session,
+            user_id=user_id,
+            request_id=request_id,
+            outcome="failure",
+            model=result.model,
+            latency_ms=(time.perf_counter() - started) * 1000,
+            input_tokens=result.usage.input_tokens,
+            output_tokens=result.usage.output_tokens,
+            total_tokens=result.usage.total_tokens,
+            uncertainty=result.uncertainty,
+            failure_class="evidence_revalidation_unavailable",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="evidence revalidation unavailable",
+        ) from exc
+
+    if not evidence_is_current:
+        session.rollback()
+        _record_result_safely(
+            session,
+            user_id=user_id,
+            request_id=request_id,
+            outcome="failure",
+            model=result.model,
+            latency_ms=(time.perf_counter() - started) * 1000,
+            input_tokens=result.usage.input_tokens,
+            output_tokens=result.usage.output_tokens,
+            total_tokens=result.usage.total_tokens,
+            uncertainty=result.uncertainty,
+            failure_class="evidence_changed",
+        )
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="evidence changed during generation; retry",
+        )
 
     _record_result_safely(
         session,
