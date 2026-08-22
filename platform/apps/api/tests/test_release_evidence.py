@@ -4,7 +4,8 @@ import json
 
 import pytest
 
-from scripts.release_evidence import REQUIRED_CONTROLS, ReleaseEvidence, build_evidence, main
+from aisearcharab_api.main import EXPECTED_ALEMBIC_REVISION
+from scripts.release_evidence import DEFAULT_MIGRATION, REQUIRED_CONTROLS, ReleaseEvidence, build_evidence, main
 
 DIGEST = "a" * 64
 SHA = "abcdef1234567890"
@@ -18,7 +19,7 @@ def complete_evidence(**overrides) -> ReleaseEvidence:
         "source_head_sha": SHA,
         "tested_sha": SHA,
         "status": "PRODUCTION_READY",
-        "migration": "20260808_0005",
+        "migration": EXPECTED_ALEMBIC_REVISION,
         "workflow_run_id": 12345,
         "workflow_run_attempt": 1,
         "openapi_sha256": DIGEST,
@@ -74,12 +75,16 @@ def complete_evidence(**overrides) -> ReleaseEvidence:
     return ReleaseEvidence(**values)
 
 
+def test_release_evidence_default_migration_matches_runtime_readiness() -> None:
+    assert DEFAULT_MIGRATION == EXPECTED_ALEMBIC_REVISION
+
+
 def test_default_evidence_never_claims_production_ready(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("RELEASE_COMMIT", SHA)
     monkeypatch.delenv("GITHUB_SHA", raising=False)
     evidence = build_evidence()
     assert evidence.status == "INTEGRATED_NOT_TESTED"
-    assert evidence.migration == "20260808_0005"
+    assert evidence.migration == EXPECTED_ALEMBIC_REVISION
     assert evidence.source_head_sha == SHA
     assert evidence.tested_sha == SHA
     assert evidence.security["mfa_verified"] is False
@@ -126,7 +131,7 @@ def test_production_ready_requires_external_gates() -> None:
         source_head_sha=SHA,
         tested_sha=SHA,
         status="PRODUCTION_READY",
-        migration="20260808_0005",
+        migration=EXPECTED_ALEMBIC_REVISION,
     )
     with pytest.raises(ValueError, match="PRODUCTION_READY evidence incomplete"):
         evidence.validate()
@@ -141,6 +146,12 @@ def test_production_ready_is_forbidden_from_pull_request() -> None:
 def test_production_ready_requires_final_sha_to_match_tested_sha() -> None:
     evidence = complete_evidence(source_head_sha=BASE_SHA)
     with pytest.raises(ValueError, match="source_head_sha must equal tested_sha"):
+        evidence.validate()
+
+
+def test_production_ready_rejects_migration_mismatch() -> None:
+    evidence = complete_evidence(migration="20260808_0005")
+    with pytest.raises(ValueError, match="migration must equal the current readiness revision"):
         evidence.validate()
 
 
@@ -189,7 +200,7 @@ def test_cli_writes_machine_readable_evidence(tmp_path, monkeypatch: pytest.Monk
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["project"] == "AISearcharab.com"
     assert payload["status"] == "INTEGRATED_NOT_TESTED"
-    assert payload["migration"] == "20260808_0005"
+    assert payload["migration"] == EXPECTED_ALEMBIC_REVISION
     assert payload["source_head_sha"] == SHA
     assert payload["tested_sha"] == SHA
     assert payload["security"]["mfa_verified"] is False

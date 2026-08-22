@@ -116,6 +116,7 @@ class Settings:
     def validate(self) -> None:
         if self.environment not in {"development", "test", "staging", "production"}:
             raise ConfigurationError("APP_ENV must be development, test, staging, or production")
+        secure_runtime = self.environment in {"staging", "production"}
         if not self.database_url:
             raise ConfigurationError("DATABASE_URL is required")
         if not self.api_prefix.startswith("/") or self.api_prefix == "/":
@@ -166,26 +167,29 @@ class Settings:
             raise ConfigurationError("MFA_ENCRYPTION_KEY is required when privileged MFA is enabled")
         if not self.allowed_origins:
             raise ConfigurationError("ALLOWED_ORIGINS must contain at least one explicit origin")
-        if any(not _valid_origin(origin, require_https=self.is_production) for origin in self.allowed_origins):
-            raise ConfigurationError("ALLOWED_ORIGINS must contain valid origins without paths, credentials, queries, or fragments")
+        if any(not _valid_origin(origin, require_https=secure_runtime) for origin in self.allowed_origins):
+            raise ConfigurationError(
+                "ALLOWED_ORIGINS must contain valid origins without paths, credentials, queries, or fragments; "
+                "staging and production origins must use HTTPS"
+            )
         if self.log_queries and (self.query_hash_key is None or len(self.query_hash_key.encode("utf-8")) < 32):
             raise ConfigurationError("QUERY_HASH_KEY must contain at least 32 bytes when query logging is enabled")
-        if self.environment in {"staging", "production"}:
+        if secure_runtime:
             if not self.require_mfa_for_privileged:
                 raise ConfigurationError("REQUIRE_MFA_FOR_PRIVILEGED must be enabled in staging and production")
             if not self.mfa_encryption_key:
                 raise ConfigurationError("MFA_ENCRYPTION_KEY is required in staging and production")
             if not self.login_throttle_key:
                 raise ConfigurationError("LOGIN_THROTTLE_KEY is required in staging and production")
-        if self.is_production:
             if self.database_url.startswith("sqlite"):
-                raise ConfigurationError("SQLite is not allowed in production")
-            if "*" in self.allowed_origins:
-                raise ConfigurationError("Wildcard CORS origins are not allowed in production")
-            if "*" in self.allowed_hosts:
-                raise ConfigurationError("Wildcard hosts are not allowed in production")
+                raise ConfigurationError("SQLite is not allowed in staging or production")
+            if any("*" in host for host in self.allowed_hosts):
+                raise ConfigurationError("Wildcard hosts are not allowed in staging or production")
             if "change-me" in self.database_url.lower():
                 raise ConfigurationError("DATABASE_URL contains a placeholder credential")
+        if self.is_production:
+            if "*" in self.allowed_origins:
+                raise ConfigurationError("Wildcard CORS origins are not allowed in production")
             if not self.enforce_separation_of_duties:
                 raise ConfigurationError("ENFORCE_SEPARATION_OF_DUTIES must be enabled in production")
 
