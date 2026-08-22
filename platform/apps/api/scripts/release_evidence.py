@@ -21,6 +21,7 @@ STATUS_VALUES = {
 }
 HEX_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,64}$")
 SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+DEFAULT_MIGRATION = "20260816_0008"
 
 REQUIRED_CONTROLS = (
     "security.dependency_audit_passed",
@@ -216,7 +217,7 @@ def build_evidence() -> ReleaseEvidence:
         workflow_run_id=_env_int("GITHUB_RUN_ID"),
         workflow_run_attempt=_env_int("GITHUB_RUN_ATTEMPT"),
         status=os.getenv("RELEASE_STATUS", "INTEGRATED_NOT_TESTED"),
-        migration=os.getenv("RELEASE_MIGRATION", "20260808_0005"),
+        migration=os.getenv("RELEASE_MIGRATION", DEFAULT_MIGRATION),
         openapi_sha256=os.getenv("OPENAPI_SHA256") or None,
         dependency_lock_sha256=os.getenv("DEPENDENCY_LOCK_SHA256") or None,
         container_image_digest=os.getenv("CONTAINER_IMAGE_DIGEST") or None,
