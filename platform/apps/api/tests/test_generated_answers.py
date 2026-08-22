@@ -17,8 +17,11 @@ from aisearcharab_api.generated_answers import (
     EvidenceItem,
     ModelAnswerDraft,
     UpstreamInvalidResponseError,
+    _MAX_MODEL_INPUT_CHARS,
+    _bounded_claims,
     _bounded_source_urls,
     _input_payload,
+    _serialize_input,
     _validated_claim_selection,
     generate_grounded_answer,
     retrieve_evidence,
@@ -207,6 +210,81 @@ def test_sqlite_filters_matches_before_candidate_limit(session_factory: sessionm
     assert evidence
     assert evidence[0].title == "إختبار متقادم"
     assert evidence[0].claims[0].claim_key == "old-normalized-match-claim"
+
+
+def test_claim_relevance_is_applied_before_claim_cap() -> None:
+    item = SimpleNamespace(
+        claims=[
+            Claim(
+                claim_key=f"a-irrelevant-{index:02d}",
+                text=f"معلومة عامة غير مرتبطة رقم {index}",
+                claim_type="verified-fact",
+                confidence="high",
+                review_status="reviewed",
+            )
+            for index in range(12)
+        ]
+        + [
+            Claim(
+                claim_key="z-direct-match",
+                text="هذه المطالبة تجيب مباشرة عن عبارة الطاقة المتجددة في السؤال.",
+                claim_type="verified-fact",
+                confidence="medium",
+                review_status="reviewed",
+            )
+        ]
+    )
+
+    claims = _bounded_claims(item, "الطاقة المتجددة", 20_000)
+
+    assert len(claims) == 12
+    assert claims[0].claim_key == "z-direct-match"
+    assert "z-direct-match" in {claim.claim_key for claim in claims}
+
+
+def test_retrieval_enforces_aggregate_serialized_input_budget_before_provider(
+    session_factory: sessionmaker[Session],
+) -> None:
+    with session_factory() as session:
+        for index in range(8):
+            item = ContentItem(
+                slug=f"budget-match-{index}",
+                url_path=f"/tests/budget-match-{index}/",
+                title=f"budget query document {index}",
+                summary="budget query",
+                body="",
+                section="tests",
+                language="en",
+                status="published",
+                is_indexed=True,
+                source_authority=5.0,
+                published_at=datetime(2026, 1, index + 1, tzinfo=timezone.utc),
+            )
+            item.claims.append(
+                Claim(
+                    claim_key=f"budget-claim-{index}",
+                    text="budget query " + ("x" * 19_000),
+                    claim_type="verified-fact",
+                    confidence="high",
+                    review_status="reviewed",
+                )
+            )
+            session.add(item)
+        session.commit()
+
+        evidence = retrieve_evidence(
+            session,
+            "budget query",
+            candidate_limit=20,
+            max_sources=8,
+            max_evidence_chars=20_000,
+        )
+
+    payload = _serialize_input("budget query", evidence)
+    assert evidence
+    assert len(evidence) < 8
+    assert len(payload) <= _MAX_MODEL_INPUT_CHARS
+    assert _input_payload("budget query", evidence) == payload
 
 
 def test_model_selects_claims_but_server_renders_exact_reviewed_text() -> None:
