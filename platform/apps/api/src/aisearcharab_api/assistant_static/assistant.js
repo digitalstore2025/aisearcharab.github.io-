@@ -7,21 +7,26 @@ const state = {
   generatedAnswersEnabled: false,
   answerController: null,
   sessionEpoch: 0,
+  apiPrefix: null,
+  publicSiteOrigin: null,
 };
 
 function readCookie(name) {
   const prefix = `${encodeURIComponent(name)}=`;
   for (const part of document.cookie.split(";")) {
     const value = part.trim();
-    if (value.startsWith(prefix)) {
-      return decodeURIComponent(value.slice(prefix.length));
-    }
+    if (value.startsWith(prefix)) return decodeURIComponent(value.slice(prefix.length));
   }
   return "";
 }
 
 function csrfToken() {
   return readCookie("__Host-ais-csrf") || readCookie("ais_admin_csrf");
+}
+
+function apiPath(path) {
+  if (!state.apiPrefix) throw new Error("assistant config unavailable");
+  return `${state.apiPrefix}${path}`;
 }
 
 async function api(path, options = {}) {
@@ -35,13 +40,9 @@ async function api(path, options = {}) {
       ...(options.headers || {}),
     },
   });
-
   let payload = null;
-  if (response.status !== 204) {
-    const contentType = response.headers.get("content-type") || "";
-    if (contentType.includes("application/json")) {
-      payload = await response.json();
-    }
+  if (response.status !== 204 && (response.headers.get("content-type") || "").includes("application/json")) {
+    payload = await response.json();
   }
   if (!response.ok) {
     const error = new Error(payload?.detail || `Request failed (${response.status})`);
@@ -71,11 +72,12 @@ function showAuthenticated(user) {
   $("login-panel").hidden = true;
   $("assistant-panel").hidden = false;
   $("identity").textContent = `${user.display_name} — ${user.role}`;
-  if (state.generatedAnswersEnabled) {
-    setStatus("الجلسة صالحة وخدمة الإجابات الموثّقة متاحة.", "ok");
-  } else {
-    setStatus("الجلسة صالحة، لكن خدمة الإجابات الموثّقة معطلة في هذه البيئة.", "warn");
-  }
+  setStatus(
+    state.generatedAnswersEnabled
+      ? "الجلسة صالحة وخدمة الإجابات الموثّقة متاحة."
+      : "الجلسة صالحة، لكن خدمة الإجابات الموثّقة معطلة في هذه البيئة.",
+    state.generatedAnswersEnabled ? "ok" : "warn",
+  );
 }
 
 function showLoggedOut(message = "سجّل الدخول لاستخدام المساعد البحثي.") {
@@ -92,9 +94,9 @@ function clearNode(node) {
   while (node.firstChild) node.removeChild(node.firstChild);
 }
 
-function safeExternalUrl(raw) {
+function safeExternalUrl(raw, base = window.location.origin) {
   try {
-    const parsed = new URL(raw, window.location.origin);
+    const parsed = new URL(raw, base);
     if (parsed.protocol === "http:" || parsed.protocol === "https:") return parsed.href;
   } catch (_error) {
     return null;
@@ -102,8 +104,8 @@ function safeExternalUrl(raw) {
   return null;
 }
 
-function addLink(parent, href, label) {
-  const safe = safeExternalUrl(href);
+function addLink(parent, href, label, base) {
+  const safe = safeExternalUrl(href, base);
   if (!safe) return;
   const link = document.createElement("a");
   link.href = safe;
@@ -128,17 +130,13 @@ function renderResult(result) {
     const title = document.createElement("strong");
     title.textContent = `${citation.evidence_id} — ${citation.title}`;
     item.appendChild(title);
-
     const internal = document.createElement("div");
-    addLink(internal, citation.url, "فتح المادة");
+    addLink(internal, citation.url, "فتح المادة", state.publicSiteOrigin);
     item.appendChild(internal);
-
     if (Array.isArray(citation.source_urls) && citation.source_urls.length) {
       const sources = document.createElement("div");
       sources.className = "source-links";
-      citation.source_urls.forEach((url, index) => {
-        addLink(sources, url, `المصدر ${index + 1}`);
-      });
+      citation.source_urls.forEach((url, index) => addLink(sources, url, `المصدر ${index + 1}`));
       item.appendChild(sources);
     }
     citations.appendChild(item);
@@ -154,13 +152,20 @@ function renderResult(result) {
   $("result-panel").hidden = false;
 }
 
+async function loadClientConfig() {
+  const config = await api("/assistant/config.json");
+  if (typeof config?.api_prefix !== "string" || !config.api_prefix.startsWith("/")) throw new Error("invalid api prefix");
+  const publicOrigin = safeExternalUrl(config.public_site_origin);
+  if (!publicOrigin || !publicOrigin.startsWith("https://")) throw new Error("invalid public site origin");
+  state.apiPrefix = config.api_prefix.replace(/\/$/, "");
+  state.publicSiteOrigin = publicOrigin;
+}
+
 async function routeMfaIfRequired() {
   const csrf = csrfToken();
   if (!csrf) return false;
   try {
-    const mfa = await api("/v1/auth/mfa/status", {
-      headers: { "X-CSRF-Token": csrf },
-    });
+    const mfa = await api(apiPath("/auth/mfa/status"), { headers: { "X-CSRF-Token": csrf } });
     if (mfa.required && !mfa.verified) {
       window.location.assign("/admin/");
       return true;
@@ -173,15 +178,20 @@ async function routeMfaIfRequired() {
 
 async function bootstrap() {
   try {
-    const capabilities = await api("/v1/meta/capabilities");
+    await loadClientConfig();
+  } catch (_error) {
+    setStatus("تعذر تحميل إعدادات التطبيق بأمان.", "warn");
+    return;
+  }
+  try {
+    const capabilities = await api(apiPath("/meta/capabilities"));
     state.generatedAnswersEnabled = Boolean(capabilities.generated_answers);
   } catch (_error) {
     setStatus("تعذر قراءة قدرات الخدمة.", "warn");
   }
-
   try {
     if (await routeMfaIfRequired()) return;
-    const user = await api("/v1/auth/me");
+    const user = await api(apiPath("/auth/me"));
     showAuthenticated(user);
   } catch (error) {
     if (error.status === 401) showLoggedOut();
@@ -195,16 +205,13 @@ $("login-form").addEventListener("submit", async (event) => {
   const button = event.currentTarget.querySelector("button[type='submit']");
   button.disabled = true;
   try {
-    await api("/v1/auth/login", {
+    await api(apiPath("/auth/login"), {
       method: "POST",
-      body: JSON.stringify({
-        email: $("email").value.trim(),
-        password: $("password").value,
-      }),
+      body: JSON.stringify({ email: $("email").value.trim(), password: $("password").value }),
     });
     $("password").value = "";
     if (await routeMfaIfRequired()) return;
-    const user = await api("/v1/auth/me");
+    const user = await api(apiPath("/auth/me"));
     showAuthenticated(user);
   } catch (error) {
     $("login-error").textContent = error.status === 401 ? "بيانات الدخول غير صحيحة." : "تعذر تسجيل الدخول الآن.";
@@ -217,14 +224,18 @@ $("logout-button").addEventListener("click", async () => {
   cancelAnswerRequest();
   const csrf = csrfToken();
   try {
-    await api("/v1/auth/logout", {
+    await api(apiPath("/auth/logout"), {
       method: "POST",
       headers: csrf ? { "X-CSRF-Token": csrf } : {},
     });
-  } catch (_error) {
-    // A locally stale session is treated as logged out in the UI either way.
+    showLoggedOut("تم تسجيل الخروج.");
+  } catch (error) {
+    if (error.status === 401) {
+      showLoggedOut("انتهت الجلسة.");
+      return;
+    }
+    setStatus("تعذر تأكيد تسجيل الخروج. ما تزال الجلسة فعالة؛ أعد المحاولة.", "warn");
   }
-  showLoggedOut("تم تسجيل الخروج.");
 });
 
 $("question-form").addEventListener("submit", async (event) => {
@@ -234,21 +245,16 @@ $("question-form").addEventListener("submit", async (event) => {
   const button = $("ask-button");
   button.disabled = true;
   button.textContent = "جارٍ التحقق من الأدلة…";
-
   cancelAnswerRequest();
   const controller = new AbortController();
   state.answerController = controller;
   const requestEpoch = state.sessionEpoch;
 
   try {
-    if (!state.generatedAnswersEnabled) {
-      throw Object.assign(new Error("generated answers disabled"), { status: 503 });
-    }
+    if (!state.generatedAnswersEnabled) throw Object.assign(new Error("generated answers disabled"), { status: 503 });
     const csrf = csrfToken();
-    if (!csrf) {
-      throw Object.assign(new Error("missing csrf"), { status: 401 });
-    }
-    const result = await api("/v1/answers/grounded", {
+    if (!csrf) throw Object.assign(new Error("missing csrf"), { status: 401 });
+    const result = await api(apiPath("/answers/grounded"), {
       method: "POST",
       signal: controller.signal,
       headers: { "X-CSRF-Token": csrf },
@@ -260,8 +266,7 @@ $("question-form").addEventListener("submit", async (event) => {
     if (controller.signal.aborted || requestEpoch !== state.sessionEpoch || !state.user) return;
     renderResult(result);
   } catch (error) {
-    if (error.name === "AbortError") return;
-    if (requestEpoch !== state.sessionEpoch) return;
+    if (error.name === "AbortError" || requestEpoch !== state.sessionEpoch) return;
     if (error.status === 401 || error.status === 403) {
       showLoggedOut("انتهت الجلسة أو لا تملك الصلاحية المطلوبة.");
     } else if (error.status === 422) {
