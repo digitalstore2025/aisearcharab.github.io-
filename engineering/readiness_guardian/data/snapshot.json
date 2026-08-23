@@ -1,0 +1,135 @@
+{
+  "metadata": {
+    "project": "AISearch Study / AISearchArab",
+    "domain": "aisearch.study",
+    "snapshot_date": "2026-08-23",
+    "evidence_source": "Sanitized internal release-evidence snapshot",
+    "policy": "Fail closed: production is NO-GO unless every blocking gate is PASS."
+  },
+  "gates": [
+    {
+      "id": "SEC-REG",
+      "category": "Security",
+      "gate": "Security regression",
+      "status": "PENDING",
+      "blocking": true,
+      "evidence": "Source policy and adversarial security tests exist; current-head verification remains pending.",
+      "source": "Sanitized release evidence",
+      "acceptance": "Security regression passes on current head.",
+      "next_action": "Run current-head security regression and attach evidence."
+    },
+    {
+      "id": "SEC-DIFF",
+      "category": "Security",
+      "gate": "Security diff review",
+      "status": "PENDING",
+      "blocking": true,
+      "evidence": "Fixes exist for CSRF, per-user generation quota, bounded retrieval, provider-error mapping, and DB-connection-lifetime findings; current-head closure remains pending.",
+      "source": "Sanitized release evidence",
+      "acceptance": "Current-head security diff review closes with no unresolved High/Critical findings.",
+      "next_action": "Complete current-head CI/security review and close review threads."
+    },
+    {
+      "id": "SEARCH-REG",
+      "category": "Quality",
+      "gate": "Search regression",
+      "status": "PASS",
+      "blocking": true,
+      "evidence": "Lexical search evaluation completed successfully after generated-answer changes.",
+      "source": "Sanitized release evidence",
+      "acceptance": "Existing lexical search evaluation passes.",
+      "next_action": "",
+      "verified": true
+    },
+    {
+      "id": "OPENAPI",
+      "category": "API",
+      "gate": "OpenAPI contract",
+      "status": "PENDING",
+      "blocking": true,
+      "evidence": "Generated-answer surface is POST /v1/answers/grounded; clean current-head contract reproduction remains pending.",
+      "source": "Sanitized release evidence",
+      "acceptance": "Clean rerun reproduces the approved contract.",
+      "next_action": "Run clean OpenAPI generation/verification and compare the reviewed digest."
+    },
+    {
+      "id": "RATE-LIMIT",
+      "category": "Security",
+      "gate": "Distributed/persistent per-user rate limiting",
+      "status": "PENDING",
+      "blocking": true,
+      "evidence": "Production activation remains blocked until persistent per-user quota behavior is verified under production-like concurrency.",
+      "source": "Sanitized release evidence",
+      "acceptance": "Verified under concurrent production-like load and not bypassable by instance hopping.",
+      "next_action": "Execute concurrency/multi-instance quota verification."
+    },
+    {
+      "id": "OBSERVABILITY",
+      "category": "Operations",
+      "gate": "Cost/error/latency observability",
+      "status": "PENDING",
+      "blocking": true,
+      "evidence": "Audit-based latency/usage/error evidence exists, but runtime verification is still required.",
+      "source": "Sanitized release evidence",
+      "acceptance": "Production telemetry covers errors, provider failures, token/cost usage, latency, and alerting.",
+      "next_action": "Verify runtime telemetry and alert thresholds."
+    },
+    {
+      "id": "HC-FINDINGS",
+      "category": "Security",
+      "gate": "No unresolved High/Critical security finding",
+      "status": "UNKNOWN",
+      "blocking": true,
+      "evidence": "The current sanitized snapshot does not independently prove zero unresolved High/Critical findings.",
+      "source": "Sanitized release evidence",
+      "acceptance": "Zero unresolved High or Critical findings.",
+      "next_action": "Attach authoritative current-head security scan/review result."
+    },
+    {
+      "id": "SECRET-MGR",
+      "category": "Secrets",
+      "gate": "Production API key injected via Secret Manager",
+      "status": "PENDING",
+      "blocking": true,
+      "evidence": "Production activation requires a real key injected via Secret Manager only after other blocking controls pass.",
+      "source": "Sanitized release evidence",
+      "acceptance": "Production key exists only in secret management and not Git/tests/logs/docs/client bundles.",
+      "next_action": "Inject the real key only after the other blocking gates pass."
+    },
+    {
+      "id": "PROD-ACT",
+      "category": "Release",
+      "gate": "Production activation",
+      "status": "BLOCKED",
+      "blocking": true,
+      "evidence": "GENERATED_ANSWERS_ENABLED=false by default; activation remains fail-closed until CI/security/runtime verification and Secret Manager injection are complete.",
+      "source": "Sanitized release evidence",
+      "acceptance": "All blocking controls PASS before enabling generated answers.",
+      "next_action": "Keep GENERATED_ANSWERS_ENABLED=false until the matrix is fully green."
+    },
+    {
+      "id": "TRUST-PAGES",
+      "category": "Search/Trust",
+      "gate": "Trust pages: About / Contact / Privacy / Terms / Security",
+      "status": "UNKNOWN",
+      "blocking": false,
+      "evidence": "Not verified in this sanitized seed snapshot.",
+      "source": "Readiness policy",
+      "acceptance": "Trust/legal/security pages are live and substantive.",
+      "next_action": "Run live checks in a network-enabled environment.",
+      "trust_surface": true
+    },
+    {
+      "id": "SEARCH-SURFACES",
+      "category": "Search/Trust",
+      "gate": "robots.txt + sitemap.xml + canonical",
+      "status": "UNKNOWN",
+      "blocking": false,
+      "evidence": "Not verified in this sanitized seed snapshot.",
+      "source": "Readiness policy",
+      "acceptance": "robots.txt, sitemap.xml, and canonical are valid and consistent.",
+      "next_action": "Run live checks and validate in Search Console.",
+      "trust_surface": true
+    }
+  ]
+}

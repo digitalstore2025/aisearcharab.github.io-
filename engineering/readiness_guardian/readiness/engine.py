@@ -1,0 +1,246 @@
+from __future__ import annotations
+
+from dataclasses import dataclass, asdict
+from enum import Enum
+from pathlib import Path
+from typing import Any, Iterable
+import csv
+import io
+import json
+
+
+class Status(str, Enum):
+    PASS = "PASS"
+    FAIL = "FAIL"
+    BLOCKED = "BLOCKED"
+    PENDING = "PENDING"
+    UNKNOWN = "UNKNOWN"
+
+
+@dataclass(frozen=True)
+class Gate:
+    id: str
+    category: str
+    gate: str
+    status: Status
+    blocking: bool
+    evidence: str
+    source: str = ""
+    acceptance: str = ""
+    next_action: str = ""
+    verified: bool = False
+    trust_surface: bool = False
+
+
+REQUIRED_FIELDS = ("id", "category", "gate", "status", "blocking", "evidence")
+SECURITY_INVARIANTS = {
+    "INV-RATE": {
+        "statement": "No AI generation without verified distributed/persistent per-user rate limiting.",
+        "depends_on": ["RATE-LIMIT", "PROD-ACT"],
+    },
+    "INV-KEYS": {
+        "statement": "No real API keys in frontend, Git, tests, logs, or documentation.",
+        "depends_on": ["SECRET-MGR"],
+    },
+    "INV-CITATIONS": {
+        "statement": "Unknown citations fail closed.",
+        "depends_on": ["SEC-REG", "OPENAPI"],
+    },
+    "INV-OUTPUTS": {
+        "statement": "Malformed model/provider outputs fail closed.",
+        "depends_on": ["SEC-DIFF", "SEC-REG"],
+    },
+    "INV-FINDINGS": {
+        "statement": "No production activation with unresolved High/Critical findings.",
+        "depends_on": ["HC-FINDINGS", "PROD-ACT"],
+    },
+}
+
+
+def load_snapshot(path: str | Path) -> dict[str, Any]:
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    if not isinstance(data, dict) or not isinstance(data.get("gates"), list):
+        raise ValueError("Snapshot must be an object containing a 'gates' array.")
+    return data
+
+
+def _normalize_gate(raw: dict[str, Any]) -> Gate:
+    missing = [field for field in REQUIRED_FIELDS if field not in raw]
+    if missing:
+        raise ValueError(f"Missing required field(s): {', '.join(missing)}")
+
+    try:
+        status = Status(str(raw["status"]).upper())
+    except ValueError as exc:
+        raise ValueError(f"Invalid status: {raw.get('status')!r}") from exc
+
+    if not isinstance(raw["blocking"], bool):
+        raise ValueError("'blocking' must be a boolean.")
+
+    for field in ("id", "category", "gate", "evidence"):
+        if not isinstance(raw[field], str) or not raw[field].strip():
+            raise ValueError(f"'{field}' must be a non-empty string.")
+
+    return Gate(
+        id=raw["id"].strip(),
+        category=raw["category"].strip(),
+        gate=raw["gate"].strip(),
+        status=status,
+        blocking=raw["blocking"],
+        evidence=raw["evidence"].strip(),
+        source=str(raw.get("source", "")).strip(),
+        acceptance=str(raw.get("acceptance", raw.get("acceptanceCriteria", ""))).strip(),
+        next_action=str(raw.get("next_action", raw.get("nextAction", ""))).strip(),
+        verified=bool(raw.get("verified", False)),
+        trust_surface=bool(raw.get("trust_surface", raw.get("trustSurface", False))),
+    )
+
+
+def parse_gates(snapshot: dict[str, Any]) -> list[Gate]:
+    seen: set[str] = set()
+    gates: list[Gate] = []
+    for index, raw in enumerate(snapshot["gates"]):
+        if not isinstance(raw, dict):
+            raise ValueError(f"Gate #{index} is not an object.")
+        gate = _normalize_gate(raw)
+        if gate.id in seen:
+            raise ValueError(f"Duplicate gate id: {gate.id}")
+        seen.add(gate.id)
+        gates.append(gate)
+    return gates
+
+
+def import_json_payload(text: str) -> tuple[list[Gate], list[str]]:
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        return [], [f"Invalid JSON: {exc.msg}"]
+
+    if isinstance(payload, list):
+        raw_gates = payload
+    elif isinstance(payload, dict) and isinstance(payload.get("gates"), list):
+        raw_gates = payload["gates"]
+    else:
+        return [], ["Expected a gate array or an object with a 'gates' array."]
+
+    accepted: list[Gate] = []
+    errors: list[str] = []
+    seen: set[str] = set()
+
+    for index, raw in enumerate(raw_gates):
+        try:
+            if not isinstance(raw, dict):
+                raise ValueError("entry is not an object")
+            gate = _normalize_gate(raw)
+            if gate.id in seen:
+                raise ValueError(f"duplicate gate id: {gate.id}")
+            seen.add(gate.id)
+            accepted.append(gate)
+        except ValueError as exc:
+            errors.append(f"#{index}: {exc}")
+
+    return accepted, errors
+
+
+def is_pass(gate: Gate) -> bool:
+    return gate.status == Status.PASS
+
+
+def is_verified_pass(gate: Gate) -> bool:
+    return is_pass(gate) and gate.verified and bool(gate.evidence.strip())
+
+
+def production_decision(gates: Iterable[Gate]) -> dict[str, Any]:
+    gates = list(gates)
+    blocking = [g for g in gates if g.blocking]
+    blockers = [g for g in blocking if not is_pass(g)]
+
+    if not blocking:
+        return {
+            "decision": "NO-GO",
+            "reason": "No blocking gates are registered; absence of controls is not readiness.",
+            "blockers": [],
+        }
+
+    if blockers:
+        return {
+            "decision": "NO-GO",
+            "reason": f"{len(blockers)} blocking gate(s) are not PASS.",
+            "blockers": blockers,
+        }
+
+    return {"decision": "GO", "reason": "Every blocking gate is PASS.", "blockers": []}
+
+
+def summarize(gates: Iterable[Gate]) -> dict[str, Any]:
+    gates = list(gates)
+    blocking = [g for g in gates if g.blocking]
+    blocking_pass = [g for g in blocking if is_pass(g)]
+    verified_pass = [g for g in gates if is_verified_pass(g)]
+    trust = [g for g in gates if g.trust_surface or g.category == "Search/Trust"]
+    trust_pass = [g for g in trust if is_pass(g)]
+    decision = production_decision(gates)
+
+    def ratio(n: int, d: int) -> float:
+        return 0.0 if d == 0 else n / d
+
+    return {
+        "blocking_gate_pass_rate": ratio(len(blocking_pass), len(blocking)),
+        "verified_pass_rate": ratio(len(verified_pass), len(gates)),
+        "trust_surface_completion": ratio(len(trust_pass), len(trust)),
+        "blocking_total": len(blocking),
+        "blocking_pass": len(blocking_pass),
+        "blocking_not_pass": len(blocking) - len(blocking_pass),
+        "production_go": decision["decision"] == "GO",
+        "decision": decision["decision"],
+        "decision_reason": decision["reason"],
+    }
+
+
+_STATUS_WEIGHT = {Status.FAIL: 0, Status.BLOCKED: 1, Status.UNKNOWN: 2, Status.PENDING: 3, Status.PASS: 4}
+
+
+def next_action_queue(gates: Iterable[Gate]) -> list[Gate]:
+    def key(g: Gate) -> tuple[int, int, str]:
+        return (0 if g.blocking else 1, _STATUS_WEIGHT[g.status], g.id)
+    return sorted((g for g in gates if not is_pass(g)), key=key)
+
+
+def evaluate_invariants(gates: Iterable[Gate]) -> list[dict[str, Any]]:
+    by_id = {g.id: g for g in gates}
+    results: list[dict[str, Any]] = []
+    for invariant_id, cfg in SECURITY_INVARIANTS.items():
+        dependencies = [by_id.get(gid) for gid in cfg["depends_on"]]
+        missing = [gid for gid, gate in zip(cfg["depends_on"], dependencies) if gate is None]
+        blockers = [gate for gate in dependencies if gate is not None and not is_pass(gate)]
+        holding = not missing and not blockers
+        results.append({
+            "id": invariant_id,
+            "statement": cfg["statement"],
+            "holding": holding,
+            "status": "PASS" if holding else "NOT-HOLDING",
+            "missing": missing,
+            "blocked_by": [f"{g.id} ({g.status.value})" for g in blockers],
+        })
+    return results
+
+
+def gate_to_dict(gate: Gate) -> dict[str, Any]:
+    data = asdict(gate)
+    data["status"] = gate.status.value
+    return data
+
+
+def export_json(gates: Iterable[Gate], metadata: dict[str, Any] | None = None) -> str:
+    payload = {"metadata": metadata or {}, "gates": [gate_to_dict(g) for g in gates], "summary": summarize(gates)}
+    return json.dumps(payload, indent=2, ensure_ascii=False)
+
+
+def export_csv(gates: Iterable[Gate]) -> str:
+    fields = ["id", "category", "gate", "status", "blocking", "verified", "trust_surface", "evidence", "source", "acceptance", "next_action"]
+    stream = io.StringIO()
+    writer = csv.DictWriter(stream, fieldnames=fields)
+    writer.writeheader()
+    for gate in gates:
+        writer.writerow(gate_to_dict(gate))
+    return stream.getvalue()

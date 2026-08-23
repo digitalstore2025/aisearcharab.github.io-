@@ -1,0 +1,53 @@
+name: Validate readiness guardian
+
+on:
+  pull_request:
+    paths:
+      - "engineering/readiness_guardian/**"
+      - ".github/workflows/readiness-guardian.yml"
+  push:
+    branches: [main]
+    paths:
+      - "engineering/readiness_guardian/**"
+      - ".github/workflows/readiness-guardian.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  readiness-guardian:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: engineering/readiness_guardian
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: engineering/readiness_guardian/requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Compile
+        run: python -m compileall -q app.py readiness scripts tests
+
+      - name: Unit tests
+        run: pytest
+
+      - name: Verify fail-closed seed
+        shell: bash
+        run: |
+          set +e
+          python scripts/readiness_gate.py data/snapshot.json
+          code=$?
+          set -e
+          if [ "$code" -ne 2 ]; then
+            echo "Expected the sanitized seed snapshot to remain NO-GO."
+            exit 1
+          fi
+          echo "Fail-closed seed behavior verified."

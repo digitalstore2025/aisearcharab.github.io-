@@ -1,0 +1,13 @@
+[project]
+name = "aisearch-readiness-guardian"
+version = "0.1.0"
+description = "Fail-closed production readiness control plane for AISearch Study"
+requires-python = ">=3.11"
+dependencies = [
+  "nicegui>=2.0,<4.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"
