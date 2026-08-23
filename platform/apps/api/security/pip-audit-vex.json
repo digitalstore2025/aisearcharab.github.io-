@@ -1,33 +1,4 @@
 {
   "schema": 1,
-  "exceptions": [
-    {
-      "id": "CVE-2026-45180",
-      "package": "cryptography",
-      "version": "49.0.0",
-      "services": ["pypi"],
-      "status": "not_affected",
-      "expires_on": "2026-08-22",
-      "rationale": "The authoritative CVE record identifies Catalyst::Plugin::Statsd for Perl, not PyCA cryptography. PyPI lists cryptography 49.0.0 as the current stable release. This exception is temporary and must be re-evaluated before expiry.",
-      "references": [
-        "https://nvd.nist.gov/vuln/detail/CVE-2026-45180",
-        "https://pypi.org/project/cryptography/"
-      ]
-    },
-    {
-      "id": "PYSEC-2026-3552",
-      "package": "cryptography",
-      "version": "49.0.0",
-      "services": ["pypi", "osv"],
-      "status": "not_affected",
-      "expires_on": "2026-08-22",
-      "rationale": "The advisory concerns PKCS#7 EnvelopedData decryption and a Bleichenbacher oracle. AISearcharab imports only cryptography.fernet for symmetric authenticated encryption of MFA seed material and does not import or invoke PKCS7/CMS decryption APIs. A repository AST regression test enforces this usage boundary. The audit services currently identify 50.0.0 as the fixed version, while upstream documentation still describes 50.0.0 as the development branch and PyPI lists 49.0.0 as the current stable release. Re-evaluate immediately if cryptography usage expands or a patched stable release becomes available.",
-      "references": [
-        "OSV/PYSEC-2026-3552 as emitted by CI dependency-audit and CycloneDX artifacts",
-        "https://cryptography.io/en/latest/",
-        "https://pypi.org/project/cryptography/",
-        "platform/apps/api/tests/test_crypto_usage.py"
-      ]
-    }
-  ]
+  "exceptions": []
 }
