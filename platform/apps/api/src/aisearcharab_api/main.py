@@ -30,6 +30,7 @@ from .schemas import CapabilitiesResponse, HealthResponse, PublicClaimSummary, P
 from .search import rank_items
 
 ADMIN_STATIC = Path(__file__).resolve().parent / "admin_static"
+ASSISTANT_STATIC = Path(__file__).resolve().parent / "assistant_static"
 _PUBLIC_CLAIM_STATES = {"reviewed", "published"}
 EXPECTED_ALEMBIC_REVISION = "20260816_0008"
 
@@ -196,7 +197,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     def admin_redirect() -> RedirectResponse:
         return RedirectResponse(url="/admin/", status_code=307)
 
+    @app.get("/assistant", include_in_schema=False)
+    def assistant_redirect() -> RedirectResponse:
+        return RedirectResponse(url="/assistant/", status_code=307)
+
     app.mount("/admin", StaticFiles(directory=ADMIN_STATIC, html=True), name="admin-console")
+    app.mount("/assistant", StaticFiles(directory=ASSISTANT_STATIC, html=True), name="research-assistant")
     return app
 
 
