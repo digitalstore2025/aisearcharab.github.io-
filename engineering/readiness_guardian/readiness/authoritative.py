@@ -2,41 +2,44 @@ from __future__ import annotations
 
 import importlib.util
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
 from typing import Any
 
 
-def current_checkout_identity(repo_root: str | Path) -> tuple[str, str]:
-    root = Path(repo_root)
+def _git(root: Path, *args: str) -> str:
     try:
-        sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
+        return subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
     except (OSError, subprocess.CalledProcessError) as exc:
-        raise ValueError("Could not resolve the current checkout SHA.") from exc
-    source_ref = os.getenv("GITHUB_REF", "").strip()
+        raise ValueError(f"Git identity check failed: git {' '.join(args)}") from exc
+
+
+def current_checkout_identity(repo_root: str | Path, expected_source_ref: str | None = None) -> tuple[str, str]:
+    root = Path(repo_root)
+    sha = _git(root, "rev-parse", "HEAD")
+    source_ref = (expected_source_ref or "").strip()
     if not source_ref:
         try:
-            source_ref = subprocess.run(["git", "symbolic-ref", "-q", "HEAD"], cwd=root, check=True, capture_output=True, text=True).stdout.strip()
-        except (OSError, subprocess.CalledProcessError) as exc:
-            raise ValueError("Could not resolve the current checkout ref; provide a branch/tag checkout or GITHUB_REF.") from exc
+            source_ref = _git(root, "symbolic-ref", "-q", "HEAD")
+        except ValueError:
+            refs = [ref for ref in _git(root, "for-each-ref", "--format=%(refname)", "--points-at", "HEAD", "refs/heads", "refs/tags").splitlines() if ref.strip()]
+            if len(refs) != 1:
+                raise ValueError("Detached checkout is ambiguous; provide an explicit branch/tag ref that resolves to HEAD.")
+            source_ref = refs[0]
     if source_ref.startswith("refs/pull/"):
         raise ValueError("Pull-request refs cannot authorize production readiness.")
     if not source_ref.startswith(("refs/heads/", "refs/tags/")):
         raise ValueError(f"Unsupported release ref: {source_ref!r}")
+    ref_sha = _git(root, "rev-parse", f"{source_ref}^{{commit}}")
+    if ref_sha != sha:
+        raise ValueError(f"Release ref {source_ref!r} does not resolve to the current checkout SHA.")
     return sha, source_ref
 
 
-def validate_release_evidence_artifact(
-    text: str,
-    repo_root: str | Path,
-    *,
-    expected_sha: str | None = None,
-    expected_source_ref: str | None = None,
-) -> dict[str, Any]:
+def validate_release_evidence_artifact(text: str, repo_root: str | Path, *, expected_sha: str | None = None, expected_source_ref: str | None = None) -> dict[str, Any]:
     if expected_sha is None or expected_source_ref is None:
-        expected_sha, expected_source_ref = current_checkout_identity(repo_root)
+        expected_sha, expected_source_ref = current_checkout_identity(repo_root, expected_source_ref)
     payload = json.loads(text)
     if not isinstance(payload, dict):
         raise ValueError("Release evidence must be a JSON object.")
