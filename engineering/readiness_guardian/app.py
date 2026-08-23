@@ -10,19 +10,15 @@ from readiness.live_checks import run_live_checks
 from readiness.authoritative import validate_release_evidence_artifact
 BASE_DIR=Path(__file__).resolve().parent;SNAPSHOT_PATH=BASE_DIR/"data"/"snapshot.json";MAX_UPLOAD_BYTES=1024*1024;REPO_ROOT=BASE_DIR.parents[1]
 TEXT={"ar":{"subtitle":"لوحة التحكم لجاهزية الإنتاج","disclaimer":"أداة قرار وسجل أدلة فقط. لا تُفعّل الإنتاج بنفسها.","gates":"بوابات الجاهزية","actions":"الإجراءات التالية","invariants":"الثوابت الأمنية","live":"تشغيل فحص النطاق الحي","import":"استيراد JSON","json":"تصدير JSON","csv":"تصدير CSV","restore":"استعادة اللقطة الأصلية"},"en":{"subtitle":"Production Readiness Control Plane","disclaimer":"Decision aid and evidence registry only. It never enables production by itself.","gates":"Readiness Gates","actions":"Next Actions","invariants":"Security Invariants","live":"Run live domain checks","import":"Import JSON","json":"Export JSON","csv":"Export CSV","restore":"Restore seed snapshot"}}
-
 class DashboardState:
  def __init__(self)->None:self.locale="ar";self.restore()
  def restore(self)->None:
   self.authoritative_release_validated=False;self.release_evidence_info={}
-  try:
-   snapshot=load_snapshot(SNAPSHOT_PATH);self.metadata=snapshot.get("metadata",{});self.gates=parse_gates(snapshot)
+  try:snapshot=load_snapshot(SNAPSHOT_PATH);self.metadata=snapshot.get("metadata",{});self.gates=parse_gates(snapshot)
   except (OSError,ValueError,TypeError,json.JSONDecodeError) as exc:self.metadata={"seed_load_error":str(exc)};self.gates=[]
-
 def pct(value:float)->str:return f"{value*100:.1f}%"
 def table_row(gate:Gate)->dict[str,str]:return {"id":gate.id,"category":gate.category,"gate":gate.gate,"status":gate.status.value,"blocking":"YES" if gate.blocking else "NO","verified":"YES" if gate.verified else "NO","next_action":gate.next_action}
 ui.add_head_html("""<script>document.documentElement.dir='rtl';</script><style>body{background:#F8FAFC;color:#1E293B}.panel,.metric{background:#fff;border:1px solid #E2E8F0;border-radius:16px}</style>""")
-
 @ui.page("/")
 def dashboard()->None:
  state=DashboardState();refs:dict[str,object]={}
@@ -67,14 +63,14 @@ def dashboard()->None:
    if isinstance(raw,bytes):raw=raw.decode("utf-8")
    info=validate_release_evidence_artifact(raw,REPO_ROOT);state.authoritative_release_validated=True;state.release_evidence_info=info;state.metadata={**state.metadata,"authoritative_release_evidence":info};state.gates=[replace(gate,status=Status.PASS,verified=True,evidence="Authoritative release evidence validated: "+f"status={info['status']}; source_ref={info['source_ref']}; tested_sha={info['tested_sha']}",next_action="") if gate.id=="RELEASE-EVIDENCE" else gate for gate in state.gates];refresh_all();ui.notify("Authoritative release evidence validated.",type="positive")
   except (OSError,UnicodeDecodeError,ValueError,TypeError,json.JSONDecodeError) as exc:state.authoritative_release_validated=False;ui.notify(f"Release evidence rejected: {exc}",type="negative")
- def download_text(filename:str,content:str)->None:
-  path=Path(tempfile.gettempdir())/filename;path.write_text(content,encoding="utf-8");ui.download(str(path))
+ def download_text(filename:str,content:str)->None:path=Path(tempfile.gettempdir())/filename;path.write_text(content,encoding="utf-8");ui.download(str(path))
  def restore_seed()->None:state.restore();refresh_all();ui.notify("Seed snapshot restored.",type="positive")
  async def live_scan()->None:
-  refs["live_button"].disable();refs["live_status"].set_text("Running network checks…")
+  refs["live_button"].disable();refs["live_status"].set_text("Running network checks…");state.gates=[g for g in state.gates if not g.id.startswith(("LIVE-","TRUST-"))]
   try:
-   live=await run.io_bound(run_live_checks,"https://aisearch.study");retained=[g for g in state.gates if not g.id.startswith(("LIVE-","TRUST-"))];state.gates=retained+live;refresh_all();refs["live_status"].set_text(f"Live scan complete: {len(live)} records.")
-  except Exception as exc:refs["live_status"].set_text(f"Live scan failed safely: {exc}")
+   live=await run.io_bound(run_live_checks,"https://aisearch.study");state.gates=state.gates+[Gate(id="LIVE-SCAN",category="Search/Trust",gate="Latest live scan completed",status=Status.PASS,blocking=True,verified=True,trust_surface=True,evidence="Latest live scan completed without an unhandled scanner failure."),*live];refresh_all();refs["live_status"].set_text(f"Live scan complete: {len(live)} records.")
+  except Exception as exc:
+   state.gates.append(Gate(id="LIVE-SCAN",category="Search/Trust",gate="Latest live scan completed",status=Status.FAIL,blocking=True,verified=False,trust_surface=True,evidence=f"Latest live scan failed: {exc}",next_action="Resolve the scanner/network failure and rerun live checks."));refresh_all();refs["live_status"].set_text(f"Live scan failed safely: {exc}")
   finally:refs["live_button"].enable()
  with ui.column().classes("mx-auto w-full max-w-[1500px] gap-4 p-4 md:p-6"):
   with ui.row().classes("panel w-full items-center justify-between p-5"):
@@ -105,5 +101,4 @@ def dashboard()->None:
    with restore_button:refs["restore_label"]=ui.label(TEXT["ar"]["restore"])
  with ui.dialog() as dialog,ui.card().classes("w-[760px] max-w-[95vw]"):refs["dialog"]=dialog;refs["dialog_title"]=ui.label("").classes("text-lg font-bold");refs["dialog_body"]=ui.label("").classes("whitespace-pre-wrap text-sm");ui.button("Close",on_click=dialog.close).props("flat")
  refresh_all()
-
 if __name__ in {"__main__","__mp_main__"}:ui.run(title="AISearch Study — Readiness Guardian",host=os.getenv("READINESS_BIND_HOST","127.0.0.1"),port=int(os.getenv("PORT","8080")),reload=False,show=False)
