@@ -156,7 +156,9 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             response.headers["Origin-Agent-Cluster"] = "?1"
             response.headers["X-Robots-Tag"] = "noindex, nofollow"
             response.headers["Cache-Control"] = "no-store"
-            response.headers["Content-Security-Policy"] = ADMIN_CSP if request.url.path.startswith("/admin") else API_CSP
+            response.headers["Content-Security-Policy"] = (
+                ADMIN_CSP if request.url.path.startswith(("/admin", "/assistant")) else API_CSP
+            )
             if request.app.state.settings.secure_cookies:
                 response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
             return response
