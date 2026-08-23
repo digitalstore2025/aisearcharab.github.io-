@@ -15,6 +15,7 @@ def test_assistant_shell_and_assets_are_served(client: TestClient) -> None:
     assert "المساعد البحثي الموثّق" in page.text
     assert '<script src="/assistant/assistant.js" defer></script>' in page.text
     assert '<link rel="stylesheet" href="/assistant/assistant.css">' in page.text
+    assert 'minlength="1" maxlength="256"' in page.text
     assert "<script>" not in page.text
     assert "style=" not in page.text
 
@@ -24,6 +25,16 @@ def test_assistant_shell_and_assets_are_served(client: TestClient) -> None:
     assert stylesheet.status_code == 200
     assert "text/javascript" in script.headers["content-type"]
     assert "text/css" in stylesheet.headers["content-type"]
+
+
+def test_assistant_client_bridges_mfa_and_invalidates_stale_answers(client: TestClient) -> None:
+    script = client.get("/assistant/assistant.js")
+    assert script.status_code == 200
+    assert 'api("/v1/auth/mfa/status"' in script.text
+    assert 'window.location.assign("/admin/")' in script.text
+    assert "new AbortController()" in script.text
+    assert "state.sessionEpoch" in script.text
+    assert "controller.signal.aborted" in script.text
 
 
 def test_assistant_uses_strict_self_only_ui_csp(client: TestClient) -> None:
