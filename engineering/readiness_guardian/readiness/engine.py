@@ -24,7 +24,7 @@ SECURITY_INVARIANTS={
 
 def load_snapshot(path:str|Path)->dict[str,Any]:
  data=json.loads(Path(path).read_text(encoding="utf-8"))
- if not isinstance(data,dict) or not isinstance(data.get("gates"),list): raise ValueError("Snapshot must be an object containing a 'gates' array.")
+ if not isinstance(data,dict) or not isinstance(data.get("gates"),list):raise ValueError("Snapshot must be an object containing a 'gates' array.")
  return data
 
 def _optional_bool(raw:dict[str,Any],field:str,default:bool=False)->bool:
@@ -83,9 +83,8 @@ def is_pass(gate:Gate)->bool:return gate.status==Status.PASS
 
 def is_verified_pass(gate:Gate)->bool:return is_pass(gate) and gate.verified and bool(gate.evidence.strip())
 
-def production_decision(gates:Iterable[Gate])->dict[str,Any]:
- gates=list(gates);by_id={g.id:g for g in gates}
- missing=sorted(MANDATORY_BLOCKING_GATE_IDS-by_id.keys());downgraded=sorted(gid for gid in MANDATORY_BLOCKING_GATE_IDS if gid in by_id and not by_id[gid].blocking)
+def production_decision(gates:Iterable[Gate],authoritative_release_validated:bool=False)->dict[str,Any]:
+ gates=list(gates);by_id={g.id:g for g in gates};missing=sorted(MANDATORY_BLOCKING_GATE_IDS-by_id.keys());downgraded=sorted(gid for gid in MANDATORY_BLOCKING_GATE_IDS if gid in by_id and not by_id[gid].blocking)
  if missing or downgraded:
   details=[]
   if missing:details.append("missing="+",".join(missing))
@@ -93,10 +92,11 @@ def production_decision(gates:Iterable[Gate])->dict[str,Any]:
   return {"decision":"NO-GO","reason":"Mandatory gate registry is incomplete or downgraded: "+"; ".join(details),"blockers":[by_id[g] for g in downgraded]}
  blocking=[g for g in gates if g.blocking];blockers=[g for g in blocking if not is_verified_pass(g)]
  if blockers:return {"decision":"NO-GO","reason":f"{len(blockers)} blocking gate(s) are not verified PASS.","blockers":blockers}
- return {"decision":"GO","reason":"Every mandatory blocking gate is verified PASS, including authoritative release evidence.","blockers":[]}
+ if not authoritative_release_validated:return {"decision":"NO-GO","reason":"Authoritative release evidence has not been independently validated.","blockers":[by_id["RELEASE-EVIDENCE"]]}
+ return {"decision":"GO","reason":"Every mandatory blocking gate is verified PASS and authoritative release evidence is independently validated.","blockers":[]}
 
-def summarize(gates:Iterable[Gate])->dict[str,Any]:
- gates=list(gates);blocking=[g for g in gates if g.blocking];blocking_pass=[g for g in blocking if is_pass(g)];verified=[g for g in gates if is_verified_pass(g)];trust=[g for g in gates if g.trust_surface or g.category=="Search/Trust"];trust_pass=[g for g in trust if is_pass(g)];decision=production_decision(gates);ratio=lambda n,d:0.0 if d==0 else n/d
+def summarize(gates:Iterable[Gate],authoritative_release_validated:bool=False)->dict[str,Any]:
+ gates=list(gates);blocking=[g for g in gates if g.blocking];blocking_pass=[g for g in blocking if is_pass(g)];verified=[g for g in gates if is_verified_pass(g)];trust=[g for g in gates if g.trust_surface or g.category=="Search/Trust"];trust_pass=[g for g in trust if is_pass(g)];decision=production_decision(gates,authoritative_release_validated);ratio=lambda n,d:0.0 if d==0 else n/d
  return {"blocking_gate_pass_rate":ratio(len(blocking_pass),len(blocking)),"verified_pass_rate":ratio(len(verified),len(gates)),"trust_surface_completion":ratio(len(trust_pass),len(trust)),"blocking_total":len(blocking),"blocking_pass":len(blocking_pass),"blocking_not_pass":len(blocking)-len(blocking_pass),"production_go":decision["decision"]=="GO","decision":decision["decision"],"decision_reason":decision["reason"]}
 
 _STATUS_WEIGHT={Status.FAIL:0,Status.BLOCKED:1,Status.UNKNOWN:2,Status.PENDING:3,Status.PASS:4}
@@ -112,8 +112,8 @@ def evaluate_invariants(gates:Iterable[Gate])->list[dict[str,Any]]:
 def gate_to_dict(gate:Gate)->dict[str,Any]:
  data=asdict(gate);data["status"]=gate.status.value;return data
 
-def export_json(gates:Iterable[Gate],metadata:dict[str,Any]|None=None)->str:
- gates=list(gates);return json.dumps({"metadata":metadata or {},"gates":[gate_to_dict(g) for g in gates],"summary":summarize(gates)},indent=2,ensure_ascii=False)
+def export_json(gates:Iterable[Gate],metadata:dict[str,Any]|None=None,authoritative_release_validated:bool=False)->str:
+ gates=list(gates);return json.dumps({"metadata":metadata or {},"gates":[gate_to_dict(g) for g in gates],"summary":summarize(gates,authoritative_release_validated)},indent=2,ensure_ascii=False)
 
 def export_csv(gates:Iterable[Gate])->str:
  fields=["id","category","gate","status","blocking","verified","trust_surface","evidence","source","acceptance","next_action"];stream=io.StringIO();writer=csv.DictWriter(stream,fieldnames=fields);writer.writeheader()
