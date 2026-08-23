@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi import Depends, FastAPI, HTTPException, Query, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -31,6 +31,7 @@ from .search import rank_items
 
 ADMIN_STATIC = Path(__file__).resolve().parent / "admin_static"
 ASSISTANT_STATIC = Path(__file__).resolve().parent / "assistant_static"
+PUBLIC_SITE_ORIGIN = "https://aisearcharab.com"
 _PUBLIC_CLAIM_STATES = {"reviewed", "published"}
 EXPECTED_ALEMBIC_REVISION = "20260816_0008"
 
@@ -200,6 +201,15 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/assistant", include_in_schema=False)
     def assistant_redirect() -> RedirectResponse:
         return RedirectResponse(url="/assistant/", status_code=307)
+
+    @app.get("/assistant/config.json", include_in_schema=False)
+    def assistant_config() -> JSONResponse:
+        return JSONResponse(
+            {
+                "api_prefix": runtime_settings.api_prefix,
+                "public_site_origin": PUBLIC_SITE_ORIGIN,
+            }
+        )
 
     app.mount("/admin", StaticFiles(directory=ADMIN_STATIC, html=True), name="admin-console")
     app.mount("/assistant", StaticFiles(directory=ASSISTANT_STATIC, html=True), name="research-assistant")
