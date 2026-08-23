@@ -33,27 +33,23 @@ class Gate:
 
 
 REQUIRED_FIELDS = ("id", "category", "gate", "status", "blocking", "evidence")
+MANDATORY_BLOCKING_GATE_IDS = frozenset({
+    "SEC-REG",
+    "SEC-DIFF",
+    "SEARCH-REG",
+    "OPENAPI",
+    "RATE-LIMIT",
+    "OBSERVABILITY",
+    "HC-FINDINGS",
+    "SECRET-MGR",
+    "PROD-ACT",
+})
 SECURITY_INVARIANTS = {
-    "INV-RATE": {
-        "statement": "No AI generation without verified distributed/persistent per-user rate limiting.",
-        "depends_on": ["RATE-LIMIT", "PROD-ACT"],
-    },
-    "INV-KEYS": {
-        "statement": "No real API keys in frontend, Git, tests, logs, or documentation.",
-        "depends_on": ["SECRET-MGR"],
-    },
-    "INV-CITATIONS": {
-        "statement": "Unknown citations fail closed.",
-        "depends_on": ["SEC-REG", "OPENAPI"],
-    },
-    "INV-OUTPUTS": {
-        "statement": "Malformed model/provider outputs fail closed.",
-        "depends_on": ["SEC-DIFF", "SEC-REG"],
-    },
-    "INV-FINDINGS": {
-        "statement": "No production activation with unresolved High/Critical findings.",
-        "depends_on": ["HC-FINDINGS", "PROD-ACT"],
-    },
+    "INV-RATE": {"statement": "No AI generation without verified distributed/persistent per-user rate limiting.", "depends_on": ["RATE-LIMIT", "PROD-ACT"]},
+    "INV-KEYS": {"statement": "No real API keys in frontend, Git, tests, logs, or documentation.", "depends_on": ["SECRET-MGR"]},
+    "INV-CITATIONS": {"statement": "Unknown citations fail closed.", "depends_on": ["SEC-REG", "OPENAPI"]},
+    "INV-OUTPUTS": {"statement": "Malformed model/provider outputs fail closed.", "depends_on": ["SEC-DIFF", "SEC-REG"]},
+    "INV-FINDINGS": {"statement": "No production activation with unresolved High/Critical findings.", "depends_on": ["HC-FINDINGS", "PROD-ACT"]},
 }
 
 
@@ -64,23 +60,38 @@ def load_snapshot(path: str | Path) -> dict[str, Any]:
     return data
 
 
+def _optional_bool(raw: dict[str, Any], field: str, default: bool = False) -> bool:
+    if field not in raw:
+        return default
+    value = raw[field]
+    if not isinstance(value, bool):
+        raise ValueError(f"'{field}' must be a boolean when provided.")
+    return value
+
+
+def _optional_bool_alias(raw: dict[str, Any], primary: str, alias: str, default: bool = False) -> bool:
+    if primary in raw and alias in raw:
+        raise ValueError(f"Provide only one of '{primary}' or '{alias}'.")
+    if primary in raw:
+        return _optional_bool(raw, primary, default)
+    if alias in raw:
+        return _optional_bool(raw, alias, default)
+    return default
+
+
 def _normalize_gate(raw: dict[str, Any]) -> Gate:
     missing = [field for field in REQUIRED_FIELDS if field not in raw]
     if missing:
         raise ValueError(f"Missing required field(s): {', '.join(missing)}")
-
     try:
         status = Status(str(raw["status"]).upper())
     except ValueError as exc:
         raise ValueError(f"Invalid status: {raw.get('status')!r}") from exc
-
     if not isinstance(raw["blocking"], bool):
         raise ValueError("'blocking' must be a boolean.")
-
     for field in ("id", "category", "gate", "evidence"):
         if not isinstance(raw[field], str) or not raw[field].strip():
             raise ValueError(f"'{field}' must be a non-empty string.")
-
     return Gate(
         id=raw["id"].strip(),
         category=raw["category"].strip(),
@@ -91,8 +102,8 @@ def _normalize_gate(raw: dict[str, Any]) -> Gate:
         source=str(raw.get("source", "")).strip(),
         acceptance=str(raw.get("acceptance", raw.get("acceptanceCriteria", ""))).strip(),
         next_action=str(raw.get("next_action", raw.get("nextAction", ""))).strip(),
-        verified=bool(raw.get("verified", False)),
-        trust_surface=bool(raw.get("trust_surface", raw.get("trustSurface", False))),
+        verified=_optional_bool(raw, "verified", default=False),
+        trust_surface=_optional_bool_alias(raw, "trust_surface", "trustSurface", default=False),
     )
 
 
@@ -115,18 +126,15 @@ def import_json_payload(text: str) -> tuple[list[Gate], list[str]]:
         payload = json.loads(text)
     except json.JSONDecodeError as exc:
         return [], [f"Invalid JSON: {exc.msg}"]
-
     if isinstance(payload, list):
         raw_gates = payload
     elif isinstance(payload, dict) and isinstance(payload.get("gates"), list):
         raw_gates = payload["gates"]
     else:
         return [], ["Expected a gate array or an object with a 'gates' array."]
-
     accepted: list[Gate] = []
     errors: list[str] = []
     seen: set[str] = set()
-
     for index, raw in enumerate(raw_gates):
         try:
             if not isinstance(raw, dict):
@@ -138,8 +146,16 @@ def import_json_payload(text: str) -> tuple[list[Gate], list[str]]:
             accepted.append(gate)
         except ValueError as exc:
             errors.append(f"#{index}: {exc}")
-
-    return accepted, errors
+    if errors:
+        return [], errors
+    by_id = {gate.id: gate for gate in accepted}
+    missing = sorted(MANDATORY_BLOCKING_GATE_IDS - by_id.keys())
+    if missing:
+        return [], ["Missing mandatory blocking gate(s): " + ", ".join(missing)]
+    downgraded = sorted(gate_id for gate_id in MANDATORY_BLOCKING_GATE_IDS if not by_id[gate_id].blocking)
+    if downgraded:
+        return [], ["Mandatory gate(s) cannot be non-blocking: " + ", ".join(downgraded)]
+    return accepted, []
 
 
 def is_pass(gate: Gate) -> bool:
@@ -152,24 +168,25 @@ def is_verified_pass(gate: Gate) -> bool:
 
 def production_decision(gates: Iterable[Gate]) -> dict[str, Any]:
     gates = list(gates)
+    by_id = {g.id: g for g in gates}
+    mandatory_present = MANDATORY_BLOCKING_GATE_IDS.intersection(by_id)
+    if mandatory_present:
+        missing = sorted(MANDATORY_BLOCKING_GATE_IDS - by_id.keys())
+        downgraded = sorted(gate_id for gate_id in MANDATORY_BLOCKING_GATE_IDS if gate_id in by_id and not by_id[gate_id].blocking)
+        if missing or downgraded:
+            details = []
+            if missing:
+                details.append("missing=" + ",".join(missing))
+            if downgraded:
+                details.append("non_blocking=" + ",".join(downgraded))
+            return {"decision": "NO-GO", "reason": "Mandatory gate registry is incomplete or downgraded: " + "; ".join(details), "blockers": [by_id[g] for g in downgraded]}
     blocking = [g for g in gates if g.blocking]
-    blockers = [g for g in blocking if not is_pass(g)]
-
+    blockers = [g for g in blocking if not is_verified_pass(g)]
     if not blocking:
-        return {
-            "decision": "NO-GO",
-            "reason": "No blocking gates are registered; absence of controls is not readiness.",
-            "blockers": [],
-        }
-
+        return {"decision": "NO-GO", "reason": "No blocking gates are registered; absence of controls is not readiness.", "blockers": []}
     if blockers:
-        return {
-            "decision": "NO-GO",
-            "reason": f"{len(blockers)} blocking gate(s) are not PASS.",
-            "blockers": blockers,
-        }
-
-    return {"decision": "GO", "reason": "Every blocking gate is PASS.", "blockers": []}
+        return {"decision": "NO-GO", "reason": f"{len(blockers)} blocking gate(s) are not verified PASS.", "blockers": blockers}
+    return {"decision": "GO", "reason": "Every blocking gate is verified PASS.", "blockers": []}
 
 
 def summarize(gates: Iterable[Gate]) -> dict[str, Any]:
@@ -180,10 +197,8 @@ def summarize(gates: Iterable[Gate]) -> dict[str, Any]:
     trust = [g for g in gates if g.trust_surface or g.category == "Search/Trust"]
     trust_pass = [g for g in trust if is_pass(g)]
     decision = production_decision(gates)
-
     def ratio(n: int, d: int) -> float:
         return 0.0 if d == 0 else n / d
-
     return {
         "blocking_gate_pass_rate": ratio(len(blocking_pass), len(blocking)),
         "verified_pass_rate": ratio(len(verified_pass), len(gates)),
@@ -214,14 +229,7 @@ def evaluate_invariants(gates: Iterable[Gate]) -> list[dict[str, Any]]:
         missing = [gid for gid, gate in zip(cfg["depends_on"], dependencies) if gate is None]
         blockers = [gate for gate in dependencies if gate is not None and not is_pass(gate)]
         holding = not missing and not blockers
-        results.append({
-            "id": invariant_id,
-            "statement": cfg["statement"],
-            "holding": holding,
-            "status": "PASS" if holding else "NOT-HOLDING",
-            "missing": missing,
-            "blocked_by": [f"{g.id} ({g.status.value})" for g in blockers],
-        })
+        results.append({"id": invariant_id, "statement": cfg["statement"], "holding": holding, "status": "PASS" if holding else "NOT-HOLDING", "missing": missing, "blocked_by": [f"{g.id} ({g.status.value})" for g in blockers]})
     return results
 
 

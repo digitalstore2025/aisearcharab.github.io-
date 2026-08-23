@@ -21,7 +21,7 @@ def test_fail_closed_non_pass_statuses_block_production():
 
 
 def test_all_blocking_pass_allows_go():
-    decision = production_decision([gate("A", Status.PASS), gate("B", Status.PASS), gate("C", Status.UNKNOWN, blocking=False)])
+    decision = production_decision([gate("A", Status.PASS, verified=True), gate("B", Status.PASS, verified=True), gate("C", Status.UNKNOWN, blocking=False)])
     assert decision["decision"] == "GO"
 
 
@@ -44,8 +44,7 @@ def test_import_rejects_malformed_and_never_coerces_pass():
         {"id": "BAD", "category": "Security", "gate": "Bad", "status": "green", "blocking": True, "evidence": "bad"},
     ]})
     accepted, errors = import_json_payload(payload)
-    assert [g.id for g in accepted] == ["GOOD"]
-    assert accepted[0].verified is False
+    assert accepted == []
     assert errors
 
 
@@ -59,3 +58,32 @@ def test_invariant_does_not_hold_when_dependency_missing_or_not_pass():
     items = {i["id"]: i for i in evaluate_invariants(gates)}
     assert items["INV-RATE"]["holding"] is False
     assert items["INV-KEYS"]["holding"] is False
+
+
+def test_import_is_atomic_when_any_gate_is_invalid():
+    payload = json.dumps({"gates": [
+        {"id": "GOOD", "category": "Security", "gate": "Good", "status": "PASS", "blocking": True, "evidence": "ok"},
+        {"id": "BAD", "category": "Security", "gate": "Bad", "status": "invalid", "blocking": True, "evidence": "bad"},
+    ]})
+    accepted, errors = import_json_payload(payload)
+    assert accepted == []
+    assert errors
+
+
+def test_import_rejects_string_boolean_for_verified():
+    payload = json.dumps({"gates": [
+        {"id": "G1", "category": "Security", "gate": "Gate", "status": "PASS", "blocking": True, "evidence": "ok", "verified": "false"}
+    ]})
+    accepted, errors = import_json_payload(payload)
+    assert accepted == []
+    assert errors
+
+
+def test_unverified_pass_still_blocks_production():
+    assert production_decision([gate("G1", Status.PASS, verified=False)])["decision"] == "NO-GO"
+
+
+def test_partial_mandatory_registry_cannot_go():
+    decision = production_decision([gate("SEC-REG", Status.PASS, verified=True)])
+    assert decision["decision"] == "NO-GO"
+    assert "Mandatory gate registry" in decision["reason"]
