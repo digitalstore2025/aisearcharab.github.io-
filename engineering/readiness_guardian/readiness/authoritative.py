@@ -38,8 +38,13 @@ def current_checkout_identity(repo_root: str | Path, expected_source_ref: str | 
 
 
 def validate_release_evidence_artifact(text: str, repo_root: str | Path, *, expected_sha: str | None = None, expected_source_ref: str | None = None) -> dict[str, Any]:
-    if expected_sha is None or expected_source_ref is None:
-        expected_sha, expected_source_ref = current_checkout_identity(repo_root, expected_source_ref)
+    current_sha, current_ref = current_checkout_identity(repo_root, expected_source_ref)
+    if expected_sha is None:
+        expected_sha = current_sha
+    elif expected_sha != current_sha:
+        raise ValueError(f"Explicit expected SHA {expected_sha!r} does not match current checkout {current_sha!r}.")
+    if expected_source_ref is None:
+        expected_source_ref = current_ref
     payload = json.loads(text)
     if not isinstance(payload, dict):
         raise ValueError("Release evidence must be a JSON object.")
