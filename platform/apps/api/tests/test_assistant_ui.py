@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from fastapi.testclient import TestClient
 
+from aisearcharab_api.config import Settings
+from aisearcharab_api.main import create_app
+
 
 def test_assistant_redirects_to_trailing_slash(client: TestClient) -> None:
     response = client.get("/assistant", follow_redirects=False)
@@ -30,11 +33,37 @@ def test_assistant_shell_and_assets_are_served(client: TestClient) -> None:
 def test_assistant_client_bridges_mfa_and_invalidates_stale_answers(client: TestClient) -> None:
     script = client.get("/assistant/assistant.js")
     assert script.status_code == 200
-    assert 'api("/v1/auth/mfa/status"' in script.text
+    assert 'apiPath("/auth/mfa/status")' in script.text
     assert 'window.location.assign("/admin/")' in script.text
     assert "new AbortController()" in script.text
     assert "state.sessionEpoch" in script.text
     assert "controller.signal.aborted" in script.text
+    assert 'setStatus("تعذر تأكيد تسجيل الخروج.' in script.text
+
+
+def test_assistant_config_exposes_runtime_prefix_and_public_origin(client: TestClient) -> None:
+    response = client.get("/assistant/config.json")
+    assert response.status_code == 200
+    assert response.json() == {
+        "api_prefix": "/v1",
+        "public_site_origin": "https://aisearcharab.com",
+    }
+
+
+def test_assistant_config_honors_non_default_api_prefix() -> None:
+    settings = Settings(
+        environment="test",
+        database_url="sqlite+pysqlite:///:memory:",
+        allowed_origins=("http://localhost:3000",),
+        api_prefix="/api/v2",
+        max_search_limit=20,
+        log_queries=False,
+    )
+    app = create_app(settings)
+    with TestClient(app) as custom_client:
+        response = custom_client.get("/assistant/config.json")
+    assert response.status_code == 200
+    assert response.json()["api_prefix"] == "/api/v2"
 
 
 def test_assistant_uses_strict_self_only_ui_csp(client: TestClient) -> None:
