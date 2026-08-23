@@ -23,22 +23,19 @@ jobs:
         working-directory: engineering/readiness_guardian
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: engineering/readiness_guardian/requirements-dev.txt
-
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
-
       - name: Compile
         run: python -m compileall -q app.py readiness scripts tests
-
+      - name: Import UI smoke test
+        run: python -c "import app; print('app-import-ok')"
       - name: Unit tests
         run: pytest
-
       - name: Verify fail-closed seed
         shell: bash
         run: |
