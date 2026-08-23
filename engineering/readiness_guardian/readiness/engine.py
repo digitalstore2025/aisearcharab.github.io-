@@ -84,22 +84,19 @@ def is_pass(gate:Gate)->bool:return gate.status==Status.PASS
 def is_verified_pass(gate:Gate)->bool:return is_pass(gate) and gate.verified and bool(gate.evidence.strip())
 
 def production_decision(gates:Iterable[Gate])->dict[str,Any]:
- gates=list(gates);by_id={g.id:g for g in gates};mandatory_present=MANDATORY_BLOCKING_GATE_IDS.intersection(by_id)
- if mandatory_present:
-  missing=sorted(MANDATORY_BLOCKING_GATE_IDS-by_id.keys());downgraded=sorted(gid for gid in MANDATORY_BLOCKING_GATE_IDS if gid in by_id and not by_id[gid].blocking)
-  if missing or downgraded:
-   details=[]
-   if missing:details.append("missing="+",".join(missing))
-   if downgraded:details.append("non_blocking="+",".join(downgraded))
-   return {"decision":"NO-GO","reason":"Mandatory gate registry is incomplete or downgraded: "+"; ".join(details),"blockers":[by_id[g] for g in downgraded]}
+ gates=list(gates);by_id={g.id:g for g in gates}
+ missing=sorted(MANDATORY_BLOCKING_GATE_IDS-by_id.keys());downgraded=sorted(gid for gid in MANDATORY_BLOCKING_GATE_IDS if gid in by_id and not by_id[gid].blocking)
+ if missing or downgraded:
+  details=[]
+  if missing:details.append("missing="+",".join(missing))
+  if downgraded:details.append("non_blocking="+",".join(downgraded))
+  return {"decision":"NO-GO","reason":"Mandatory gate registry is incomplete or downgraded: "+"; ".join(details),"blockers":[by_id[g] for g in downgraded]}
  blocking=[g for g in gates if g.blocking];blockers=[g for g in blocking if not is_verified_pass(g)]
- if not blocking:return {"decision":"NO-GO","reason":"No blocking gates are registered; absence of controls is not readiness.","blockers":[]}
  if blockers:return {"decision":"NO-GO","reason":f"{len(blockers)} blocking gate(s) are not verified PASS.","blockers":blockers}
- return {"decision":"GO","reason":"Every blocking gate is verified PASS, including authoritative release evidence when using the project registry.","blockers":[]}
+ return {"decision":"GO","reason":"Every mandatory blocking gate is verified PASS, including authoritative release evidence.","blockers":[]}
 
 def summarize(gates:Iterable[Gate])->dict[str,Any]:
- gates=list(gates);blocking=[g for g in gates if g.blocking];blocking_pass=[g for g in blocking if is_pass(g)];verified=[g for g in gates if is_verified_pass(g)];trust=[g for g in gates if g.trust_surface or g.category=="Search/Trust"];trust_pass=[g for g in trust if is_pass(g)];decision=production_decision(gates)
- ratio=lambda n,d:0.0 if d==0 else n/d
+ gates=list(gates);blocking=[g for g in gates if g.blocking];blocking_pass=[g for g in blocking if is_pass(g)];verified=[g for g in gates if is_verified_pass(g)];trust=[g for g in gates if g.trust_surface or g.category=="Search/Trust"];trust_pass=[g for g in trust if is_pass(g)];decision=production_decision(gates);ratio=lambda n,d:0.0 if d==0 else n/d
  return {"blocking_gate_pass_rate":ratio(len(blocking_pass),len(blocking)),"verified_pass_rate":ratio(len(verified),len(gates)),"trust_surface_completion":ratio(len(trust_pass),len(trust)),"blocking_total":len(blocking),"blocking_pass":len(blocking_pass),"blocking_not_pass":len(blocking)-len(blocking_pass),"production_go":decision["decision"]=="GO","decision":decision["decision"],"decision_reason":decision["reason"]}
 
 _STATUS_WEIGHT={Status.FAIL:0,Status.BLOCKED:1,Status.UNKNOWN:2,Status.PENDING:3,Status.PASS:4}
