@@ -2,36 +2,11 @@
 
 Open-source V1 production-readiness control plane for `aisearch.study`.
 
-## Architecture
+## Safety boundary
 
-```text
-Evidence snapshot / imported JSON
-          │
-          ▼
-   Python readiness engine
-          │
-          ├── strict validation
-          ├── fail-closed decision
-          ├── KPI computation
-          ├── invariant evaluation
-          └── CSV/JSON export
-          │
-          ▼
-       NiceGUI
-          ├── GO / NO-GO
-          ├── gate matrix + filters
-          ├── evidence dialog
-          ├── next-action queue
-          ├── Arabic RTL toggle
-          ├── live domain/TLS/header checks
-          └── import/export
-```
+Guardian can show `GO` **only** if every blocking gate is an explicitly verified `PASS`, the mandatory registry is complete, and `RELEASE-EVIDENCE` verifies the repository-authoritative `platform/apps/api/scripts/release_evidence.py` contract. Guardian never replaces that release contract.
 
-## Core safety invariant
-
-Production is `GO` **only** if every blocking gate is an explicitly verified `PASS`, and the mandatory blocking-gate registry is complete. `FAIL`, `BLOCKED`, `PENDING`, `UNKNOWN`, unverified `PASS`, missing mandatory gates, and downgraded mandatory gates all fail closed.
-
-Imported JSON is atomic: one malformed record rejects the entire import. Optional boolean fields must be real JSON booleans.
+`FAIL`, `BLOCKED`, `PENDING`, `UNKNOWN`, unverified `PASS`, missing mandatory gates, and downgraded mandatory gates all fail closed. Imported JSON is atomic: one malformed record rejects the entire import. Optional boolean fields must be real JSON booleans.
 
 ## Run locally
 
@@ -61,29 +36,18 @@ docker run --rm -e READINESS_BIND_HOST=0.0.0.0 -p 127.0.0.1:8080:8080 aisearch-r
 
 The host port is deliberately loopback-only.
 
-## Live domain checks
+## Live checks
 
-The UI can check TLS, HTTPS reachability, baseline security headers, canonical URL, `/about`, `/contact`, `/privacy`, `/terms`, `/security`, `/robots.txt`, and `/sitemap.xml`. Redirects must remain on the expected HTTPS hostname. Network failures never create `PASS`.
+The UI checks TLS, HTTPS reachability, baseline security headers, canonical URL, `/about`, `/contact`, `/privacy`, `/terms`, `/security`, `/robots.txt`, and `/sitemap.xml`. Redirects must remain on the expected HTTPS hostname and expected route. Network failures never create `PASS`.
 
-## Data contract
+## State isolation
 
-The sanitized seed is `data/snapshot.json`. Supported statuses are `PASS`, `FAIL`, `BLOCKED`, `PENDING`, and `UNKNOWN`.
+Dashboard state and UI references are created inside the `@ui.page('/')` builder, so each page/client receives isolated transient state. V1 still binds to `127.0.0.1` by default and should not be exposed publicly without a separately reviewed authentication/authorization design.
 
-Required gate fields are `id`, `category`, `gate`, `status`, `blocking`, and `evidence`. Optional fields are `source`, `acceptance` / `acceptanceCriteria`, `next_action` / `nextAction`, `verified`, and `trust_surface` / `trustSurface`.
+## Public-repository safety
 
-## Deployment boundary
-
-V1 is a **single-operator internal tool** and binds to `127.0.0.1` by default. Do not expose the process directly to a network. Multi-user/shared deployment is out of scope until the transient process-global state is replaced by per-user/session storage and authentication/authorization is independently reviewed.
-
-## Security notes
-
-- No API keys are embedded.
-- The dashboard never flips production feature flags.
-- Do not expose V1 publicly.
-- Runtime secrets belong in a secret manager/environment, not source control.
-- The committed seed is sanitized and contains no private Coda/Drive URL.
-- Do not treat dashboard state as authoritative without evidence provenance.
+The committed seed is sanitized. Do not commit private Coda/Drive URLs, credentials, incident-only evidence, customer data, or other non-public provenance.
 
 ## Current seed decision
 
-The supplied seed intentionally remains `NO-GO` until unresolved blocking gates are independently verified.
+The supplied seed intentionally remains `NO-GO`. `RELEASE-EVIDENCE` is blocking until the authoritative release-evidence validator succeeds on the final non-PR release ref.
