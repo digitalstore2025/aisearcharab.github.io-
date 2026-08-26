@@ -26,7 +26,7 @@ Malformed snapshots or release artifacts fail closed with `Decision: NO-GO` and 
 cd engineering/readiness_guardian
 python -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+python -m pip install --require-hashes -r requirements.txt
 python app.py
 ```
 
