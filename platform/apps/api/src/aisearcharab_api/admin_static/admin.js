@@ -8,7 +8,7 @@
   let currentUser = null;
   let selectedContent = null;
 
-  const configPromise = fetch('/assistant/config.json', {
+  const configPromise = fetch('../assistant/config.json', {
     credentials: 'same-origin',
     cache: 'no-store',
     headers: { Accept: 'application/json' }

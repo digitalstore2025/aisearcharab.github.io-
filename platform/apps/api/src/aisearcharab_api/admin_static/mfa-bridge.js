@@ -2,7 +2,7 @@
   'use strict';
 
   const originalFetch = window.fetch.bind(window);
-  const configPromise = originalFetch('/assistant/config.json', {
+  const configPromise = originalFetch('../assistant/config.json', {
     credentials: 'same-origin',
     cache: 'no-store',
     headers: { Accept: 'application/json' }

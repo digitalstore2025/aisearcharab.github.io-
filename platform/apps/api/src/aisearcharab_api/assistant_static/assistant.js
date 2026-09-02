@@ -169,7 +169,7 @@ function renderResult(result) {
 }
 
 async function loadClientConfig() {
-  const config = await api("/assistant/config.json");
+  const config = await api("config.json");
   if (typeof config?.api_prefix !== "string" || !config.api_prefix.startsWith("/")) throw new Error("invalid api prefix");
   const publicOrigin = safeExternalUrl(config.public_site_origin);
   if (!publicOrigin || !publicOrigin.startsWith("https://")) throw new Error("invalid public site origin");
@@ -183,7 +183,7 @@ async function routeMfaIfRequired() {
   try {
     const mfa = await api(apiPath("/auth/mfa/status"), { headers: { "X-CSRF-Token": csrf } });
     if (mfa.required && !mfa.verified) {
-      window.location.assign("/admin/");
+      window.location.assign(new URL("../admin/", window.location.href).toString());
       return true;
     }
   } catch (error) {
