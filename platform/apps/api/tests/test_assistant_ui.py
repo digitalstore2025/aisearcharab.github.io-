@@ -16,8 +16,8 @@ def test_assistant_shell_and_assets_are_served(client: TestClient) -> None:
     page = client.get("/assistant/")
     assert page.status_code == 200
     assert "المساعد البحثي الموثّق" in page.text
-    assert '<script src="/assistant/assistant.js" defer></script>' in page.text
-    assert '<link rel="stylesheet" href="/assistant/assistant.css">' in page.text
+    assert '<script src="assistant.js" defer></script>' in page.text
+    assert '<link rel="stylesheet" href="assistant.css">' in page.text
     assert 'minlength="1" maxlength="256"' in page.text
     assert "<script>" not in page.text
     assert "style=" not in page.text
@@ -34,7 +34,7 @@ def test_assistant_client_bridges_mfa_and_invalidates_stale_answers(client: Test
     script = client.get("/assistant/assistant.js")
     assert script.status_code == 200
     assert 'apiPath("/auth/mfa/status")' in script.text
-    assert 'window.location.assign("/admin/")' in script.text
+    assert 'window.location.assign(new URL("../admin/", window.location.href).toString())' in script.text
     assert "new AbortController()" in script.text
     assert "state.sessionEpoch" in script.text
     assert "controller.signal.aborted" in script.text
@@ -50,10 +50,18 @@ def test_assistant_internal_citations_are_canonical_origin_only(client: TestClie
 
 
 def test_admin_clients_honor_runtime_api_prefix(client: TestClient) -> None:
+    admin_page = client.get("/admin/")
+    assert admin_page.status_code == 200
+    assert '<link rel="stylesheet" href="admin.css">' in admin_page.text
+    assert '<script src="mfa-bridge.js" defer></script>' in admin_page.text
+    assert '<script src="admin.js" defer></script>' in admin_page.text
+
     admin_script = client.get("/admin/admin.js")
     mfa_bridge = client.get("/admin/mfa-bridge.js")
     assert admin_script.status_code == 200
     assert mfa_bridge.status_code == 200
+    assert "fetch('../assistant/config.json'" in admin_script.text
+    assert "originalFetch('../assistant/config.json'" in mfa_bridge.text
     assert "config.api_prefix" in admin_script.text
     assert "config.api_prefix" in mfa_bridge.text
     assert "`${apiPrefix}${path}`" in admin_script.text
