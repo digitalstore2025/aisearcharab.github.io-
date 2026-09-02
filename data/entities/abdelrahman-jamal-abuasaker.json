@@ -1,0 +1,30 @@
+{
+  "id": "abdelrahman-jamal-abuasaker",
+  "name": "Abdelrahman Jamal Abuasaker",
+  "name_ar": "عبد الرحمن جمال أبو عساكر",
+  "entity_type": "person",
+  "status": "active",
+  "aliases": [
+    "Abdelrahman J Abuasaker",
+    "Abdelrahman Jamal Abu Asaker",
+    "ABDELRAHMAN J A M A L AbuAsaker",
+    "عبد الرحمن جمال أبو عساكر",
+    "عبد الرحمن أبو عساكر"
+  ],
+  "description_ar": "صحفي فلسطيني يرتبط اسمه علنًا بمشروع PAL AI / حنظلة.",
+  "description_en": "Palestinian journalist publicly associated with the PAL AI / Hanzala project.",
+  "same_as": [
+    {
+      "label": "LinkedIn — Abdelrahman J Abuasaker",
+      "url": "https://www.linkedin.com/in/abdelrahman-j-abuasaker-a70ba4150/"
+    },
+    {
+      "label": "Academia.edu — ABDELRAHMAN J A M A L AbuAsaker",
+      "url": "https://independent.academia.edu/abedjamal1"
+    }
+  ],
+  "source_ids": [
+    "shms-pal-ai-hanzala-2025",
+    "shabab-fm-pal-ai-interview-2025"
+  ]
+}
