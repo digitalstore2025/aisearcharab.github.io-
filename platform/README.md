@@ -2,7 +2,7 @@
 
 هذا المسار يطوّر المنصة ديناميكياً دون استبدال واجهة Hugo العامة أو إعلان الجاهزية الإنتاجية قبل اكتمال Staging والمراجعات المستقلة وخطة الرجوع.
 
-## المرحلة الحالية: Phase 3.1 — Perfect Master 2026 Hardening
+## المرحلة الحالية: Phase 3.2 — Grounded Assistant Beta
 
 - FastAPI modular monolith مع PostgreSQL وAlembic.
 - بحث عربي معجمي شفاف مع PostgreSQL GIN FTS مطبّع للعربية وbounded candidate retrieval.
@@ -17,6 +17,9 @@
 - Separation of Duties اختياري في التطوير وإجباري في production configuration.
 - optimistic locking + row locks + actor provenance لدورة التحرير.
 - دورة draft → reviewed → published → archived، مع إبطال المراجعة عند التعديل.
+- Grounded Generated Answers اختيارية ومعطلة افتراضياً؛ النموذج يختار `claim_key` فقط من claims مراجَعة، والخادم يعيد بناء الإجابة من النص المراجع مع citations وuncertainty وprovider provenance.
+- quota دائمة لكل مستخدم، bounds على المدخلات والمصادر، `store=False`، وإعادة تحقق من evidence بعد زمن المزود قبل إرجاع الإجابة.
+- واجهة `/assistant/` عربية RTL للمستخدم المصرح له، تعتمد same-origin session + CSRF ولا تخزن session/CSRF/API secrets في Web Storage.
 - Trusted Host validation، request-size ceiling، security headers وprivacy-minimized JSON request telemetry.
 - migration-aware readiness في Staging/Production.
 - Docker multi-stage runtime يعتمد dependency graph مولداً ومثبت digest ومراجعاً بالـhashes.
@@ -36,7 +39,21 @@ docker compose up --build
 python apps/api/scripts/bootstrap_admin.py --email owner@example.com --name "اسم المالك"
 ```
 
-ثم افتح `http://localhost:8000/admin/`.
+ثم افتح `http://localhost:8000/admin/` للإدارة، أو `http://localhost:8000/assistant/` للمساعد البحثي.
+
+### Grounded Assistant Beta
+
+الميزة معطلة افتراضياً. في بيئة تطوير/اختبار أو Staging معتمدة فقط، اضبط القيم عبر البيئة/Secret Manager:
+
+```text
+GENERATED_ANSWERS_ENABLED=true
+OPENAI_API_KEY=<secret-manager value>
+OPENAI_MODEL=<approved model identifier>
+GENERATED_ANSWER_MAX_REQUESTS=20
+GENERATED_ANSWER_WINDOW_SECONDS=3600
+```
+
+المسار المدفوع `POST /v1/answers/grounded` يتطلب جلسة مصادقاً عليها وصلاحية `content:read` وCSRF صحيحاً. لا توجد anonymous generation endpoint. تفعيل Generated Answers في `production` ما يزال مرفوضاً برمجياً إلى أن تكتمل بوابات التشغيل المستقلة.
 
 ### MFA للحسابات المميزة
 
@@ -100,9 +117,10 @@ python scripts/load_probe.py \
 
 ## بوابات غير مفتوحة بعد
 
-- لا RAG أو إجابات مولدة.
-- لا embeddings أو vector search.
-- لا crawling خارجي.
+- لا تفعيل Production للمساعد المولد حتى إثبات rate limiting/observability/secrets/runtime في Staging وإزالة production gate بتغيير مستقل ومراجع.
+- لا anonymous/public paid generation قبل abuse policy وWAF/rate limits مناسبة.
+- لا embeddings أو vector search قبل Golden Dataset ومقارنة قابلة للإعادة.
+- لا crawling خارجي قبل allowlist وحماية SSRF وحدود الشبكة والحجم والمهلة وإعادة التوجيه.
 - لا مدفوعات.
 - لا نشر إنتاجي تلقائي.
 - TOTP MFA نُفذت على مستوى الكود، لكن Production ما يزال يتطلب إثباتها فعلياً في Staging ومراجعتها أمنياً بصورة مستقلة، إضافة إلى distributed rate limiting/WAF، managed PostgreSQL مع PITR/restore drill، benchmark عربي حقيقي، external observability، مراجعة إتاحة مستقلة وStaging/rollback موثق.

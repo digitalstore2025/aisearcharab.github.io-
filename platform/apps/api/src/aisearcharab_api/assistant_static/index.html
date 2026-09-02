@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light dark">
+  <title>AISearcharab — المساعد البحثي</title>
+  <link rel="stylesheet" href="/assistant/assistant.css">
+  <script src="/assistant/assistant.js" defer></script>
+</head>
+<body>
+  <main class="shell">
+    <header class="hero">
+      <p class="eyebrow">AISearcharab</p>
+      <h1>المساعد البحثي الموثّق</h1>
+      <p class="lede">إجابات مبنية فقط على الادعاءات المراجَعة والمنشورة داخل قاعدة AISearcharab، مع إظهار المصدر ودرجة عدم اليقين.</p>
+    </header>
+
+    <section id="status-card" class="status-card" aria-live="polite">
+      <span id="status-dot" class="status-dot" aria-hidden="true"></span>
+      <span id="status-text">جارٍ فحص الجلسة والقدرات…</span>
+    </section>
+
+    <section id="login-panel" class="panel" hidden>
+      <h2>تسجيل الدخول</h2>
+      <p>هذه النسخة التجريبية متاحة للمستخدمين المصرح لهم فقط.</p>
+      <form id="login-form">
+        <label for="email">البريد الإلكتروني</label>
+        <input id="email" name="email" type="email" autocomplete="username" maxlength="254" required>
+        <label for="password">كلمة المرور</label>
+        <input id="password" name="password" type="password" autocomplete="current-password" minlength="1" maxlength="256" required>
+        <button type="submit">دخول آمن</button>
+      </form>
+      <p id="login-error" class="error" role="alert"></p>
+    </section>
+
+    <section id="assistant-panel" class="panel" hidden>
+      <div class="panel-heading">
+        <div>
+          <h2>اسأل قاعدة الأدلة</h2>
+          <p id="identity" class="muted"></p>
+        </div>
+        <button id="logout-button" class="secondary" type="button">تسجيل الخروج</button>
+      </div>
+
+      <form id="question-form">
+        <label for="query">السؤال</label>
+        <textarea id="query" name="query" minlength="2" maxlength="500" rows="4" required placeholder="مثال: ما الادعاءات الموثقة المتاحة حول هذا الموضوع؟"></textarea>
+        <div class="form-row">
+          <label for="max-sources">أقصى عدد للمصادر</label>
+          <select id="max-sources" name="max_sources">
+            <option value="3">3</option>
+            <option value="5" selected>5</option>
+            <option value="8">8</option>
+          </select>
+        </div>
+        <button id="ask-button" type="submit">إنشاء إجابة موثّقة</button>
+      </form>
+      <p id="question-error" class="error" role="alert"></p>
+    </section>
+
+    <section id="result-panel" class="panel result" hidden aria-live="polite">
+      <div class="result-meta">
+        <span id="uncertainty" class="badge"></span>
+        <span id="model" class="muted"></span>
+        <span id="usage" class="muted"></span>
+      </div>
+      <h2>الإجابة</h2>
+      <pre id="answer" class="answer"></pre>
+      <h3>المصادر</h3>
+      <ol id="citations" class="citations"></ol>
+      <details>
+        <summary>القيود المنهجية</summary>
+        <ul id="limitations"></ul>
+      </details>
+      <p id="request-id" class="request-id"></p>
+    </section>
+  </main>
+</body>
+</html>
