@@ -8,6 +8,9 @@
   --border: #d5d8dc;
   --accent: #176b5b;
   --accent-strong: #0f5145;
+  --button-bg: #176b5b;
+  --button-hover: #0f5145;
+  --button-text: #ffffff;
   --danger: #a93226;
   --warn: #9a6700;
   --ok: #1e8449;
@@ -22,6 +25,9 @@
     --border: #39444b;
     --accent: #52b9a4;
     --accent-strong: #73cdbb;
+    --button-bg: #176b5b;
+    --button-hover: #0f5145;
+    --button-text: #ffffff;
     --danger: #ff8a80;
     --warn: #ffd166;
     --ok: #74d99f;
@@ -46,8 +52,8 @@ form { display: grid; gap: 10px; }
 label { font-weight: 700; }
 input, textarea, select { width: 100%; border: 1px solid var(--border); border-radius: 10px; padding: 12px; background: var(--surface); color: var(--text); }
 textarea { resize: vertical; line-height: 1.7; }
-button { border: 0; border-radius: 10px; padding: 12px 18px; background: var(--accent); color: #fff; font-weight: 800; cursor: pointer; }
-button:hover { background: var(--accent-strong); }
+button { border: 0; border-radius: 10px; padding: 12px 18px; background: var(--button-bg); color: var(--button-text); font-weight: 800; cursor: pointer; }
+button:hover { background: var(--button-hover); }
 button:disabled { opacity: .6; cursor: wait; }
 button.secondary { background: transparent; color: var(--text); border: 1px solid var(--border); }
 .error { color: var(--danger); min-height: 1.4em; }
