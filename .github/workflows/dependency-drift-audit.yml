@@ -1,0 +1,77 @@
+name: Dependency drift audit
+
+on:
+  pull_request:
+    paths:
+      - "platform/apps/api/pyproject.toml"
+      - "platform/apps/api/requirements-runtime.lock.sha256"
+      - "platform/apps/api/scripts/audit_runtime_dependencies.py"
+      - "platform/apps/api/security/pip-audit-vex.json"
+      - ".github/workflows/dependency-drift-audit.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dependency-drift-audit-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  audit-generated-lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: platform/apps/api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: platform/apps/api/pyproject.toml
+
+      - name: Install pinned audit toolchain
+        run: python -m pip install 'pip==26.1.2' && python -m pip install -e '.[dev]'
+
+      - name: Verify installed dependencies
+        run: python -m pip check
+
+      - name: Generate current hashed runtime lock
+        run: pip-compile pyproject.toml --generate-hashes --strip-extras --output-file /tmp/requirements-runtime.lock
+
+      - name: Record generated lock digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="$(awk '{print $1}' requirements-runtime.lock.sha256)"
+          actual="$(sha256sum /tmp/requirements-runtime.lock | awk '{print $1}')"
+          printf 'expected=%s\nactual=%s\n' "$expected" "$actual" | tee /tmp/runtime-lock-digest.txt
+
+      - name: Audit generated lock before repinning
+        run: >-
+          python scripts/audit_runtime_dependencies.py
+          --lock /tmp/requirements-runtime.lock
+          --vex security/pip-audit-vex.json
+          --report-dir /tmp/dependency-audit
+          --cyclonedx-output /tmp/aisearcharab-sbom.cdx.json
+
+      - name: Validate generated SBOM
+        run: python -m json.tool /tmp/aisearcharab-sbom.cdx.json > /dev/null
+
+      - name: Upload drift review evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: dependency-drift-review
+          path: |
+            /tmp/requirements-runtime.lock
+            /tmp/runtime-lock-digest.txt
+            /tmp/dependency-audit
+            /tmp/aisearcharab-sbom.cdx.json
+          if-no-files-found: warn
+          retention-days: 14
