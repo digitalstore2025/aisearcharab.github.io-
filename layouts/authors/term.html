@@ -1,0 +1,65 @@
+{{ define "main" }}
+{{- $entity := index site.Data.entities .Params.entity_id -}}
+<article class="content profile-page">
+  <header class="profile-header">
+    <p class="eyebrow">ملف مؤلف موثّق · Verified author profile</p>
+    <h1 class="profile-name-en" lang="en" dir="ltr">{{ $entity.name }}</h1>
+    <p class="profile-name-ar" lang="ar">{{ $entity.name_ar }}</p>
+    <p class="profile-summary">{{ .Description }}</p>
+  </header>
+
+  <section aria-labelledby="profile-summary-title">
+    <h2 id="profile-summary-title">نبذة موثقة</h2>
+    {{ .Content }}
+  </section>
+
+  <section aria-labelledby="profile-aliases-title">
+    <h2 id="profile-aliases-title">صيغ الاسم العامة</h2>
+    <ul class="profile-aliases">
+      {{- range $entity.aliases }}
+      <li lang="{{ if findRE "[A-Za-z]" . }}en{{ else }}ar{{ end }}"{{ if findRE "[A-Za-z]" . }} dir="ltr"{{ end }}>{{ . }}</li>
+      {{- end }}
+    </ul>
+  </section>
+
+  <section aria-labelledby="profile-identities-title">
+    <h2 id="profile-identities-title">ملفات الهوية الخارجية</h2>
+    <p>هذه الروابط تعرّف ملفات الشخص نفسه؛ لا تُعامل بوصفها مصادر مستقلة لإثبات الادعاءات.</p>
+    <ul class="profile-links">
+      {{- range $entity.same_as }}
+      <li><a href="{{ .url }}" rel="me noopener noreferrer">{{ .label }}</a></li>
+      {{- end }}
+    </ul>
+  </section>
+
+  <section aria-labelledby="profile-evidence-title">
+    <h2 id="profile-evidence-title">مواد خارجية عن الشخص</h2>
+    <ul class="sources-list">
+      {{- range $entity.source_ids }}
+        {{- $source := index site.Data.sources . -}}
+        {{- with $source }}
+        <li>
+          <a href="{{ .url }}" rel="noopener noreferrer">{{ .title }}</a>
+          <span class="meta">— {{ .publisher }}{{ with .published_at }}، {{ time.Format "2006-01-02" . }}{{ end }}</span>
+        </li>
+        {{- end }}
+      {{- end }}
+    </ul>
+  </section>
+
+  <section aria-labelledby="profile-work-title">
+    <h2 id="profile-work-title">مواد منشورة في المرصد</h2>
+    <div class="grid">
+      {{- range .Pages.ByDate.Reverse }}
+      <article class="card content-card">
+        <p class="meta"><time datetime="{{ .Date.Format "2006-01-02" }}">{{ .Date.Format "2006-01-02" }}</time></p>
+        <h3><a href="{{ .RelPermalink }}">{{ .Title }}</a></h3>
+        <p>{{ .Summary | plainify | truncate 180 }}</p>
+      </article>
+      {{- else }}
+      <p>لا توجد مواد منسوبة إلى هذا المؤلف داخل المرصد حتى الآن.</p>
+      {{- end }}
+    </div>
+  </section>
+</article>
+{{ end }}

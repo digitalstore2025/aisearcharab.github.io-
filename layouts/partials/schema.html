@@ -1,6 +1,7 @@
+{{- $organizationID := printf "%s#organization" site.BaseURL -}}
 {{- $organization := dict
   "@type" "Organization"
-  "@id" (printf "%s#organization" site.BaseURL)
+  "@id" $organizationID
   "name" site.Params.siteName
   "alternateName" site.Params.shortName
   "url" site.BaseURL
@@ -14,14 +15,78 @@
     "url" site.BaseURL
     "description" site.Params.description
     "inLanguage" "ar"
-    "publisher" (dict "@id" (printf "%s#organization" site.BaseURL))
+    "publisher" (dict "@id" $organizationID)
   -}}
   <script type="application/ld+json">{{ dict "@context" "https://schema.org" "@graph" (slice $organization $website) | jsonify | safeJS }}</script>
+{{- else if .Params.profile_page -}}
+  {{- $entity := index site.Data.entities .Params.entity_id -}}
+  {{- $personID := printf "%s#person" .Permalink -}}
+  {{- $sameAs := slice -}}
+  {{- range $entity.same_as -}}
+    {{- $sameAs = $sameAs | append .url -}}
+  {{- end -}}
+  {{- $subjectOf := slice -}}
+  {{- range $entity.source_ids -}}
+    {{- $source := index site.Data.sources . -}}
+    {{- with $source -}}
+      {{- $subjectOf = $subjectOf | append (dict
+        "@type" (.schema_type | default "CreativeWork")
+        "name" .title
+        "url" .url
+      ) -}}
+    {{- end -}}
+  {{- end -}}
+  {{- $person := dict
+    "@type" "Person"
+    "@id" $personID
+    "name" $entity.name
+    "alternateName" $entity.aliases
+    "description" $entity.description_en
+    "url" .Permalink
+    "sameAs" $sameAs
+    "subjectOf" $subjectOf
+  -}}
+  {{- $profilePage := dict
+    "@type" "ProfilePage"
+    "@id" (printf "%s#profile-page" .Permalink)
+    "name" .Title
+    "description" (.Description | default $entity.description_ar)
+    "url" .Permalink
+    "inLanguage" (slice "ar" "en")
+    "dateCreated" (.Date.Format "2006-01-02T15:04:05Z07:00")
+    "dateModified" (.Lastmod.Format "2006-01-02T15:04:05Z07:00")
+    "mainEntity" (dict "@id" $personID)
+    "publisher" (dict "@id" $organizationID)
+  -}}
+  <script type="application/ld+json">{{ dict "@context" "https://schema.org" "@graph" (slice $organization $person $profilePage) | jsonify | safeJS }}</script>
 {{- else if .IsPage -}}
-  {{- $authorName := site.Params.author -}}
-  {{- with .Params.authors }}{{ $authorName = delimit . "، " }}{{ end -}}
+  {{- $authors := slice -}}
+  {{- $authorTerms := .GetTerms "authors" -}}
+  {{- if $authorTerms -}}
+    {{- range $authorTerms -}}
+      {{- $authorTerm := . -}}
+      {{- with .Params.entity_id -}}
+        {{- $entity := index site.Data.entities . -}}
+        {{- $authors = $authors | append (dict
+          "@type" "Person"
+          "@id" (printf "%s#person" $authorTerm.Permalink)
+          "name" $entity.name
+          "url" $authorTerm.Permalink
+        ) -}}
+      {{- else -}}
+        {{- if eq $authorTerm.Title site.Params.author -}}
+          {{- $authors = $authors | append (dict "@type" "Organization" "@id" $organizationID "name" site.Params.siteName "url" site.BaseURL) -}}
+        {{- else -}}
+          {{- $authors = $authors | append (dict "@type" "Person" "name" $authorTerm.Title "url" $authorTerm.Permalink) -}}
+        {{- end -}}
+      {{- end -}}
+    {{- end -}}
+  {{- else -}}
+    {{- $authors = $authors | append (dict "@type" "Organization" "@id" $organizationID "name" site.Params.siteName "url" site.BaseURL) -}}
+  {{- end -}}
   {{- $article := dict
     "@type" "Article"
+    "@id" (printf "%s#article" .Permalink)
     "headline" .Title
     "description" (.Description | default site.Params.description)
     "url" .Permalink
@@ -29,8 +94,8 @@
     "inLanguage" "ar"
     "datePublished" (.Date.Format "2006-01-02T15:04:05Z07:00")
     "dateModified" (.Lastmod.Format "2006-01-02T15:04:05Z07:00")
-    "author" (dict "@type" "Organization" "name" $authorName)
-    "publisher" (dict "@id" (printf "%s#organization" site.BaseURL))
+    "author" $authors
+    "publisher" (dict "@id" $organizationID)
   -}}
   <script type="application/ld+json">{{ dict "@context" "https://schema.org" "@graph" (slice $organization $article) | jsonify | safeJS }}</script>
 {{- else -}}

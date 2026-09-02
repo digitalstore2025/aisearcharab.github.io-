@@ -1,5 +1,7 @@
 [
-{{- $pages := where site.RegularPages "RelPermalink" "ne" "/search/" -}}
+{{- $regularPages := where site.RegularPages "RelPermalink" "ne" "/search/" -}}
+{{- $profilePages := where site.Pages "Params.profile_page" true -}}
+{{- $pages := union $regularPages $profilePages -}}
 {{- range $index, $page := $pages -}}
 {{- if $index }},{{ end }}
 {
