@@ -2,6 +2,18 @@
   'use strict';
 
   const originalFetch = window.fetch.bind(window);
+  const configPromise = originalFetch('/assistant/config.json', {
+    credentials: 'same-origin',
+    cache: 'no-store',
+    headers: { Accept: 'application/json' }
+  }).then(async (response) => {
+    if (!response.ok) throw new Error('runtime config unavailable');
+    const config = await response.json();
+    if (typeof config.api_prefix !== 'string' || !config.api_prefix.startsWith('/')) {
+      throw new Error('invalid api prefix');
+    }
+    return config.api_prefix.replace(/\/$/, '');
+  });
 
   const csrfToken = () => {
     const names = ['__Host-ais-csrf', 'ais_admin_csrf'];
@@ -13,12 +25,13 @@
   };
 
   const directApi = async (path, options = {}) => {
+    const apiPrefix = await configPromise;
     const method = (options.method || 'GET').toUpperCase();
     const headers = new Headers(options.headers || {});
     headers.set('Accept', 'application/json');
     headers.set('X-CSRF-Token', csrfToken());
     if (options.body) headers.set('Content-Type', 'application/json');
-    const response = await originalFetch(`/v1${path}`, {
+    const response = await originalFetch(`${apiPrefix}${path}`, {
       ...options,
       method,
       headers,
@@ -205,9 +218,11 @@
   };
 
   window.fetch = async (input, init = {}) => {
-    const url = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
+    const apiPrefix = await configPromise;
+    const rawUrl = typeof input === 'string' ? input : input instanceof Request ? input.url : String(input);
+    const url = new URL(rawUrl, window.location.origin);
     const method = (init.method || (input instanceof Request ? input.method : 'GET')).toUpperCase();
-    const isLogin = method === 'POST' && (url === '/v1/auth/login' || url.endsWith('/v1/auth/login'));
+    const isLogin = method === 'POST' && url.origin === window.location.origin && url.pathname === `${apiPrefix}/auth/login`;
     const response = await originalFetch(input, init);
     if (!isLogin || !response.ok) return response;
 
