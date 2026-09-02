@@ -8,6 +8,19 @@
   let currentUser = null;
   let selectedContent = null;
 
+  const configPromise = fetch('/assistant/config.json', {
+    credentials: 'same-origin',
+    cache: 'no-store',
+    headers: { Accept: 'application/json' }
+  }).then(async (response) => {
+    if (!response.ok) throw new Error('runtime config unavailable');
+    const config = await response.json();
+    if (typeof config.api_prefix !== 'string' || !config.api_prefix.startsWith('/')) {
+      throw new Error('invalid api prefix');
+    }
+    return config.api_prefix.replace(/\/$/, '');
+  });
+
   const csrfToken = () => {
     const names = ['__Host-ais-csrf', 'ais_admin_csrf'];
     for (const part of document.cookie.split(';')) {
@@ -18,12 +31,13 @@
   };
 
   const api = async (path, options = {}) => {
+    const apiPrefix = await configPromise;
     const method = (options.method || 'GET').toUpperCase();
     const headers = new Headers(options.headers || {});
     headers.set('Accept', 'application/json');
     if (options.body) headers.set('Content-Type', 'application/json');
     if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) headers.set('X-CSRF-Token', csrfToken());
-    const response = await fetch(`/v1${path}`, { ...options, method, headers, credentials: 'same-origin' });
+    const response = await fetch(`${apiPrefix}${path}`, { ...options, method, headers, credentials: 'same-origin' });
     if (response.status === 204) return null;
     const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
