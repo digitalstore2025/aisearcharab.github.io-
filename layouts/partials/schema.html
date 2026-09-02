@@ -20,6 +20,10 @@
   <script type="application/ld+json">{{ dict "@context" "https://schema.org" "@graph" (slice $organization $website) | jsonify | safeJS }}</script>
 {{- else if .Params.profile_page -}}
   {{- $entity := index site.Data.entities .Params.entity_id -}}
+  {{- if not $entity -}}
+    {{- errorf "profile page %q references missing entity_id %q" .RelPermalink .Params.entity_id -}}
+  {{- end -}}
+  {{- if $entity -}}
   {{- $personID := printf "%s#person" .Permalink -}}
   {{- $sameAs := slice -}}
   {{- range $entity.same_as -}}
@@ -59,6 +63,7 @@
     "publisher" (dict "@id" $organizationID)
   -}}
   <script type="application/ld+json">{{ dict "@context" "https://schema.org" "@graph" (slice $organization $person $profilePage) | jsonify | safeJS }}</script>
+  {{- end -}}
 {{- else if .IsPage -}}
   {{- $authors := slice -}}
   {{- $authorTerms := .GetTerms "authors" -}}
@@ -67,12 +72,16 @@
       {{- $authorTerm := . -}}
       {{- with .Params.entity_id -}}
         {{- $entity := index site.Data.entities . -}}
-        {{- $authors = $authors | append (dict
-          "@type" "Person"
-          "@id" (printf "%s#person" $authorTerm.Permalink)
-          "name" $entity.name
-          "url" $authorTerm.Permalink
-        ) -}}
+        {{- if $entity -}}
+          {{- $authors = $authors | append (dict
+            "@type" "Person"
+            "@id" (printf "%s#person" $authorTerm.Permalink)
+            "name" $entity.name
+            "url" $authorTerm.Permalink
+          ) -}}
+        {{- else -}}
+          {{- errorf "author term %q references missing entity_id %q" $authorTerm.RelPermalink . -}}
+        {{- end -}}
       {{- else -}}
         {{- if eq $authorTerm.Title site.Params.author -}}
           {{- $authors = $authors | append (dict "@type" "Organization" "@id" $organizationID "name" site.Params.siteName "url" site.BaseURL) -}}

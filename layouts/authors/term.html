@@ -1,5 +1,12 @@
 {{ define "main" }}
-{{- $entity := index site.Data.entities .Params.entity_id -}}
+{{- $entity := false -}}
+{{- with .Params.entity_id -}}
+  {{- $entity = index site.Data.entities . -}}
+  {{- if not $entity -}}
+    {{- errorf "author profile %q references missing entity_id %q" $.RelPermalink . -}}
+  {{- end -}}
+{{- end -}}
+{{- if $entity -}}
 <article class="content profile-page">
   <header class="profile-header">
     <p class="eyebrow">ملف مؤلف موثّق · Verified author profile</p>
@@ -62,4 +69,23 @@
     </div>
   </section>
 </article>
+{{- else -}}
+<section class="content" aria-labelledby="author-title">
+  <p class="eyebrow">ملف مؤلف · Author profile</p>
+  <h1 id="author-title">{{ .Title }}</h1>
+  {{ .Content }}
+  <h2>مواد منشورة في المرصد</h2>
+  <div class="grid">
+    {{- range .Pages.ByDate.Reverse }}
+    <article class="card content-card">
+      <p class="meta"><time datetime="{{ .Date.Format "2006-01-02" }}">{{ .Date.Format "2006-01-02" }}</time></p>
+      <h3><a href="{{ .RelPermalink }}">{{ .Title }}</a></h3>
+      <p>{{ .Summary | plainify | truncate 180 }}</p>
+    </article>
+    {{- else }}
+    <p>لا توجد مواد منسوبة إلى هذا المؤلف داخل المرصد حتى الآن.</p>
+    {{- end }}
+  </div>
+</section>
+{{- end -}}
 {{ end }}
