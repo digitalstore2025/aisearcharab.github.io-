@@ -104,8 +104,24 @@ function safeExternalUrl(raw, base = window.location.origin) {
   return null;
 }
 
-function addLink(parent, href, label, base) {
-  const safe = safeExternalUrl(href, base);
+function safeCanonicalUrl(raw, base) {
+  try {
+    const canonical = new URL(base);
+    const parsed = new URL(raw, canonical);
+    if (
+      (parsed.protocol === "http:" || parsed.protocol === "https:") &&
+      parsed.origin === canonical.origin
+    ) {
+      return parsed.href;
+    }
+  } catch (_error) {
+    return null;
+  }
+  return null;
+}
+
+function addLink(parent, href, label, { base = window.location.origin, canonicalOnly = false } = {}) {
+  const safe = canonicalOnly ? safeCanonicalUrl(href, base) : safeExternalUrl(href, base);
   if (!safe) return;
   const link = document.createElement("a");
   link.href = safe;
@@ -131,7 +147,7 @@ function renderResult(result) {
     title.textContent = `${citation.evidence_id} — ${citation.title}`;
     item.appendChild(title);
     const internal = document.createElement("div");
-    addLink(internal, citation.url, "فتح المادة", state.publicSiteOrigin);
+    addLink(internal, citation.url, "فتح المادة", { base: state.publicSiteOrigin, canonicalOnly: true });
     item.appendChild(internal);
     if (Array.isArray(citation.source_urls) && citation.source_urls.length) {
       const sources = document.createElement("div");
