@@ -41,6 +41,35 @@ def test_assistant_client_bridges_mfa_and_invalidates_stale_answers(client: Test
     assert 'setStatus("تعذر تأكيد تسجيل الخروج.' in script.text
 
 
+def test_assistant_internal_citations_are_canonical_origin_only(client: TestClient) -> None:
+    script = client.get("/assistant/assistant.js")
+    assert script.status_code == 200
+    assert "function safeCanonicalUrl" in script.text
+    assert "parsed.origin === canonical.origin" in script.text
+    assert "canonicalOnly: true" in script.text
+
+
+def test_admin_clients_honor_runtime_api_prefix(client: TestClient) -> None:
+    admin_script = client.get("/admin/admin.js")
+    mfa_bridge = client.get("/admin/mfa-bridge.js")
+    assert admin_script.status_code == 200
+    assert mfa_bridge.status_code == 200
+    assert "config.api_prefix" in admin_script.text
+    assert "config.api_prefix" in mfa_bridge.text
+    assert "`${apiPrefix}${path}`" in admin_script.text
+    assert "`${apiPrefix}${path}`" in mfa_bridge.text
+    assert "fetch(`/v1${path}`" not in admin_script.text
+    assert "originalFetch(`/v1${path}`" not in mfa_bridge.text
+
+
+def test_assistant_dark_mode_buttons_keep_aa_contrast_tokens(client: TestClient) -> None:
+    stylesheet = client.get("/assistant/assistant.css")
+    assert stylesheet.status_code == 200
+    assert "--button-bg: #176b5b" in stylesheet.text
+    assert "--button-hover: #0f5145" in stylesheet.text
+    assert "color: var(--button-text)" in stylesheet.text
+
+
 def test_assistant_config_exposes_runtime_prefix_and_public_origin(client: TestClient) -> None:
     response = client.get("/assistant/config.json")
     assert response.status_code == 200
