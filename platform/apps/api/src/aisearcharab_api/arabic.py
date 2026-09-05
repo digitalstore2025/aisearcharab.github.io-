@@ -6,6 +6,7 @@ import unicodedata
 ARABIC_DIACRITICS = re.compile(r"[\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]")
 TOKEN_PATTERN = re.compile(r"[A-Za-z0-9][A-Za-z0-9.+#/_-]*|[\u0600-\u06FF]+")
 WHITESPACE = re.compile(r"\s+")
+INVISIBLE_FORMATTING = re.compile(r"[\u061C\u200B-\u200F\u202A-\u202E\u2060-\u2069\uFEFF]")
 
 PROTECTED_ENTITIES = (
     "gpt-5",
@@ -35,8 +36,13 @@ _TRANSLATION = str.maketrans(
 
 
 def normalize_text(value: str) -> str:
-    """Normalize Arabic and Latin text without destructive stemming."""
+    """Normalize Arabic and Latin text without destructive stemming.
+
+    Invisible bidirectional and zero-width formatting controls are removed so
+    visually identical queries cannot bypass token matching.
+    """
     normalized = unicodedata.normalize("NFKC", value).casefold()
+    normalized = INVISIBLE_FORMATTING.sub("", normalized)
     normalized = ARABIC_DIACRITICS.sub("", normalized)
     normalized = normalized.translate(_TRANSLATION)
     normalized = WHITESPACE.sub(" ", normalized).strip()
