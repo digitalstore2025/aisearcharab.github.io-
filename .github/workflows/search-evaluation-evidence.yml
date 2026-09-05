@@ -1,0 +1,105 @@
+name: Publish lexical search evaluation evidence
+
+on:
+  pull_request:
+    paths:
+      - "platform/**"
+      - "static/js/search.js"
+      - ".github/workflows/search-evaluation-evidence.yml"
+  push:
+    branches:
+      - main
+    paths:
+      - "platform/**"
+      - "static/js/search.js"
+      - ".github/workflows/search-evaluation-evidence.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: search-evaluation-evidence-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lexical-evidence:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: platform/apps/api
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: platform/apps/api/pyproject.toml
+
+      - name: Install API and evaluation dependencies
+        run: python -m pip install 'pip==26.1.2' && python -m pip install -e '.[dev]'
+
+      - name: Verify installed dependencies
+        run: python -m pip check
+
+      - name: Evaluate lexical search
+        run: python scripts/evaluate_search.py --output /tmp/search-evaluation/metrics.json
+
+      - name: Validate metrics JSON
+        if: always()
+        run: |
+          set -euo pipefail
+          test -s /tmp/search-evaluation/metrics.json
+          python -m json.tool /tmp/search-evaluation/metrics.json > /dev/null
+
+      - name: Generate immutable provenance
+        if: always()
+        env:
+          TESTED_SHA: ${{ github.sha }}
+          SOURCE_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || '' }}
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_ID: ${{ github.run_id }}
+          WORKFLOW_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          output = Path("/tmp/search-evaluation/provenance.json")
+          output.parent.mkdir(parents=True, exist_ok=True)
+          payload = {
+              "schema_version": 1,
+              "evidence_scope": "engineering-regression-only",
+              "tested_sha": os.environ["TESTED_SHA"],
+              "source_head_sha": os.environ["SOURCE_HEAD_SHA"],
+              "base_sha": os.environ["BASE_SHA"],
+              "event_name": os.environ["EVENT_NAME"],
+              "workflow_run_id": os.environ["WORKFLOW_RUN_ID"],
+              "workflow_run_attempt": os.environ["WORKFLOW_RUN_ATTEMPT"],
+              "limitations": [
+                  "Does not establish production retrieval quality.",
+                  "Does not establish Arabic corpus coverage.",
+                  "Does not establish RAG answer quality or groundedness.",
+                  "Does not establish human preference or product-market fit."
+              ],
+          }
+          output.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+          PY
+
+      - name: Validate provenance JSON
+        if: always()
+        run: python -m json.tool /tmp/search-evaluation/provenance.json > /dev/null
+
+      - name: Upload lexical search evaluation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: phase3-search-evaluation-${{ github.sha }}
+          path: /tmp/search-evaluation
+          if-no-files-found: error
+          retention-days: 30
