@@ -1,0 +1,25 @@
+name: One-time runtime lock patch
+
+on:
+  push:
+    branches:
+      - build/commit-reviewed-runtime-lock-2026-09-05
+    paths:
+      - ".github/workflows/one-time-runtime-lock-patch.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - name: Patch lock consumers and remove bootstrap material
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python .github/scripts/one_time_patch_runtime_lock.py
