@@ -4,10 +4,13 @@ on:
   pull_request:
     paths:
       - "platform/apps/api/pyproject.toml"
+      - "platform/apps/api/requirements-runtime.lock"
       - "platform/apps/api/requirements-runtime.lock.sha256"
       - "platform/apps/api/scripts/audit_runtime_dependencies.py"
       - "platform/apps/api/security/pip-audit-vex.json"
       - ".github/workflows/dependency-drift-audit.yml"
+  schedule:
+    - cron: "0 6 * * 1"
   workflow_dispatch:
 
 permissions:
@@ -41,16 +44,22 @@ jobs:
       - name: Verify installed dependencies
         run: python -m pip check
 
-      - name: Generate current hashed runtime lock
+      - name: Verify committed reviewed lock integrity
+        run: sha256sum -c requirements-runtime.lock.sha256
+
+      - name: Generate current hashed runtime lock candidate
         run: pip-compile pyproject.toml --generate-hashes --strip-extras --output-file /tmp/requirements-runtime.lock
 
-      - name: Record generated lock digest
+      - name: Record reviewed and candidate lock digests
         shell: bash
         run: |
           set -euo pipefail
-          expected="$(awk '{print $1}' requirements-runtime.lock.sha256)"
-          actual="$(sha256sum /tmp/requirements-runtime.lock | awk '{print $1}')"
-          printf 'expected=%s\nactual=%s\n' "$expected" "$actual" | tee /tmp/runtime-lock-digest.txt
+          reviewed="$(awk '{print $1}' requirements-runtime.lock.sha256)"
+          committed="$(sha256sum requirements-runtime.lock | awk '{print $1}')"
+          candidate="$(sha256sum /tmp/requirements-runtime.lock | awk '{print $1}')"
+          test -n "$reviewed"
+          test "$committed" = "$reviewed"
+          printf 'reviewed=%s\ncommitted=%s\ncandidate=%s\n' "$reviewed" "$committed" "$candidate" | tee /tmp/runtime-lock-digest.txt
 
       - name: Audit generated lock before repinning
         run: >-
@@ -67,8 +76,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: dependency-drift-review
+          name: dependency-drift-review-${{ github.sha }}
           path: |
+            platform/apps/api/requirements-runtime.lock
             /tmp/requirements-runtime.lock
             /tmp/runtime-lock-digest.txt
             /tmp/dependency-audit
