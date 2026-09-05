@@ -76,7 +76,7 @@ class ProductValidationScorerTests(unittest.TestCase):
         rows = []
         for i in range(30):
             evaluator = (i % 10) + 1
-            task = (i % 10) + 1
+            task = ((i % 10) + (i // 10)) % 10 + 1
             mode = "retrieval_only" if i < 15 else "generated_answer"
             rows.append(row(evaluator, task, mode=mode, success=1))
         path = self.write_rows(rows)
