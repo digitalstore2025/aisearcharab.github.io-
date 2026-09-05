@@ -53,6 +53,24 @@ Every decision must classify claims as one of:
 6. At least one reachable buyer or user segment has credible willingness to pay.
 7. The product remains valuable even when generated answers are disabled; retrieval/evidence must carry independent value.
 
+## Measurement validity gate
+
+The benchmark instrument must be valid before its outputs can drive product decisions.
+
+The automated scorer must return `INSUFFICIENT_EVIDENCE` unless the collected scorecard contains at least:
+
+- 30 evaluated comparisons;
+- 10 unique evaluators;
+- 10 unique tasks.
+
+These are pilot minimums, not claims of statistical sufficiency for every inference.
+
+Preference and task-success rates must be reported with descriptive 95% confidence intervals. Repeated tasks from the same evaluator create clustered observations, so simple binomial confidence intervals must not be described as a complete inferential model.
+
+The collection schema must record whether AISearchArab was evaluated in `retrieval_only` or `generated_answer` mode. Retrieval success, zero-result behavior, citation accuracy, citation completeness, and groundedness must be recorded separately when applicable. This prevents generated prose from masking a weak evidence layer.
+
+Thresholds are frozen before viewing outcomes. A disappointing result is not grounds to redefine the metric post hoc.
+
 ## Validation Experiment A — Blind Competitive Benchmark
 
 ### Hypothesis
@@ -63,7 +81,8 @@ For a defined Arabic AI research job, target users will prefer AISearchArab over
 
 - 20 target users.
 - 3–5 real tasks per user.
-- Minimum 60 evaluated task comparisons.
+- Minimum 60 evaluated task comparisons for the primary cycle.
+- The 30-comparison / 10-evaluator / 10-task rule is only the minimum measurement-pilot floor.
 
 ### Competitor set
 
@@ -80,21 +99,30 @@ When feasible, evaluators should not see product names while scoring outputs.
 
 - Blind Preference Rate.
 - Task Success Rate.
+- Retrieval Success Rate.
+- Zero-result Rate.
 - Citation Usefulness, 1–5.
+- Citation Accuracy.
+- Citation Completeness.
+- Groundedness.
 - Trust, 1–5.
 - Completion time.
 - Return intent.
 - Qualitative reason for preference.
+- Participant-supplied query share.
 
 ### Proposed decision thresholds
 
 These are initial operating thresholds, not scientific constants.
 
-- `PROCEED`: AISearchArab preference >= 60% and task success >= 80%.
+- `PROCEED`: AISearchArab preference >= 60% and task success >= 80%, after the measurement-validity gate is satisfied.
 - `MODIFY/NARROW`: preference 40–59% or task success 60–79%.
 - `PIVOT`: preference < 40% after one focused remediation cycle.
+- `INSUFFICIENT_EVIDENCE`: minimum comparison/evaluator/task coverage is not met.
 
-No feature should be built merely to influence the benchmark unless the failure analysis shows that feature directly addresses the failed job.
+Confidence intervals are reported alongside point estimates. If an interval materially overlaps a decision boundary, the review must record the uncertainty rather than presenting the threshold result as settled.
+
+No feature should be built merely to influence the benchmark unless failure analysis shows that feature directly addresses the failed job.
 
 ## Validation Experiment B — Arabic Retrieval & Citation Stress Test
 
@@ -180,13 +208,15 @@ The validation must distinguish two products:
 1. `Retrieval/Evidence Product`: search, corpus, entities, provenance, citations.
 2. `Generated Answer Layer`: model-synthesized response over reviewed evidence.
 
-Every study should record whether the generated answer improved the outcome over retrieval/evidence alone.
+Every study should record the AIS mode and whether generated synthesis improved the outcome over retrieval/evidence alone.
 
 Key test:
 
 > If generated answers are disabled, is AISearchArab still worth using?
 
 A strong `yes` is evidence that product value lives in owned information architecture rather than only in a model wrapper.
+
+A generated-answer win must not overwrite retrieval diagnostics. If generated answers score well while retrieval success, citation accuracy, or groundedness are weak, the review must classify the underlying evidence layer as a separate failure mode.
 
 ## False-progress controls
 
@@ -225,10 +255,10 @@ The next high-value evidence is not a new feature. It is a small blind benchmark
 
 Minimum first batch:
 
-- 10 users if 20 cannot be recruited immediately;
-- 3 tasks per user;
-- 30 comparisons;
-- record preference, task success, citation usefulness, trust, completion time, and reason.
+- 10 users;
+- at least 10 distinct tasks overall;
+- at least 30 comparisons;
+- record preference, task success, retrieval success, zero-result behavior, citations, groundedness, trust, completion time, mode, query source, and reason.
 
 Treat this as a pilot of the measurement system. Do not claim product-market fit from the first batch.
 
@@ -241,5 +271,6 @@ Every validation review ends with exactly one primary decision:
 - `NARROW`
 - `PIVOT`
 - `STOP`
+- `INSUFFICIENT_EVIDENCE`
 
 And must state the cheapest next assumption to test.
