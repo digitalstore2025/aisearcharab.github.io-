@@ -14,7 +14,9 @@ def test_arabic_normalization_is_conservative() -> None:
 def test_arabic_normalization_removes_invisible_format_controls() -> None:
     assert normalize_text("الذ\u200bكاء") == "الذكاء"
     assert normalize_text("\u2067إستخدام\u2069") == "استخدام"
+    assert normalize_text("\u061cالذكاء") == "الذكاء"
     assert tokenize("Open\u202eAI API") == ("openai", "api")
+    assert tokenize("Open\ufeffAI API") == ("openai", "api")
 
 
 def test_tokenizer_preserves_technical_tokens() -> None:
