@@ -8,7 +8,7 @@ on:
       - ".github/workflows/codeql.yml"
       - ".github/dependabot.yml"
   push:
-    branches: ["main"]
+    branches: ["main", "feat/nextjs-web-foundation"]
     paths:
       - "platform/apps/web/**"
       - "platform/apps/api/src/aisearcharab_api/**"
