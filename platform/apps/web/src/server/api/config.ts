@@ -27,5 +27,6 @@ export function getApiBaseUrl(): string | null {
 
 export function getPublicSiteOrigin(): string {
   const raw = process.env.AISEARCH_PUBLIC_SITE_ORIGIN?.trim() || 'https://aisearcharab.com';
-  return validateOrigin(raw, 'AISEARCH_PUBLIC_SITE_ORIGIN', true);
+  const allowLocalHttp = process.env.NODE_ENV !== 'production';
+  return validateOrigin(raw, 'AISEARCH_PUBLIC_SITE_ORIGIN', allowLocalHttp);
 }
