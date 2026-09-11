@@ -79,6 +79,7 @@ for marker in [
     'pnpm audit --audit-level moderate',
     'permissions:\n  contents: read',
     'platform/apps/api/src/aisearcharab_api/**',
+    '.github/workflows/codeql.yml',
     '.github/dependabot.yml',
     'branches: ["main"]',
 ]:
@@ -88,6 +89,18 @@ for marker in [
 dependabot = (REPO / '.github/dependabot.yml').read_text()
 if 'package-ecosystem: "npm"' not in dependabot or 'directory: "/platform/apps/web"' not in dependabot:
     fail('Dependabot coverage for the web pnpm workspace is missing')
+
+codeql = (REPO / '.github/workflows/codeql.yml').read_text()
+for marker in [
+    'github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63',
+    'github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63',
+    'language: ["javascript-typescript", "python"]',
+    'queries: security-extended',
+    'security-events: write',
+    'persist-credentials: false',
+]:
+    if marker not in codeql:
+        fail(f'CodeQL security-analysis marker changed or disappeared: {marker}')
 
 routes_auth = (API / 'routes_auth.py').read_text()
 auth_core = (API / 'auth.py').read_text()
@@ -116,4 +129,4 @@ for name, markers in required_markers.items():
         if marker not in source:
             fail(f'backend auth invariant changed or disappeared: {name}:{marker}')
 
-print('RELEASE GATE AUDIT OK: search, browser, CI triggers/supply-chain, backend auth, and noindex invariants remain enforced.')
+print('RELEASE GATE AUDIT OK: search, browser, CI triggers/supply-chain, CodeQL, backend auth, and noindex invariants remain enforced.')
