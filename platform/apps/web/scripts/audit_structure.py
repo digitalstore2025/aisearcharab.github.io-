@@ -3,10 +3,10 @@ from __future__ import annotations
 import json,re
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
-REQUIRED=['package.json','tsconfig.json','next.config.ts','eslint.config.mjs','ARCHITECTURE.md','DESIGN_SYSTEM.md','DATA_BOUNDARY.md','pnpm-lock.yaml','pnpm-workspace.yaml','.env.example','public/brand-mark.svg','src/app/layout.tsx','src/app/page.tsx','src/app/api/health/route.ts','src/components/navigation/nav-links.tsx','src/server/api/search.ts','src/lib/contracts/search.ts']
+REQUIRED=['package.json','tsconfig.json','next.config.ts','eslint.config.mjs','ARCHITECTURE.md','DESIGN_SYSTEM.md','DATA_BOUNDARY.md','SECURITY_GATES.md','pnpm-lock.yaml','pnpm-workspace.yaml','.env.example','public/brand-mark.svg','src/app/layout.tsx','src/app/page.tsx','src/app/robots.ts','src/app/not-found.tsx','src/app/(workspace)/error.tsx','src/app/api/health/route.ts','src/components/navigation/nav-links.tsx','src/server/api/search.ts','src/lib/contracts/search.ts']
 SECRET_PATTERNS=[re.compile(r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----'),re.compile(r'(?i)(?:api[_-]?key|secret|token|password)\s*[:=]\s*["\'][^"\']{12,}["\']')]
 CLIENT_FORBIDDEN_PATTERNS=[re.compile(r"(?:from\s+|import\s*)['\"]@/server(?:/|['\"])") ,re.compile(r"import\s+['\"]server-only['\"]"),re.compile(r"\bprocess\.env\b")]
-EXPECTED_CLIENT_MODULES={'src/components/navigation/nav-links.tsx'}
+EXPECTED_CLIENT_MODULES={'src/components/navigation/nav-links.tsx','src/app/(workspace)/error.tsx'}
 def fail(message:str)->None: raise SystemExit(f'AUDIT FAILED: {message}')
 def is_client_module(text:str)->bool:
     meaningful=[line.strip() for line in text.splitlines() if line.strip()][:5]

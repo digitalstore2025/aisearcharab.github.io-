@@ -36,6 +36,8 @@ jobs:
         run: python3 scripts/audit_design.py
       - name: Python FastAPI contract drift audit
         run: python3 scripts/audit_api_contract.py
+      - name: Python release/security gates audit
+        run: python3 scripts/audit_release_gates.py
       - name: Lint
         run: pnpm lint
       - name: Typecheck

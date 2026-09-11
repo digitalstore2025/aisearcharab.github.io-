@@ -1,6 +1,6 @@
 {
   "name":"@aisearcharab/web","version":"0.1.0","private":true,"packageManager":"pnpm@12.3.4","engines":{"node":">=20.9.0"},
-  "scripts":{"dev":"next dev","build":"next build","start":"next start","lint":"eslint . --max-warnings=0","typecheck":"tsc --noEmit","test":"vitest run","audit:structure":"python3 scripts/audit_structure.py","audit:design":"python3 scripts/audit_design.py","audit:api-contract":"python3 scripts/audit_api_contract.py"},
+  "scripts":{"dev":"next dev","build":"next build","start":"next start","lint":"eslint . --max-warnings=0","typecheck":"tsc --noEmit","test":"vitest run","audit:structure":"python3 scripts/audit_structure.py","audit:design":"python3 scripts/audit_design.py","audit:api-contract":"python3 scripts/audit_api_contract.py","audit:release-gates":"python3 scripts/audit_release_gates.py"},
   "dependencies":{"next":"16.3.4","react":"19.2.8","react-dom":"19.2.8"},
   "devDependencies":{"@types/node":"^22.0.0","@types/react":"^19.0.0","@types/react-dom":"^19.0.0","eslint":"^9.0.0","eslint-config-next":"16.3.4","typescript":"^5.9.0","vitest":"^3.2.0"}
 }
