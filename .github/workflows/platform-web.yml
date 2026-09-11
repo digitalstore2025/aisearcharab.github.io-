@@ -1,10 +1,18 @@
 name: Platform Web
 on:
   pull_request:
-    paths: ["platform/apps/web/**", ".github/workflows/platform-web.yml"]
+    paths:
+      - "platform/apps/web/**"
+      - "platform/apps/api/src/aisearcharab_api/**"
+      - ".github/workflows/platform-web.yml"
+      - ".github/dependabot.yml"
   push:
-    branches: ["feat/nextjs-web-foundation"]
-    paths: ["platform/apps/web/**", ".github/workflows/platform-web.yml"]
+    branches: ["main", "feat/nextjs-web-foundation"]
+    paths:
+      - "platform/apps/web/**"
+      - "platform/apps/api/src/aisearcharab_api/**"
+      - ".github/workflows/platform-web.yml"
+      - ".github/dependabot.yml"
   workflow_dispatch:
 permissions:
   contents: read
