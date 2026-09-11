@@ -97,4 +97,10 @@ describe('search security boundary', () => {
     expect(() => publicContentUrl('/\\evil.example')).toThrow();
     expect(publicContentUrl('/reports/gaza/')).toBe('https://aisearcharab.com/reports/gaza/');
   });
+
+  it('rejects an HTTP public origin in production', () => {
+    process.env.NODE_ENV = 'production';
+    process.env.AISEARCH_PUBLIC_SITE_ORIGIN = 'http://127.0.0.1:3000';
+    expect(() => publicContentUrl('/reports/gaza/')).toThrow('AISEARCH_PUBLIC_SITE_ORIGIN must use HTTPS');
+  });
 });
