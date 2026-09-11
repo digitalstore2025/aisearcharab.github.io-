@@ -85,7 +85,7 @@ for marker in [
     'platform/apps/api/src/aisearcharab_api/**',
     '.github/workflows/codeql.yml',
     '.github/dependabot.yml',
-    'branches: ["main"]',
+    'branches: ["main", "feat/nextjs-web-foundation"]',
     'name: CodeQL (${{ matrix.language }})',
     'language: ["javascript-typescript", "python"]',
     'security-events: write',
