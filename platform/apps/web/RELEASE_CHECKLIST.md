@@ -6,21 +6,23 @@ Use this checklist for every promotion of the hardened Next.js foundation. A che
 
 - [ ] PR is not marked ready while any required check is failing or pending.
 - [ ] No unresolved Critical/High security finding exists in the tested code scope.
+- [ ] CI proves the supported Node 24 LTS runtime and exact reviewed 24.21.0 baseline.
 - [ ] `pnpm install --frozen-lockfile` succeeds.
 - [ ] `pnpm audit --audit-level moderate` reports no blocking advisory.
+- [ ] Runtime and full-build CycloneDX SBOMs are generated from the installed pnpm graph, JSON-validated, and retained as the `web-cyclonedx-sbom` artifact.
 - [ ] Python structure/secret/boundary audit passes.
 - [ ] Python design/WCAG audit passes.
 - [ ] Python FastAPI contract-drift audit passes.
 - [ ] Python release/security gate audit passes.
 - [ ] ESLint passes with zero warnings.
 - [ ] TypeScript strict typecheck passes.
-- [ ] Vitest suite passes.
+- [ ] Vitest suite passes on the patched 4.1.11 baseline.
 - [ ] Next.js production build passes.
 - [ ] Chromium Playwright E2E passes.
 - [ ] FastAPI tests and security regression tests pass.
 - [ ] Database migration/rollback/re-upgrade/schema-drift checks pass.
-- [ ] CodeQL JavaScript/TypeScript analysis passes release policy.
-- [ ] CodeQL Python analysis passes release policy.
+- [ ] Branch-enforced CodeQL JavaScript/TypeScript analysis passes release policy.
+- [ ] Branch-enforced CodeQL Python analysis passes release policy.
 - [ ] Any fixed security issue has a regression test/audit rule.
 
 ## B. Repository governance gate
@@ -32,7 +34,7 @@ Before merge to `main`:
 - [ ] Pull request review is required.
 - [ ] CODEOWNER review is required for `.github/**` and `platform/**`.
 - [ ] Stale approvals are dismissed after new commits.
-- [ ] Required status checks include web, API, security, governance and CodeQL gates.
+- [ ] Required status checks include web verify, both CodeQL jobs, API, security, governance, site and search-evidence gates.
 - [ ] Conversation resolution is required.
 - [ ] Qualifying code-scanning alerts block merge.
 
@@ -40,6 +42,7 @@ Tracked by Issue #97.
 
 ## C. Production configuration gate
 
+- [ ] Production runtime uses the supported Node 24.x line; no Node 20/EOL deployment remains.
 - [ ] Public origin is the approved HTTPS canonical origin.
 - [ ] Secrets come from the deployment secret manager; none are embedded in build artifacts.
 - [ ] Search flag remains `false` unless Section D is fully evidenced.
@@ -122,8 +125,9 @@ Rollback or disable the affected feature if any of these occur:
 Record in the release/PR:
 
 - commit SHA;
-- CI workflow run IDs;
-- CodeQL result references;
+- Platform Web verify and both CodeQL check/run references;
+- runtime and build SBOM artifact reference;
+- repository-wide security/API workflow run IDs;
 - reviewer/security-owner approval;
 - deployment identifier;
 - feature flags enabled/disabled;
