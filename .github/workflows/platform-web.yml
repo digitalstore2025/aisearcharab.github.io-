@@ -47,6 +47,9 @@ jobs:
       - name: Python structural and secret audit
         run: python3 scripts/audit_structure.py
 
+      - name: Python design and contrast audit
+        run: python3 scripts/audit_design.py
+
       - name: Lint
         run: pnpm lint
 

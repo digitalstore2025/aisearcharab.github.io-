@@ -11,7 +11,8 @@
     "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "audit:structure": "python3 scripts/audit_structure.py"
+    "audit:structure": "python3 scripts/audit_structure.py",
+    "audit:design": "python3 scripts/audit_design.py"
   },
   "dependencies": {
     "next": "16.3.4",
