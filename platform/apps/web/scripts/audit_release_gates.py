@@ -76,11 +76,11 @@ for marker in [
     'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020',
     'persist-credentials: false',
     'pnpm install --frozen-lockfile',
-    'pnpm audit --audit-level high',
+    'pnpm audit --audit-level moderate',
     'permissions:\n  contents: read',
     'platform/apps/api/src/aisearcharab_api/**',
     '.github/dependabot.yml',
-    'branches: ["main", "feat/nextjs-web-foundation"]',
+    'branches: ["main"]',
 ]:
     if marker not in workflow:
         fail(f'CI supply-chain/enforcement marker changed or disappeared: {marker}')
