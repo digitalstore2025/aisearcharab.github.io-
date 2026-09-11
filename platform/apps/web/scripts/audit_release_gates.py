@@ -76,11 +76,15 @@ workflow = (REPO / '.github/workflows/platform-web.yml').read_text()
 for marker in [
     'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
     'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020',
+    'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
     'node-version: "24.21.0"',
     "if(!v.startsWith('24.'))",
     'persist-credentials: false',
     'pnpm install --frozen-lockfile',
     'pnpm audit --audit-level moderate',
+    'pnpm list --prod --json --depth Infinity',
+    'scripts/generate_cyclonedx_sbom.py',
+    'web-cyclonedx-sbom',
     'permissions:\n  contents: read',
     'platform/apps/api/src/aisearcharab_api/**',
     '.github/workflows/codeql.yml',
@@ -141,4 +145,4 @@ for name, markers in required_markers.items():
         if marker not in source:
             fail(f'backend auth invariant changed or disappeared: {name}:{marker}')
 
-print('RELEASE GATE AUDIT OK: search, browser, CSP, supported Node runtime, CI triggers/supply-chain, PR CodeQL, scheduled CodeQL, backend auth, and noindex invariants remain enforced.')
+print('RELEASE GATE AUDIT OK: search, browser, CSP, supported Node runtime, SBOM evidence, CI triggers/supply-chain, PR CodeQL, scheduled CodeQL, backend auth, and noindex invariants remain enforced.')
