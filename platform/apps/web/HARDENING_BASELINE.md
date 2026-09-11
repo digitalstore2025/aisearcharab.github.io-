@@ -16,6 +16,7 @@ Never claim the system is universally vulnerability-free.
 
 - Next.js 16.3.4 App Router web application.
 - React 19.2.8 and TypeScript strict mode.
+- Node.js 24 LTS runtime; CI/local baseline 24.21.0, with the package engine restricted to the supported 24.x line.
 - Server-side FastAPI search client and response contract.
 - FastAPI local content-path validation contract.
 - Browser security headers and pre-launch indexing controls.
@@ -129,9 +130,12 @@ FastAPI remains the authority. Required invariants include HttpOnly session cook
 
 The web release gate rejects shadow auth/session routes and Server Actions until the auth integration gate is deliberately changed in a reviewed PR.
 
-### Supply chain
+### Runtime and supply chain
 
 Controls:
+- Node 20/EOL runtime is prohibited; web runtime is restricted to supported Node 24 LTS and CI pins 24.21.0;
+- `.node-version` gives local tooling the same runtime baseline;
+- `@types/node` is pinned to the Node 24 type line;
 - frozen pnpm lockfile;
 - direct framework/test baselines reviewed and policy checked;
 - pnpm lifecycle build allowlist limited to reviewed packages;
@@ -139,7 +143,8 @@ Controls:
 - Dependabot for web npm/pnpm dependencies;
 - GitHub Actions pinned to commit SHAs;
 - checkout credentials are not persisted in permanent verification workflows;
-- CodeQL `security-extended` for JavaScript/TypeScript and Python.
+- CodeQL `security-extended` runs inside the PR-enforced Platform Web workflow for JavaScript/TypeScript and Python;
+- a separate CodeQL workflow remains for scheduled/default-branch rescans after merge.
 
 ## Findings resolved by the hardening pass
 
@@ -154,7 +159,9 @@ Controls:
 | Medium | search pagination could prefetch query-bearing pages | `prefetch={false}` |
 | Medium | vulnerable Vitest 3.x / mocker advisory | pinned patched Vitest 4.1.11 + regenerated lockfile |
 | Medium | dependency audit ignored Moderate advisories | CI threshold raised to Moderate |
+| Medium | package engine allowed Node 20 after its 2026 EOL | restricted runtime to Node 24 LTS; CI/local baseline pinned to 24.21.0 |
 | Low/Medium | older GitHub Action runtimes | checkout/setup-node upgraded and SHA pinned |
+| Medium | standalone CodeQL workflow was not evidenced on the PR head | CodeQL matrix moved into the already-enforced Platform Web PR workflow; scheduled/default-branch workflow retained |
 
 ## External evidence gates
 
@@ -175,6 +182,7 @@ Code cannot prove these controls. They remain blockers for production promotion:
 
 A release candidate is complete only when:
 
+- supported Node 24 LTS runtime is proven by CI;
 - frozen install succeeds;
 - `pnpm audit --audit-level moderate` reports no blocking advisories;
 - all Python policy audits pass;
@@ -184,7 +192,7 @@ A release candidate is complete only when:
 - Chromium E2E passes;
 - FastAPI tests/migrations/schema checks pass;
 - security regression workflow passes;
-- CodeQL jobs complete with no merge-blocking finding;
+- PR CodeQL JavaScript/TypeScript and Python jobs complete with no merge-blocking finding;
 - required GitHub branch/ruleset controls are proven;
 - all production feature gates remain off unless their external acceptance evidence exists.
 
