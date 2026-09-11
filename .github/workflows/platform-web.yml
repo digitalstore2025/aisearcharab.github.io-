@@ -7,7 +7,7 @@ on:
       - ".github/workflows/platform-web.yml"
       - ".github/dependabot.yml"
   push:
-    branches: ["main", "feat/nextjs-web-foundation"]
+    branches: ["main"]
     paths:
       - "platform/apps/web/**"
       - "platform/apps/api/src/aisearcharab_api/**"
@@ -46,7 +46,7 @@ jobs:
       - name: Install reviewed dependency graph
         run: pnpm install --frozen-lockfile
       - name: Audit dependency vulnerabilities
-        run: pnpm audit --audit-level high
+        run: pnpm audit --audit-level moderate
       - name: Python structural and secret audit
         run: python3 scripts/audit_structure.py
       - name: Python design and contrast audit
