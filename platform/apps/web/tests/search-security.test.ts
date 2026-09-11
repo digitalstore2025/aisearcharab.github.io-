@@ -34,6 +34,24 @@ describe('search security boundary', () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['', 0],
+    ['x', 0],
+    ['x'.repeat(121), 0],
+    ['غزة', -10],
+    ['غزة', 1],
+    ['غزة', 300],
+    ['غزة', Number.NaN],
+  ])('rejects invalid direct calls before any network request: %j / %j', async (query, offset) => {
+    process.env.AISEARCH_SEARCH_ENABLED = 'true';
+    process.env.AISEARCH_API_BASE_URL = 'https://api.example.com';
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(searchContent(query, offset)).rejects.toBeInstanceOf(SearchUnavailableError);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it('uses a fixed-origin GET, refuses redirects, and accepts a bounded JSON response', async () => {
     process.env.AISEARCH_SEARCH_ENABLED = 'true';
     process.env.AISEARCH_API_BASE_URL = 'https://api.example.com';
