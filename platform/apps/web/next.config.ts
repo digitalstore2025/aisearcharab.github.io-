@@ -4,6 +4,7 @@ const isDevelopment = process.env.NODE_ENV === 'development';
 const contentSecurityPolicy = [
   "default-src 'self'",
   `script-src 'self' 'unsafe-inline'${isDevelopment ? " 'unsafe-eval'" : ''}`,
+  "script-src-attr 'none'",
   "style-src 'self' 'unsafe-inline'",
   "img-src 'self' data: blob:",
   "font-src 'self'",
@@ -15,6 +16,7 @@ const contentSecurityPolicy = [
   "frame-src 'none'",
   "media-src 'none'",
   "worker-src 'self' blob:",
+  ...(isDevelopment ? [] : ['upgrade-insecure-requests']),
 ].join('; ');
 
 const securityHeaders = [
