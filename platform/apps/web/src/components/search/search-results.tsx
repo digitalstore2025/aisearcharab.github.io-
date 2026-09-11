@@ -56,9 +56,9 @@ export async function SearchResults({ request }: { request: SearchRequest }) {
       )}
       {totalPages > 1 ? (
         <nav className="pagination" aria-label="صفحات نتائج البحث">
-          {request.page > 1 ? <Link href={pageUrl(request.query, request.page - 1)}>السابق</Link> : <span aria-disabled="true">السابق</span>}
+          {request.page > 1 ? <Link prefetch={false} href={pageUrl(request.query, request.page - 1)}>السابق</Link> : <span aria-disabled="true">السابق</span>}
           <strong>صفحة {request.page} من {totalPages}</strong>
-          {request.page < totalPages ? <Link href={pageUrl(request.query, request.page + 1)}>التالي</Link> : <span aria-disabled="true">التالي</span>}
+          {request.page < totalPages ? <Link prefetch={false} href={pageUrl(request.query, request.page + 1)}>التالي</Link> : <span aria-disabled="true">التالي</span>}
         </nav>
       ) : null}
     </div>
