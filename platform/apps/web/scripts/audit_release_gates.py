@@ -78,9 +78,12 @@ for marker in [
     'pnpm install --frozen-lockfile',
     'pnpm audit --audit-level high',
     'permissions:\n  contents: read',
+    'platform/apps/api/src/aisearcharab_api/**',
+    '.github/dependabot.yml',
+    'branches: ["main", "feat/nextjs-web-foundation"]',
 ]:
     if marker not in workflow:
-        fail(f'CI supply-chain hardening marker changed or disappeared: {marker}')
+        fail(f'CI supply-chain/enforcement marker changed or disappeared: {marker}')
 
 dependabot = (REPO / '.github/dependabot.yml').read_text()
 if 'package-ecosystem: "npm"' not in dependabot or 'directory: "/platform/apps/web"' not in dependabot:
@@ -113,4 +116,4 @@ for name, markers in required_markers.items():
         if marker not in source:
             fail(f'backend auth invariant changed or disappeared: {name}:{marker}')
 
-print('RELEASE GATE AUDIT OK: search, browser, CI supply-chain, backend auth, and noindex invariants remain enforced.')
+print('RELEASE GATE AUDIT OK: search, browser, CI triggers/supply-chain, backend auth, and noindex invariants remain enforced.')
