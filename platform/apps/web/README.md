@@ -12,7 +12,7 @@ This baseline includes server-rendered workspace routes and a fail-closed, expli
 corepack enable
 corepack prepare pnpm@12.3.4 --activate
 pnpm install --frozen-lockfile
-pnpm audit --audit-level high
+pnpm audit --audit-level moderate
 pnpm audit:structure
 pnpm audit:design
 pnpm audit:api-contract
@@ -40,4 +40,4 @@ Production enablement additionally requires the WAF/rate-limit and query-log-red
 
 ## Dependency policy
 
-Framework and browser-test baselines are pinned and the complete dependency graph is committed in `pnpm-lock.yaml`. CI installs only with `--frozen-lockfile`, runs a high/critical advisory audit, and blocks unreviewed dependency lifecycle scripts through the pnpm build allowlist.
+Framework and browser-test baselines are pinned and the complete dependency graph is committed in `pnpm-lock.yaml`. CI installs only with `--frozen-lockfile`, blocks known moderate/high/critical dependency advisories, and blocks unreviewed dependency lifecycle scripts through the pnpm build allowlist. Dependabot covers this pnpm workspace weekly.
