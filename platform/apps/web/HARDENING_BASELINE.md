@@ -21,7 +21,7 @@ Never claim the system is universally vulnerability-free.
 - FastAPI local content-path validation contract.
 - Browser security headers and pre-launch indexing controls.
 - pnpm dependency graph and lifecycle-script policy.
-- GitHub Actions verification, Dependabot and CodeQL configuration.
+- GitHub Actions verification, Dependabot, CycloneDX evidence and CodeQL configuration.
 - Unit, contract, Python policy and Playwright browser tests.
 
 ## Explicitly out of scope / closed gates
@@ -136,15 +136,18 @@ Controls:
 - Node 20/EOL runtime is prohibited; web runtime is restricted to supported Node 24 LTS and CI pins 24.21.0;
 - `.node-version` gives local tooling the same runtime baseline;
 - `@types/node` is pinned to the Node 24 type line;
-- frozen pnpm lockfile;
+- frozen pnpm lockfile and reviewed dependency markers;
 - direct framework/test baselines reviewed and policy checked;
 - pnpm lifecycle build allowlist limited to reviewed packages;
 - Moderate-and-above advisory audit in CI;
 - Dependabot for web npm/pnpm dependencies;
 - GitHub Actions pinned to commit SHAs;
 - checkout credentials are not persisted in permanent verification workflows;
-- CodeQL `security-extended` runs inside the PR-enforced Platform Web workflow for JavaScript/TypeScript and Python;
-- a separate CodeQL workflow remains for scheduled/default-branch rescans after merge.
+- CodeQL `security-extended` runs inside the branch-enforced Platform Web workflow for JavaScript/TypeScript and Python;
+- a separate CodeQL workflow remains for scheduled/default-branch rescans after merge;
+- CI generates both runtime and full-build CycloneDX 1.5 SBOMs from the actually installed pnpm graph and retains them as evidence artifacts.
+
+pnpm 12 uses a multi-document lockfile when its package-manager environment is locked. That format is accepted by pnpm but may be incompletely consumed by some single-document ecosystem tools. The SBOM artifacts and blocking `pnpm audit` are therefore explicit compensating controls rather than assuming GitHub's dependency graph is complete.
 
 ## Findings resolved by the hardening pass
 
@@ -160,8 +163,9 @@ Controls:
 | Medium | vulnerable Vitest 3.x / mocker advisory | pinned patched Vitest 4.1.11 + regenerated lockfile |
 | Medium | dependency audit ignored Moderate advisories | CI threshold raised to Moderate |
 | Medium | package engine allowed Node 20 after its 2026 EOL | restricted runtime to Node 24 LTS; CI/local baseline pinned to 24.21.0 |
+| Medium | pnpm multi-document lockfile can reduce visibility for single-document dependency consumers | runtime/build CycloneDX SBOM generated from installed graph + blocking pnpm audit retained |
 | Low/Medium | older GitHub Action runtimes | checkout/setup-node upgraded and SHA pinned |
-| Medium | standalone CodeQL workflow was not evidenced on the PR head | CodeQL matrix moved into the already-enforced Platform Web PR workflow; scheduled/default-branch workflow retained |
+| Medium | standalone CodeQL workflow was not evidenced on the PR head | CodeQL matrix moved into the branch-enforced Platform Web workflow; scheduled/default-branch workflow retained |
 
 ## External evidence gates
 
@@ -185,6 +189,7 @@ A release candidate is complete only when:
 - supported Node 24 LTS runtime is proven by CI;
 - frozen install succeeds;
 - `pnpm audit --audit-level moderate` reports no blocking advisories;
+- runtime and build CycloneDX SBOMs are generated, JSON-validated and retained as CI evidence;
 - all Python policy audits pass;
 - lint and TypeScript strict checks pass;
 - all unit/contract tests pass;
@@ -192,7 +197,7 @@ A release candidate is complete only when:
 - Chromium E2E passes;
 - FastAPI tests/migrations/schema checks pass;
 - security regression workflow passes;
-- PR CodeQL JavaScript/TypeScript and Python jobs complete with no merge-blocking finding;
+- branch CodeQL JavaScript/TypeScript and Python jobs complete with no merge-blocking finding;
 - required GitHub branch/ruleset controls are proven;
 - all production feature gates remain off unless their external acceptance evidence exists.
 
@@ -213,5 +218,6 @@ Rollback must be configuration-first where possible:
 - Any Moderate-or-higher dependency advisory without documented, time-bounded exception approved by a security owner.
 - Any unresolved Critical/High code-scanning finding.
 - Missing branch protection/ruleset evidence for `main`.
+- Missing required SBOM evidence artifact for the release candidate.
 - Search/Auth/Mutation/AI feature enabled without its documented security gate.
 - Any secret, credential or token detected in repository content.
