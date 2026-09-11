@@ -84,6 +84,12 @@ for marker in [
     '.github/workflows/codeql.yml',
     '.github/dependabot.yml',
     'branches: ["main"]',
+    'name: CodeQL (${{ matrix.language }})',
+    'language: ["javascript-typescript", "python"]',
+    'security-events: write',
+    'github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63',
+    'github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63',
+    'queries: security-extended',
 ]:
     if marker not in workflow:
         fail(f'CI supply-chain/enforcement marker changed or disappeared: {marker}')
@@ -92,6 +98,8 @@ dependabot = (REPO / '.github/dependabot.yml').read_text()
 if 'package-ecosystem: "npm"' not in dependabot or 'directory: "/platform/apps/web"' not in dependabot:
     fail('Dependabot coverage for the web pnpm workspace is missing')
 
+# Keep the separate workflow for scheduled/default-branch rescans, while PR analysis
+# is also enforced inside Platform Web so the PR cannot silently miss SAST.
 codeql = (REPO / '.github/workflows/codeql.yml').read_text()
 for marker in [
     'github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63',
@@ -102,7 +110,7 @@ for marker in [
     'persist-credentials: false',
 ]:
     if marker not in codeql:
-        fail(f'CodeQL security-analysis marker changed or disappeared: {marker}')
+        fail(f'CodeQL scheduled/default-branch security marker changed or disappeared: {marker}')
 
 routes_auth = (API / 'routes_auth.py').read_text()
 auth_core = (API / 'auth.py').read_text()
@@ -131,4 +139,4 @@ for name, markers in required_markers.items():
         if marker not in source:
             fail(f'backend auth invariant changed or disappeared: {name}:{marker}')
 
-print('RELEASE GATE AUDIT OK: search, browser, CSP, CI triggers/supply-chain, CodeQL, backend auth, and noindex invariants remain enforced.')
+print('RELEASE GATE AUDIT OK: search, browser, CSP, CI triggers/supply-chain, PR CodeQL, scheduled CodeQL, backend auth, and noindex invariants remain enforced.')
