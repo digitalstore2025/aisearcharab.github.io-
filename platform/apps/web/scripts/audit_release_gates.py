@@ -47,6 +47,8 @@ for marker in [
     "object-src 'none'",
     "frame-ancestors 'none'",
     "form-action 'self'",
+    "script-src-attr 'none'",
+    'upgrade-insecure-requests',
     "Referrer-Policy', value: 'no-referrer'",
     "X-Robots-Tag', value: 'noindex, nofollow, noarchive'",
     'images: { unoptimized: true }',
@@ -129,4 +131,4 @@ for name, markers in required_markers.items():
         if marker not in source:
             fail(f'backend auth invariant changed or disappeared: {name}:{marker}')
 
-print('RELEASE GATE AUDIT OK: search, browser, CI triggers/supply-chain, CodeQL, backend auth, and noindex invariants remain enforced.')
+print('RELEASE GATE AUDIT OK: search, browser, CSP, CI triggers/supply-chain, CodeQL, backend auth, and noindex invariants remain enforced.')
