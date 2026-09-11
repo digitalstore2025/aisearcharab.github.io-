@@ -1,0 +1,45 @@
+name: Temporary Web Lock Refresh
+on:
+  push:
+    branches: ["feat/nextjs-web-foundation"]
+    paths:
+      - "platform/apps/web/package.json"
+      - ".github/workflows/update-web-lock.yml"
+permissions:
+  contents: write
+jobs:
+  refresh:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: feat/nextjs-web-foundation
+          fetch-depth: 1
+      - name: Setup Node 24 LTS
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.21.0"
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Prepare pnpm
+        run: corepack prepare pnpm@12.3.4 --activate
+      - name: Refresh reviewed lockfile
+        working-directory: platform/apps/web
+        run: pnpm install --lockfile-only
+      - name: Verify dependency graph
+        working-directory: platform/apps/web
+        run: pnpm audit --audit-level moderate
+      - name: Commit lockfile only
+        run: |
+          if git diff --quiet -- platform/apps/web/pnpm-lock.yaml; then
+            echo "Lockfile already current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add platform/apps/web/pnpm-lock.yaml
+          git commit -m "chore(web): refresh lockfile for Node 24 type baseline"
+          git push origin HEAD:feat/nextjs-web-foundation
