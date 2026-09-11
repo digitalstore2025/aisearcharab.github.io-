@@ -52,6 +52,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Audit dependency vulnerabilities
         run: pnpm audit --audit-level moderate
+      - name: Test CycloneDX generator
+        run: python3 scripts/test_generate_cyclonedx_sbom.py
       - name: Generate runtime and build CycloneDX SBOMs
         run: |
           set -euo pipefail
