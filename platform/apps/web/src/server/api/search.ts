@@ -1,14 +1,28 @@
 import { assertSafeLocalContentPath, parseSearchResponse, type SearchResponse } from '@/lib/contracts/search';
-import { SEARCH_PAGE_SIZE } from '@/lib/search-request';
+import { SEARCH_MAX_PAGE, SEARCH_PAGE_SIZE } from '@/lib/search-request';
 import { getApiBaseUrl, getPublicSiteOrigin } from './config';
 
 const SEARCH_TIMEOUT_MS = 4500;
 const MAX_SEARCH_RESPONSE_BYTES = 256 * 1024;
+const MAX_SEARCH_OFFSET = (SEARCH_MAX_PAGE - 1) * SEARCH_PAGE_SIZE;
 
 export class SearchUnavailableError extends Error {
   constructor() {
     super('Search service unavailable');
     this.name = 'SearchUnavailableError';
+  }
+}
+
+function assertSearchCall(query: string, offset: number): void {
+  if (
+    query.length < 2
+    || query.length > 120
+    || !Number.isSafeInteger(offset)
+    || offset < 0
+    || offset > MAX_SEARCH_OFFSET
+    || offset % SEARCH_PAGE_SIZE !== 0
+  ) {
+    throw new SearchUnavailableError();
   }
 }
 
@@ -56,6 +70,7 @@ async function readBoundedJson(response: Response): Promise<unknown> {
 }
 
 export async function searchContent(query: string, offset: number): Promise<SearchResponse> {
+  assertSearchCall(query, offset);
   const apiBase = getApiBaseUrl();
   if (!apiBase) throw new SearchUnavailableError();
 
