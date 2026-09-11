@@ -5,6 +5,7 @@ from pathlib import Path
 
 WEB = Path(__file__).resolve().parents[1]
 PLATFORM = WEB.parents[1]
+REPO = WEB.parents[2]
 API = PLATFORM / 'apps/api/src/aisearcharab_api'
 
 
@@ -36,6 +37,9 @@ if 'AISEARCH_SEARCH_ENABLED=false' not in env_example:
 robots = (WEB / 'src/app/robots.ts').read_text()
 layout = (WEB / 'src/app/layout.tsx').read_text()
 next_config = (WEB / 'next.config.ts').read_text()
+search_transport = (WEB / 'src/server/api/search.ts').read_text()
+search_config = (WEB / 'src/server/api/config.ts').read_text()
+search_results = (WEB / 'src/components/search/search-results.tsx').read_text()
 if "disallow: '/'" not in robots or 'robots: { index: false, follow: false }' not in layout:
     fail('web foundation must remain noindex until canonical deployment is approved')
 for marker in [
@@ -52,6 +56,35 @@ for marker in [
 for forbidden in ['rewrites()', 'redirects()', 'dangerouslyAllowSVG']:
     if forbidden in next_config:
         fail(f'unreviewed Next.js network/image surface enabled: {forbidden}')
+
+for marker in [
+    "redirect: 'error'",
+    'MAX_SEARCH_RESPONSE_BYTES = 256 * 1024',
+    'response.body.getReader()',
+    'assertSearchCall(query, offset)',
+]:
+    if marker not in search_transport:
+        fail(f'search transport hardening marker changed or disappeared: {marker}')
+if "process.env.NODE_ENV !== 'production'" not in search_config:
+    fail('public-site origin must require HTTPS in production')
+if search_results.count('prefetch={false}') < 2:
+    fail('search pagination must not prefetch query-bearing pages')
+
+workflow = (REPO / '.github/workflows/platform-web.yml').read_text()
+for marker in [
+    'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
+    'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020',
+    'persist-credentials: false',
+    'pnpm install --frozen-lockfile',
+    'pnpm audit --audit-level high',
+    'permissions:\n  contents: read',
+]:
+    if marker not in workflow:
+        fail(f'CI supply-chain hardening marker changed or disappeared: {marker}')
+
+dependabot = (REPO / '.github/dependabot.yml').read_text()
+if 'package-ecosystem: "npm"' not in dependabot or 'directory: "/platform/apps/web"' not in dependabot:
+    fail('Dependabot coverage for the web pnpm workspace is missing')
 
 routes_auth = (API / 'routes_auth.py').read_text()
 auth_core = (API / 'auth.py').read_text()
@@ -80,4 +113,4 @@ for name, markers in required_markers.items():
         if marker not in source:
             fail(f'backend auth invariant changed or disappeared: {name}:{marker}')
 
-print('RELEASE GATE AUDIT OK: fail-closed search, minimal API surface, hardened headers, backend auth invariants, and noindex gate remain enforced.')
+print('RELEASE GATE AUDIT OK: search, browser, CI supply-chain, backend auth, and noindex invariants remain enforced.')
