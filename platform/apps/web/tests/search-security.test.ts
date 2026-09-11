@@ -18,6 +18,7 @@ function responseFixture(query = 'غزة') {
 }
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   process.env = { ...ORIGINAL_ENV };
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -99,7 +100,7 @@ describe('search security boundary', () => {
   });
 
   it('rejects an HTTP public origin in production', () => {
-    process.env.NODE_ENV = 'production';
+    vi.stubEnv('NODE_ENV', 'production');
     process.env.AISEARCH_PUBLIC_SITE_ORIGIN = 'http://127.0.0.1:3000';
     expect(() => publicContentUrl('/reports/gaza/')).toThrow('AISEARCH_PUBLIC_SITE_ORIGIN must use HTTPS');
   });
