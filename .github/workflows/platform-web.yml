@@ -1,0 +1,68 @@
+name: Platform Web
+
+on:
+  pull_request:
+    paths:
+      - "platform/apps/web/**"
+      - ".github/workflows/platform-web.yml"
+  push:
+    branches:
+      - "feat/nextjs-web-foundation"
+    paths:
+      - "platform/apps/web/**"
+      - ".github/workflows/platform-web.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: platform-web-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: platform/apps/web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Prepare pnpm
+        run: corepack prepare pnpm@12.3.4 --activate
+
+      - name: Install dependencies and create bootstrap lock
+        run: pnpm install --no-frozen-lockfile
+
+      - name: Python structural and secret audit
+        run: python3 scripts/audit_structure.py
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Production build
+        run: pnpm build
+
+      - name: Upload bootstrap lock for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: platform-web-pnpm-lock-${{ github.sha }}
+          path: platform/apps/web/pnpm-lock.yaml
+          if-no-files-found: error
+          retention-days: 14
