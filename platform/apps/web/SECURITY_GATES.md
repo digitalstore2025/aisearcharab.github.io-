@@ -4,7 +4,7 @@
 
 No web mutation path is opened in this foundation PR. The FastAPI service already owns RBAC, CSRF, optimistic locking, step-up authentication, audit records and database transactions. Adding parallel Server Actions now would duplicate those controls and create inconsistent authorization paths.
 
-`scripts/audit_release_gates.py` therefore rejects any `use server` directive in `src/` until a mutation ADR explicitly maps each action to the backend authorization contract.
+`scripts/audit_release_gates.py` therefore rejects any `use server` directive and any App Router API route other than `/api/health` until a reviewed ADR explicitly maps the new surface to authorization, CSRF, rate-limit, logging and rollback controls.
 
 ## Authentication
 
@@ -12,7 +12,17 @@ FastAPI remains the authentication authority. It currently provides opaque serve
 
 A Next.js BFF login proxy is intentionally **not enabled in this PR**. Proxying authentication changes the apparent network source of login attempts; production enablement must first define the trusted reverse-proxy/WAF topology so backend login throttling does not collapse all users into one source or trust spoofable forwarding headers.
 
-The release audit rejects shadow `/api/auth` and `/api/session` routes until that gate is deliberately removed in a reviewed auth-integration PR.
+## Search exposure
+
+Search is fail-closed by default. Setting an upstream URL is insufficient: `AISEARCH_SEARCH_ENABLED=true` is also required. Before that flag is enabled in production, require edge/WAF rate limiting, request-log query redaction, upstream capacity evidence, and a rollback switch. Redirects are rejected and response bodies are bounded before parsing.
+
+## Browser hardening
+
+- Enforced CSP limits scripts, styles, connections and forms to the application origin and blocks objects/frames.
+- `Referrer-Policy: no-referrer` prevents URL search queries from propagating via browser referrers.
+- COOP/CORP, nosniff, frame denial and restrictive Permissions Policy are set globally.
+- The unused Next.js image optimizer is disabled for this local-static-asset foundation.
+- Global `X-Robots-Tag` plus HTML metadata and `robots.txt` keep the pre-launch surface out of indexes.
 
 ## Error handling
 
@@ -20,10 +30,6 @@ The release audit rejects shadow `/api/auth` and `/api/session` routes until tha
 - Missing routes use `not-found.tsx`.
 - Expected search transport failure is handled locally and never falls back to an external provider.
 - User-facing errors do not include upstream URLs, stack traces, credentials, or raw exception messages.
-
-## Metadata / indexing
-
-The Next.js web workspace is not yet the canonical public frontend. `robots.ts` therefore emits a global disallow. Indexing must only be enabled when deployment ownership, canonical URLs, redirects and Hugo migration are explicitly approved.
 
 ## Gate to open authentication later
 

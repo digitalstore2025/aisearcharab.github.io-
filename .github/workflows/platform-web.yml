@@ -13,13 +13,20 @@ concurrency:
   cancel-in-progress: true
 jobs:
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      CI: "true"
+      NEXT_TELEMETRY_DISABLED: "1"
     defaults:
       run:
         working-directory: platform/apps/web
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+          fetch-depth: 1
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -30,6 +37,8 @@ jobs:
         run: corepack prepare pnpm@12.3.4 --activate
       - name: Install reviewed dependency graph
         run: pnpm install --frozen-lockfile
+      - name: Audit dependency vulnerabilities
+        run: pnpm audit --audit-level high
       - name: Python structural and secret audit
         run: python3 scripts/audit_structure.py
       - name: Python design and contrast audit
@@ -45,13 +54,8 @@ jobs:
       - name: Unit tests
         run: pnpm test
       - name: Production build
-        env:
-          NEXT_TELEMETRY_DISABLED: "1"
         run: pnpm build
       - name: Install Playwright Chromium
         run: pnpm exec playwright install --with-deps chromium
       - name: Browser E2E
-        env:
-          CI: "true"
-          NEXT_TELEMETRY_DISABLED: "1"
         run: pnpm e2e

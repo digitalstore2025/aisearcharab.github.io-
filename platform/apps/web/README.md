@@ -1,26 +1,43 @@
-# AISearchArab Web — Sprint 0
+# AISearchArab Web — Hardened Foundation
 
 Next.js web foundation for the existing `platform/` modular monolith.
 
 ## Scope
 
-This baseline intentionally contains no authentication, RAG, agent, payment, external fetch, or generated-answer UI. Those features remain behind later architecture/security gates.
+This baseline includes server-rendered workspace routes and a fail-closed, explicitly gated FastAPI search integration. Authentication, RAG, agents, payments, mutations and generated answers remain behind later architecture/security gates.
 
 ## Local commands
 
 ```bash
 corepack enable
-pnpm install
+corepack prepare pnpm@12.3.4 --activate
+pnpm install --frozen-lockfile
+pnpm audit --audit-level high
 pnpm audit:structure
+pnpm audit:design
+pnpm audit:api-contract
+pnpm audit:release-gates
 pnpm lint
 pnpm typecheck
 pnpm test
 pnpm build
-pnpm dev
+pnpm exec playwright install chromium
+pnpm e2e
 ```
 
 Health endpoint: `GET /api/health`.
 
+## Search opt-in
+
+Search performs no upstream request unless both are present:
+
+```text
+AISEARCH_SEARCH_ENABLED=true
+AISEARCH_API_BASE_URL=<reviewed origin>
+```
+
+Production enablement additionally requires the WAF/rate-limit and query-log-redaction evidence documented in `SECURITY_GATES.md`.
+
 ## Dependency policy
 
-Direct framework dependencies are pinned. The first CI run generates the initial `pnpm-lock.yaml`; that lock must be reviewed and committed before this branch can be considered reproducible or merge-ready.
+Framework and browser-test baselines are pinned and the complete dependency graph is committed in `pnpm-lock.yaml`. CI installs only with `--frozen-lockfile`, runs a high/critical advisory audit, and blocks unreviewed dependency lifecycle scripts through the pnpm build allowlist.

@@ -20,7 +20,8 @@ def fail(message: str) -> None:
 if not SCHEMA_PATH.is_file() or not MAIN_PATH.is_file():
     fail('FastAPI source files are missing')
 
-tree = ast.parse(SCHEMA_PATH.read_text())
+schema_text = SCHEMA_PATH.read_text()
+tree = ast.parse(schema_text)
 classes: dict[str, set[str]] = {}
 for node in tree.body:
     if isinstance(node, ast.ClassDef):
@@ -38,9 +39,12 @@ for model, expected_fields in EXPECTED.items():
     if missing:
         fail(f'{model} lost required fields: {sorted(missing)}')
 
+if '_validate_local_url_path' not in schema_text or '@field_validator("url")' not in schema_text:
+    fail('backend search-result URL path hardening changed or disappeared')
+
 main_text = MAIN_PATH.read_text()
 for marker in ['api_prefix}/search', 'max_length=120', 'offset: int = Query(default=0, ge=0, le=10_000)']:
     if marker not in main_text:
         fail(f'backend search route contract marker changed: {marker}')
 
-print('API CONTRACT AUDIT OK: FastAPI search route remains compatible with the web contract.')
+print('API CONTRACT AUDIT OK: FastAPI search route and local-path security contract remain compatible with the web client.')

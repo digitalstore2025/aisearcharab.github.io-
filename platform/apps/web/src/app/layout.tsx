@@ -20,6 +20,7 @@ const headingFont = Noto_Sans_Arabic({
 export const metadata: Metadata = {
   title: { default: APP_META.name, template: `%s | ${APP_META.name}` },
   description: APP_META.description,
+  robots: { index: false, follow: false },
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

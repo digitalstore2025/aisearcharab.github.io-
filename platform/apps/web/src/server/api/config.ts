@@ -14,7 +14,12 @@ function validateOrigin(raw: string, label: string, allowLocalHttp: boolean): st
   return url.origin;
 }
 
+export function isSearchEnabled(): boolean {
+  return process.env.AISEARCH_SEARCH_ENABLED?.trim().toLowerCase() === 'true';
+}
+
 export function getApiBaseUrl(): string | null {
+  if (!isSearchEnabled()) return null;
   const raw = process.env.AISEARCH_API_BASE_URL?.trim();
   if (!raw) return null;
   return validateOrigin(raw, 'AISEARCH_API_BASE_URL', true);
