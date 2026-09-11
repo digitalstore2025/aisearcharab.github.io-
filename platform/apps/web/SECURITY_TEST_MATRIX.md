@@ -21,10 +21,12 @@ This matrix links threat classes to executable controls and evidence. A control 
 | Secret/client boundary leak | Client component budget + `process.env` / `@/server` rejection | `audit_structure.py` | Platform Web |
 | Unauthorized mutation surface | reject `use server` and unapproved API routes | `audit_release_gates.py` | Platform Web |
 | Auth-control drift | verify FastAPI HttpOnly, SameSite, CSRF, throttle, MFA, step-up markers | `audit_release_gates.py` + backend tests | Platform Web + Platform API |
+| EOL/unsupported Node runtime | package engine restricted to Node 24 LTS, `.node-version` and CI exact runtime | structural audit + CI Node assertion | Platform Web |
 | Vulnerable dependency graph | frozen lockfile + Moderate advisory threshold | `pnpm audit --audit-level moderate` | Platform Web |
+| Incomplete dependency inventory visibility | runtime + full-build CycloneDX generated from installed pnpm graph | JSON validation + retained `web-cyclonedx-sbom` artifact | Platform Web |
 | Dependency lifecycle abuse | reviewed pnpm `allowBuilds` list | frozen install + structural audit | Platform Web |
 | CI action compromise/drift | pinned GitHub Action commit SHAs | Python release audit | Platform Web |
-| Static-analysis blind spot | CodeQL JS/TS + Python, `security-extended` | CodeQL jobs | CodeQL + branch protection |
+| Static-analysis blind spot | CodeQL JS/TS + Python, `security-extended` inside branch-enforced workflow | two CodeQL jobs | Platform Web + branch protection |
 | Accidental indexing before launch | robots metadata + robots.txt + X-Robots-Tag | Playwright + release audit | Platform Web |
 | Visual accessibility regression | WCAG AA token calculation | `audit_design.py` | Platform Web |
 | Auth proxy source-IP collapse | auth BFF remains forbidden | release audit; Issue #96 evidence before opening | External gate |
@@ -33,14 +35,15 @@ This matrix links threat classes to executable controls and evidence. A control 
 
 ## Test ownership
 
-- `scripts/audit_structure.py`: structure, secrets, client/server boundary, dangerous sinks, patched baselines.
+- `scripts/audit_structure.py`: structure, secrets, client/server boundary, dangerous sinks, supported runtime and patched baselines.
 - `scripts/audit_design.py`: identity and WCAG contrast.
 - `scripts/audit_api_contract.py`: FastAPI search/local-path contract drift.
-- `scripts/audit_release_gates.py`: release invariants, CSP/search/auth/CI/supply-chain gates.
+- `scripts/audit_release_gates.py`: release invariants, CSP/search/auth/CI/runtime/SBOM/supply-chain gates.
+- `scripts/generate_cyclonedx_sbom.py`: deterministic CycloneDX 1.5 inventory from installed pnpm runtime/build graphs.
 - `tests/*.test.ts`: unit and security boundary tests.
 - `e2e/foundation.spec.ts`: browser-visible headers, RTL/navigation, fail-closed search, noindex.
 - FastAPI tests: authentication, governance, mutations, publishing, URL-path validation.
-- CodeQL: cross-file/data-flow static security analysis.
+- CodeQL: cross-file/data-flow static security analysis for JavaScript/TypeScript and Python.
 
 ## Required rule
 
