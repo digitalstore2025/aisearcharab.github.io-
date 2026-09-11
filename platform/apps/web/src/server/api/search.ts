@@ -23,11 +23,32 @@ async function readBoundedJson(response: Response): Promise<unknown> {
       throw new SearchUnavailableError();
     }
   }
+  if (!response.body) throw new SearchUnavailableError();
 
-  const body = await response.text();
-  if (new TextEncoder().encode(body).byteLength > MAX_SEARCH_RESPONSE_BYTES) throw new SearchUnavailableError();
+  const reader = response.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let receivedBytes = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    receivedBytes += value.byteLength;
+    if (receivedBytes > MAX_SEARCH_RESPONSE_BYTES) {
+      await reader.cancel();
+      throw new SearchUnavailableError();
+    }
+    chunks.push(value);
+  }
+
+  const bytes = new Uint8Array(receivedBytes);
+  let writeOffset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, writeOffset);
+    writeOffset += chunk.byteLength;
+  }
 
   try {
+    const body = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
     return JSON.parse(body) as unknown;
   } catch {
     throw new SearchUnavailableError();

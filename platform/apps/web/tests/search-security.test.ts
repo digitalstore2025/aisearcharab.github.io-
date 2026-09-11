@@ -52,12 +52,23 @@ describe('search security boundary', () => {
     expect(options.cache).toBe('no-store');
   });
 
-  it('rejects oversized upstream responses before parsing', async () => {
+  it('rejects an oversized declared upstream response before reading it', async () => {
     process.env.AISEARCH_SEARCH_ENABLED = 'true';
     process.env.AISEARCH_API_BASE_URL = 'https://api.example.com';
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', {
       status: 200,
       headers: { 'content-type': 'application/json', 'content-length': '300000' },
+    })));
+
+    await expect(searchContent('غزة', 0)).rejects.toBeInstanceOf(SearchUnavailableError);
+  });
+
+  it('cancels an oversized streamed upstream response even without content-length', async () => {
+    process.env.AISEARCH_SEARCH_ENABLED = 'true';
+    process.env.AISEARCH_API_BASE_URL = 'https://api.example.com';
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('x'.repeat(300_000), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
     })));
 
     await expect(searchContent('غزة', 0)).rejects.toBeInstanceOf(SearchUnavailableError);
