@@ -52,6 +52,24 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Audit dependency vulnerabilities
         run: pnpm audit --audit-level moderate
+      - name: Generate runtime and build CycloneDX SBOMs
+        run: |
+          set -euo pipefail
+          pnpm list --prod --json --depth Infinity > /tmp/aisearcharab-web-runtime-deps.json
+          pnpm list --json --depth Infinity > /tmp/aisearcharab-web-build-deps.json
+          python3 scripts/generate_cyclonedx_sbom.py --input /tmp/aisearcharab-web-runtime-deps.json --output /tmp/aisearcharab-web-runtime.cdx.json --scope runtime
+          python3 scripts/generate_cyclonedx_sbom.py --input /tmp/aisearcharab-web-build-deps.json --output /tmp/aisearcharab-web-build.cdx.json --scope build
+          python3 -m json.tool /tmp/aisearcharab-web-runtime.cdx.json > /dev/null
+          python3 -m json.tool /tmp/aisearcharab-web-build.cdx.json > /dev/null
+      - name: Upload web SBOM evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: web-cyclonedx-sbom
+          path: |
+            /tmp/aisearcharab-web-runtime.cdx.json
+            /tmp/aisearcharab-web-build.cdx.json
+          if-no-files-found: error
+          retention-days: 14
       - name: Python structural and secret audit
         run: python3 scripts/audit_structure.py
       - name: Python design and contrast audit
