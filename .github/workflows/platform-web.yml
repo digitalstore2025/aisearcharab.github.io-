@@ -1,25 +1,16 @@
 name: Platform Web
-
 on:
   pull_request:
-    paths:
-      - "platform/apps/web/**"
-      - ".github/workflows/platform-web.yml"
+    paths: ["platform/apps/web/**", ".github/workflows/platform-web.yml"]
   push:
-    branches:
-      - "feat/nextjs-web-foundation"
-    paths:
-      - "platform/apps/web/**"
-      - ".github/workflows/platform-web.yml"
+    branches: ["feat/nextjs-web-foundation"]
+    paths: ["platform/apps/web/**", ".github/workflows/platform-web.yml"]
   workflow_dispatch:
-
 permissions:
   contents: read
-
 concurrency:
   group: platform-web-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -29,35 +20,29 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
-
       - name: Setup Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: "22"
-
       - name: Enable Corepack
         run: corepack enable
-
       - name: Prepare pnpm
         run: corepack prepare pnpm@12.3.4 --activate
-
       - name: Install reviewed dependency graph
         run: pnpm install --frozen-lockfile
-
       - name: Python structural and secret audit
         run: python3 scripts/audit_structure.py
-
       - name: Python design and contrast audit
         run: python3 scripts/audit_design.py
-
+      - name: Python FastAPI contract drift audit
+        run: python3 scripts/audit_api_contract.py
       - name: Lint
         run: pnpm lint
-
       - name: Typecheck
         run: pnpm typecheck
-
       - name: Unit tests
         run: pnpm test
-
       - name: Production build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
         run: pnpm build
