@@ -3,7 +3,7 @@ from __future__ import annotations
 import json,re
 from pathlib import Path
 ROOT=Path(__file__).resolve().parents[1]
-REQUIRED=['package.json','tsconfig.json','next.config.ts','eslint.config.mjs','playwright.config.ts','ARCHITECTURE.md','DESIGN_SYSTEM.md','DATA_BOUNDARY.md','SECURITY_GATES.md','HARDENING_BASELINE.md','SECURITY_TEST_MATRIX.md','RELEASE_CHECKLIST.md','pnpm-lock.yaml','pnpm-workspace.yaml','.env.example','public/brand-mark.svg','src/app/layout.tsx','src/app/page.tsx','src/app/robots.ts','src/app/not-found.tsx','src/app/(workspace)/error.tsx','src/app/api/health/route.ts','src/components/navigation/nav-links.tsx','src/server/api/search.ts','src/lib/contracts/search.ts','e2e/foundation.spec.ts','tests/search-security.test.ts']
+REQUIRED=['package.json','.node-version','tsconfig.json','next.config.ts','eslint.config.mjs','playwright.config.ts','ARCHITECTURE.md','DESIGN_SYSTEM.md','DATA_BOUNDARY.md','SECURITY_GATES.md','HARDENING_BASELINE.md','SECURITY_TEST_MATRIX.md','RELEASE_CHECKLIST.md','pnpm-lock.yaml','pnpm-workspace.yaml','.env.example','public/brand-mark.svg','src/app/layout.tsx','src/app/page.tsx','src/app/robots.ts','src/app/not-found.tsx','src/app/(workspace)/error.tsx','src/app/api/health/route.ts','src/components/navigation/nav-links.tsx','src/server/api/search.ts','src/lib/contracts/search.ts','e2e/foundation.spec.ts','tests/search-security.test.ts']
 SECRET_PATTERNS=[re.compile(r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----'),re.compile(r'(?i)(?:api[_-]?key|secret|token|password)\s*[:=]\s*["\'][^"\']{12,}["\']'),re.compile(r'\bsk-(?:proj-)?[A-Za-z0-9_-]{20,}\b'),re.compile(r'\bgithub_pat_[A-Za-z0-9_]{20,}\b'),re.compile(r'\bgh[pousr]_[A-Za-z0-9]{20,}\b'),re.compile(r'\bAKIA[0-9A-Z]{16}\b')]
 CLIENT_FORBIDDEN_PATTERNS=[re.compile(r"(?:from\s+|import\s*)['\"]@/server(?:/|['\"])") ,re.compile(r"import\s+['\"]server-only['\"]"),re.compile(r"\bprocess\.env\b")]
 DANGEROUS_SOURCE_PATTERNS=[re.compile(r'\bdangerouslySetInnerHTML\b'),re.compile(r'(?<![\w.])eval\s*\('),re.compile(r'\bnew\s+Function\s*\('),re.compile(r'\bdocument\.write\s*\(')]
@@ -21,8 +21,10 @@ if pkg.get('dependencies',{}).get('next')!='16.3.4': fail('Next.js must be pinne
 if pkg.get('dependencies',{}).get('react')!='19.2.8' or pkg.get('dependencies',{}).get('react-dom')!='19.2.8': fail('React must remain on reviewed patched baseline 19.2.8')
 if pkg.get('devDependencies',{}).get('@playwright/test')!='1.63.0': fail('Playwright must be pinned to reviewed baseline 1.63.0')
 if pkg.get('devDependencies',{}).get('vitest')!='4.1.11': fail('Vitest must remain on patched baseline 4.1.11 or be deliberately re-reviewed')
+if pkg.get('devDependencies',{}).get('@types/node')!='24.13.4': fail('@types/node must match the reviewed Node 24 line')
 if pkg.get('packageManager')!='pnpm@12.3.4': fail('pnpm must remain on reviewed baseline 12.3.4')
-if pkg.get('engines',{}).get('node')!='>=20.9.0': fail('Node engine baseline changed unexpectedly')
+if pkg.get('engines',{}).get('node')!='>=24.17.0 <25': fail('Node runtime must remain on supported Node 24 LTS line')
+if (ROOT/'.node-version').read_text().strip()!='24.21.0': fail('local Node version must match reviewed CI baseline 24.21.0')
 for rel, marker in {
     'HARDENING_BASELINE.md':'No known Critical or High vulnerability remains within the tested code scope',
     'SECURITY_TEST_MATRIX.md':'Every newly fixed security defect must add at least one regression test',
@@ -45,4 +47,4 @@ for path in ROOT.rglob('*'):
             if pattern.search(text): fail(f'client/server boundary violation in {rel}: {pattern.pattern}')
         if 'src/server' in rel.as_posix(): fail(f'client directive is forbidden under src/server: {rel}')
 if client_modules!=EXPECTED_CLIENT_MODULES: fail(f'client-module budget changed: expected {sorted(EXPECTED_CLIENT_MODULES)}, got {sorted(client_modules)}')
-print('AUDIT OK: structure, patched baselines, hardening governance, secret scan, dangerous sinks, and client/server boundaries passed.')
+print('AUDIT OK: structure, supported runtime, patched baselines, hardening governance, secret scan, dangerous sinks, and client/server boundaries passed.')
