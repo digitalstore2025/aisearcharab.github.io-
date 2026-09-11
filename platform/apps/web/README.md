@@ -2,11 +2,22 @@
 
 Next.js web foundation for the existing `platform/` modular monolith.
 
+## Security posture
+
+The defensible claim for this branch is: **no known Critical/High vulnerability remains within the tested code scope; unverified production capabilities remain disabled or fail-closed.** This is not a claim of universal vulnerability-freedom.
+
 ## Scope
 
 This baseline includes server-rendered workspace routes and a fail-closed, explicitly gated FastAPI search integration. Authentication, RAG, agents, payments, mutations and generated answers remain behind later architecture/security gates.
 
-## Local commands
+Operational security documents:
+
+- `HARDENING_BASELINE.md` — threat model, trust boundaries, resolved findings, Definition of Done and external blockers.
+- `SECURITY_TEST_MATRIX.md` — threat → control → regression test → evidence mapping.
+- `SECURITY_GATES.md` — gates that keep Auth/Search/Mutations/AI closed until proven.
+- `RELEASE_CHECKLIST.md` — pre-merge, production, deployment and rollback checklist.
+
+## Local verification
 
 ```bash
 corepack enable
@@ -36,8 +47,19 @@ AISEARCH_SEARCH_ENABLED=true
 AISEARCH_API_BASE_URL=<reviewed origin>
 ```
 
-Production enablement additionally requires the WAF/rate-limit and query-log-redaction evidence documented in `SECURITY_GATES.md`.
+Production enablement additionally requires the WAF/rate-limit, query-log-redaction, capacity and rollback evidence documented in `SECURITY_GATES.md` / `RELEASE_CHECKLIST.md` and tracked in Issue #98.
 
 ## Dependency policy
 
-Framework and browser-test baselines are pinned and the complete dependency graph is committed in `pnpm-lock.yaml`. CI installs only with `--frozen-lockfile`, blocks known moderate/high/critical dependency advisories, and blocks unreviewed dependency lifecycle scripts through the pnpm build allowlist. Dependabot covers this pnpm workspace weekly.
+- Next.js/React/Playwright and the patched Vitest 4.1.11 security baseline are policy checked.
+- The complete dependency graph is committed in `pnpm-lock.yaml`.
+- CI installs only with `--frozen-lockfile`.
+- CI blocks known Moderate/High/Critical dependency advisories.
+- Unreviewed dependency lifecycle scripts are blocked through the pnpm build allowlist.
+- Dependabot covers this pnpm workspace weekly.
+- GitHub Actions are pinned to reviewed commit SHAs.
+- CodeQL `security-extended` covers JavaScript/TypeScript and Python.
+
+## Promotion rule
+
+PR green status alone is not sufficient for production. Repository protection, WAF/rate-limit/log-redaction, deployment secret management, observability and rollback are external evidence gates. Missing evidence means the related capability remains disabled.
