@@ -22,6 +22,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  detect-web:
+    name: detect-web
+    runs-on: ubuntu-24.04
+    outputs:
+      present: ${{ steps.detect.outputs.present }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+      - id: detect
+        name: Detect Next.js web workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -f platform/apps/web/package.json ]]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
   source-and-unit:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -120,3 +142,142 @@ jobs:
         if: always()
         working-directory: platform
         run: docker compose down -v --remove-orphans
+
+  web-verify:
+    name: web-verify
+    needs: detect-web
+    if: needs.detect-web.outputs.present == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CI: "true"
+      NEXT_TELEMETRY_DISABLED: "1"
+    defaults:
+      run:
+        working-directory: platform/apps/web
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Setup Node 24 LTS
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24.21.0"
+
+      - name: Verify Node runtime
+        run: node -e "const v=process.versions.node; if(!v.startsWith('24.')) throw new Error('Unsupported Node runtime: '+v); console.log('Node runtime',v)"
+
+      - name: Enable Corepack
+        run: corepack enable
+
+      - name: Prepare pnpm
+        run: corepack prepare pnpm@12.3.4 --activate
+
+      - name: Install reviewed dependency graph
+        run: pnpm install --frozen-lockfile
+
+      - name: Audit dependency vulnerabilities
+        run: pnpm audit --audit-level moderate
+
+      - name: Test SBOM generator
+        run: python3 scripts/test_generate_cyclonedx_sbom.py
+
+      - name: Generate runtime and build CycloneDX SBOMs
+        run: |
+          set -euo pipefail
+          pnpm list --prod --json --depth Infinity > /tmp/aisearcharab-web-runtime-deps.json
+          pnpm list --json --depth Infinity > /tmp/aisearcharab-web-build-deps.json
+          python3 scripts/generate_cyclonedx_sbom.py --input /tmp/aisearcharab-web-runtime-deps.json --output /tmp/aisearcharab-web-runtime.cdx.json --scope runtime
+          python3 scripts/generate_cyclonedx_sbom.py --input /tmp/aisearcharab-web-build-deps.json --output /tmp/aisearcharab-web-build.cdx.json --scope build
+          python3 -m json.tool /tmp/aisearcharab-web-runtime.cdx.json > /dev/null
+          python3 -m json.tool /tmp/aisearcharab-web-build.cdx.json > /dev/null
+
+      - name: Validate SBOM package evidence
+        run: |
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          runtime = json.loads(Path('/tmp/aisearcharab-web-runtime.cdx.json').read_text())
+          build = json.loads(Path('/tmp/aisearcharab-web-build.cdx.json').read_text())
+          runtime_names = {c['name'] for c in runtime.get('components', [])}
+          build_names = {c['name'] for c in build.get('components', [])}
+          assert {'next', 'react', 'react-dom'} <= runtime_names, runtime_names
+          assert {'vitest', '@playwright/test', 'typescript'} <= build_names, build_names
+          assert len(build_names) >= len(runtime_names) >= 3
+          print(f"SBOM evidence OK: runtime={len(runtime_names)} build={len(build_names)}")
+          PY
+
+      - name: Upload web SBOM evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: web-cyclonedx-sbom
+          path: |
+            /tmp/aisearcharab-web-runtime.cdx.json
+            /tmp/aisearcharab-web-build.cdx.json
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Python structural and secret audit
+        run: python3 scripts/audit_structure.py
+
+      - name: Python design and contrast audit
+        run: python3 scripts/audit_design.py
+
+      - name: Python FastAPI contract drift audit
+        run: python3 scripts/audit_api_contract.py
+
+      - name: Python release/security gates audit
+        run: python3 scripts/audit_release_gates.py
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Unit tests
+        run: pnpm test
+
+      - name: Production build
+        run: pnpm build
+
+      - name: Install Playwright Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Browser E2E
+        run: pnpm e2e
+
+  web-codeql:
+    name: "web-codeql (${{ matrix.language }})"
+    needs: detect-web
+    if: needs.detect-web.outputs.present == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: ["javascript-typescript", "python"]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: none
+          queries: security-extended
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4
+        with:
+          category: "/security-regression/language:${{ matrix.language }}"
