@@ -26,6 +26,8 @@ class ResearchTargetDenied(ResearchPolicyError):
 
 
 def _normalize_hostname(value: str) -> str:
+    if not isinstance(value, str):
+        raise ResearchPolicyError("source host must be a string")
     raw = value.strip().rstrip(".")
     if not raw or "*" in raw:
         raise ResearchPolicyError("source host must be an explicit DNS name")
@@ -58,24 +60,38 @@ class ResearchSourcePolicy:
     timeout_seconds: float = 20.0
 
     def __post_init__(self) -> None:
+        if not isinstance(self.source_id, str):
+            raise ResearchPolicyError("source_id must be a string")
         source_id = self.source_id.strip()
         if not _SOURCE_ID.fullmatch(source_id):
             raise ResearchPolicyError("source_id contains unsupported characters or length")
+        if not isinstance(self.allow_subdomains, bool):
+            raise ResearchPolicyError("allow_subdomains must be boolean")
         if not self.allowed_hosts:
             raise ResearchPolicyError("research source must allow at least one host")
         normalized_hosts = frozenset(_normalize_hostname(host) for host in self.allowed_hosts)
         schemes = frozenset(str(value).lower() for value in self.allowed_schemes)
         if not schemes or not schemes.issubset(_ALLOWED_SCHEMES):
             raise ResearchPolicyError("allowed_schemes must be a non-empty subset of http/https")
+        if any(isinstance(port, bool) or not isinstance(port, int) for port in self.allowed_ports):
+            raise ResearchPolicyError("allowed_ports must contain integers")
         ports = frozenset(self.allowed_ports)
         if not ports or not ports.issubset(_ALLOWED_PORTS):
             raise ResearchPolicyError("allowed_ports must be a non-empty subset of 80/443")
         if any((scheme == "https" and 443 not in ports) or (scheme == "http" and 80 not in ports) for scheme in schemes):
             raise ResearchPolicyError("allowed ports must include the conventional port for every allowed scheme")
-        if isinstance(self.max_redirects, bool) or not 0 <= self.max_redirects <= 10:
-            raise ResearchPolicyError("max_redirects must be between 0 and 10")
-        if isinstance(self.max_response_bytes, bool) or not 1 <= self.max_response_bytes <= 10 * 1024 * 1024:
-            raise ResearchPolicyError("max_response_bytes must be between 1 byte and 10 MiB")
+        if (
+            isinstance(self.max_redirects, bool)
+            or not isinstance(self.max_redirects, int)
+            or not 0 <= self.max_redirects <= 10
+        ):
+            raise ResearchPolicyError("max_redirects must be an integer between 0 and 10")
+        if (
+            isinstance(self.max_response_bytes, bool)
+            or not isinstance(self.max_response_bytes, int)
+            or not 1 <= self.max_response_bytes <= 10 * 1024 * 1024
+        ):
+            raise ResearchPolicyError("max_response_bytes must be an integer between 1 byte and 10 MiB")
         if isinstance(self.timeout_seconds, bool) or not isinstance(self.timeout_seconds, (int, float)):
             raise ResearchPolicyError("timeout_seconds must be numeric")
         timeout = float(self.timeout_seconds)
