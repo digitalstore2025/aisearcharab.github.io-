@@ -124,3 +124,23 @@ def compare_rankings(
         delta_recall_at_5=round(candidate.recall_at_5 - baseline.recall_at_5, 4),
         delta_zero_result_rate=round(candidate.zero_result_rate - baseline.zero_result_rate, 4),
     )
+
+
+def comparison_passes_gate(
+    comparison: RetrievalComparison,
+    *,
+    min_mrr_delta: float = 0.0,
+    min_recall_delta: float = 0.0,
+    min_ndcg_delta: float = 0.0,
+    max_zero_result_delta: float = 0.0,
+) -> bool:
+    """Return True only when every configured retrieval quality gate passes."""
+    thresholds = (min_mrr_delta, min_recall_delta, min_ndcg_delta, max_zero_result_delta)
+    if not all(math.isfinite(value) for value in thresholds):
+        raise ValueError("retrieval gate thresholds must be finite")
+    return (
+        comparison.delta_mrr_at_10 >= min_mrr_delta
+        and comparison.delta_recall_at_5 >= min_recall_delta
+        and comparison.delta_ndcg_at_10 >= min_ndcg_delta
+        and comparison.delta_zero_result_rate <= max_zero_result_delta
+    )
