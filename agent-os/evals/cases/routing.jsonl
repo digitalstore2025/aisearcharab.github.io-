@@ -1,0 +1,7 @@
+{"id":"r1","task":"Audit authentication, secrets and OWASP risks","expected":["security-review"]}
+{"id":"r2","task":"Create a Postgres schema migration and rollback","expected":["db-migration"]}
+{"id":"r3","task":"Measure RAG recall@k, reranking and citation faithfulness","expected":["rag-evaluation"]}
+{"id":"r4","task":"Check production release readiness and CI/CD","expected":["release-readiness"]}
+{"id":"r5","task":"Audit SEO, GEO, schema.org and AI search visibility","expected":["seo-geo-audit"]}
+{"id":"r6","task":"Fact-check OSINT claims and verify sources","expected":["research-verification"]}
+{"id":"r7","task":"Review auth security before production deployment","expected":["security-review","release-readiness"]}

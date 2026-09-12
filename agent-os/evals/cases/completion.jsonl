@@ -1,0 +1,4 @@
+{"id":"d1","type":"code","passed":["implementation_exists","targeted_tests_pass","security_checks_pass","no_unexplained_regressions"],"complete":true}
+{"id":"d2","type":"code","passed":["implementation_exists","targeted_tests_pass"],"complete":false}
+{"id":"d3","type":"research","passed":["claims_extracted","primary_sources_checked","contradictions_checked","dates_verified","confidence_assigned"],"complete":true}
+{"id":"d4","type":"research","passed":["claims_extracted","primary_sources_checked","dates_verified"],"complete":false}

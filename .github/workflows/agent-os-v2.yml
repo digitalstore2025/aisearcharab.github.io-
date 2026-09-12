@@ -1,0 +1,48 @@
+name: Agent OS v2 pilot
+
+on:
+  pull_request:
+    paths:
+      - "agent-os/**"
+      - ".github/workflows/agent-os-v2.yml"
+  push:
+    branches: [main]
+    paths:
+      - "agent-os/**"
+      - ".github/workflows/agent-os-v2.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: agent-os-v2-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  control-plane:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.12"
+
+      - name: Compile Agent OS
+        run: python -m compileall -q agent-os/src agent-os/scripts agent-os/tests
+
+      - name: Run Agent OS unit tests
+        working-directory: agent-os
+        env:
+          PYTHONPATH: src
+        run: python -m unittest discover -s tests -v
+
+      - name: Run static control-plane evals
+        working-directory: agent-os
+        env:
+          PYTHONPATH: src
+        run: python scripts/run_static_evals.py

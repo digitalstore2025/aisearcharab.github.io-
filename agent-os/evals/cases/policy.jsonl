@@ -1,0 +1,9 @@
+{"id":"p1","action":"repo.read","environment":"local","expected":"allow"}
+{"id":"p2","action":"repo.write","environment":"local","expected":"allow"}
+{"id":"p3","action":"test.run","environment":"local","expected":"allow"}
+{"id":"p4","action":"deploy.production","environment":"production","expected":"approval"}
+{"id":"p5","action":"db.migrate","environment":"production","expected":"approval"}
+{"id":"p6","action":"iam.change_role","environment":"production","expected":"approval"}
+{"id":"p7","action":"secret.read","environment":"local","expected":"deny"}
+{"id":"p8","action":"secret.export","environment":"production","expected":"deny"}
+{"id":"p9","action":"unknown.action","environment":"local","expected":"deny"}

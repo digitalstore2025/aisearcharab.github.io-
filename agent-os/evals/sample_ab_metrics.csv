@@ -1,0 +1,5 @@
+variant,case_id,success,latency_s,tool_calls,input_tokens,output_tokens,cost_usd,security_violations
+v1,c1,true,4.2,6,2000,800,0.020,0
+v2,c1,true,3.5,4,1500,700,0.015,0
+v1,c2,false,5.0,8,2500,900,0.025,0
+v2,c2,true,4.1,5,1700,800,0.018,0
