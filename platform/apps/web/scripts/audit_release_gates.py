@@ -72,8 +72,13 @@ if "process.env.NODE_ENV !== 'production'" not in search_config:
 if search_results.count('prefetch={false}') < 2:
     fail('search pagination must not prefetch query-bearing pages')
 
-workflow = (REPO / '.github/workflows/platform-web.yml').read_text()
+# PR verification is owned by a canonical workflow that is installed on main
+# independently of the application PR. This avoids self-approving CI policy.
+web_security = (REPO / '.github/workflows/web-security.yml').read_text()
 for marker in [
+    'name: Web security gate',
+    'platform/apps/web/**',
+    'platform/apps/api/**',
     'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
     'actions/setup-node@820762786026740c76f36085b0efc47a31fe5020',
     'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02',
@@ -83,31 +88,60 @@ for marker in [
     'pnpm install --frozen-lockfile',
     'pnpm audit --audit-level moderate',
     'pnpm list --prod --json --depth Infinity',
+    'scripts/test_generate_cyclonedx_sbom.py',
     'scripts/generate_cyclonedx_sbom.py',
+    'Validate SBOM package evidence',
     'web-cyclonedx-sbom',
-    'permissions:\n  contents: read',
-    'platform/apps/api/src/aisearcharab_api/**',
-    '.github/workflows/codeql.yml',
-    '.github/dependabot.yml',
-    'branches: ["main", "feat/nextjs-web-foundation"]',
-    'name: CodeQL (${{ matrix.language }})',
-    'language: ["javascript-typescript", "python"]',
+    'python3 scripts/audit_structure.py',
+    'python3 scripts/audit_design.py',
+    'python3 scripts/audit_api_contract.py',
+    'python3 scripts/audit_release_gates.py',
+    'pnpm e2e',
+    'name: web-codeql (${{ matrix.language }})',
+    '- javascript-typescript',
+    '- python',
     'security-events: write',
     'github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63',
     'github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63',
     'queries: security-extended',
 ]:
-    if marker not in workflow:
-        fail(f'CI supply-chain/enforcement marker changed or disappeared: {marker}')
+    if marker not in web_security:
+        fail(f'canonical web security marker changed or disappeared: {marker}')
+if 'permissions:\n  contents: read' not in web_security:
+    fail('canonical web gate must keep top-level contents read-only permission')
+
+# GitHub Actions definitions need an independent preflight because invalid YAML
+# can prevent the broken workflow from creating a run at all.
+workflow_lint = (REPO / '.github/workflows/workflow-lint.yml').read_text()
+for marker in [
+    'name: Workflow lint',
+    '.github/workflows/**',
+    'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1',
+    'persist-credentials: false',
+    'version="1.7.12"',
+    'actionlint_${version}_linux_amd64.tar.gz',
+    '8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8',
+    'sha256sum --check --strict',
+    "/tmp/actionlint/actionlint -color -ignore 'SC2129'",
+]:
+    if marker not in workflow_lint:
+        fail(f'workflow preflight marker changed or disappeared: {marker}')
+if 'permissions:\n  contents: read' not in workflow_lint:
+    fail('workflow lint gate must keep top-level contents read-only permission')
 
 dependabot = (REPO / '.github/dependabot.yml').read_text()
 if 'package-ecosystem: "npm"' not in dependabot or 'directory: "/platform/apps/web"' not in dependabot:
     fail('Dependabot coverage for the web pnpm workspace is missing')
 
-# Keep the separate workflow for scheduled/default-branch rescans, while PR analysis
-# is also enforced inside Platform Web so the PR cannot silently miss SAST.
+# PR CodeQL is enforced by the canonical Web security gate above. Keep this
+# separate workflow for scheduled/default-branch rescans only, avoiding duplicate
+# PR scans and invalid workflow-level matrix references.
 codeql = (REPO / '.github/workflows/codeql.yml').read_text()
 for marker in [
+    'name: Scheduled CodeQL',
+    'branches: ["main"]',
+    'cron: "23 3 * * 1"',
+    'group: codeql-${{ github.workflow }}-${{ github.ref }}',
     'github/codeql-action/init@b96794f015dfd88f77b49b1c93e0fa7110f94c63',
     'github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63',
     'language: ["javascript-typescript", "python"]',
@@ -117,6 +151,10 @@ for marker in [
 ]:
     if marker not in codeql:
         fail(f'CodeQL scheduled/default-branch security marker changed or disappeared: {marker}')
+if 'pull_request:' in codeql:
+    fail('scheduled CodeQL must not duplicate canonical PR CodeQL analysis')
+if '${{ matrix.language }}' in codeql.split('jobs:', 1)[0]:
+    fail('workflow-level CodeQL configuration must not reference matrix context')
 
 routes_auth = (API / 'routes_auth.py').read_text()
 auth_core = (API / 'auth.py').read_text()
@@ -145,4 +183,4 @@ for name, markers in required_markers.items():
         if marker not in source:
             fail(f'backend auth invariant changed or disappeared: {name}:{marker}')
 
-print('RELEASE GATE AUDIT OK: search, browser, CSP, supported Node runtime, SBOM evidence, CI triggers/supply-chain, PR CodeQL, scheduled CodeQL, backend auth, and noindex invariants remain enforced.')
+print('RELEASE GATE AUDIT OK: search, browser, CSP, supported Node runtime, SBOM evidence, canonical PR verification/CodeQL, workflow preflight, scheduled CodeQL, backend auth, and noindex invariants remain enforced.')
