@@ -70,15 +70,6 @@ def test_external_research_tool_requires_explicit_allowlisted_source() -> None:
     assert authorized.research_source_id == "official-docs"
 
 
-def test_external_research_registration_requires_permission() -> None:
-    with pytest.raises(InvalidToolRegistration, match="external research tools"):
-        ToolCapability(
-            name="fetch_research_source",
-            replay_class="read_replay_safe",
-            allowed_research_sources=frozenset({"official-docs"}),
-        )
-
-
 def test_tool_without_network_capability_rejects_source_id() -> None:
     registry = ToolCapabilityRegistry([ToolCapability(name="local_rank")])
     with pytest.raises(ToolNetworkSourceDenied, match="no external research"):
@@ -88,21 +79,15 @@ def test_tool_without_network_capability_rejects_source_id() -> None:
         )
 
 
-def test_side_effect_registration_requires_application_permission() -> None:
-    with pytest.raises(InvalidToolRegistration, match="side-effecting tools"):
+def test_non_idempotent_side_effect_registration_requires_approval_and_permission() -> None:
+    with pytest.raises(InvalidToolRegistration, match="must require approval"):
+        ToolCapability(name="publish", replay_class="non_idempotent_side_effect")
+
+    with pytest.raises(InvalidToolRegistration, match="application permission"):
         ToolCapability(
             name="publish",
             replay_class="non_idempotent_side_effect",
             requires_approval=True,
-        )
-
-
-def test_non_idempotent_side_effect_registration_requires_approval() -> None:
-    with pytest.raises(InvalidToolRegistration, match="must require approval"):
-        ToolCapability(
-            name="publish",
-            replay_class="non_idempotent_side_effect",
-            required_permissions=frozenset({"content:publish"}),
         )
 
     registry = ToolCapabilityRegistry(
@@ -122,12 +107,15 @@ def test_non_idempotent_side_effect_registration_requires_approval() -> None:
         )
 
 
-def test_idempotent_side_effect_requires_registration_and_invocation_key() -> None:
+def test_idempotent_side_effect_requires_permission_key_and_invocation_key() -> None:
     with pytest.raises(InvalidToolRegistration, match="idempotency"):
+        ToolCapability(name="record_event", replay_class="idempotent_side_effect")
+
+    with pytest.raises(InvalidToolRegistration, match="application permission"):
         ToolCapability(
             name="record_event",
             replay_class="idempotent_side_effect",
-            required_permissions=frozenset({"audit:write"}),
+            idempotency_key_required=True,
         )
 
     registry = ToolCapabilityRegistry(
@@ -135,7 +123,7 @@ def test_idempotent_side_effect_requires_registration_and_invocation_key() -> No
             ToolCapability(
                 name="record_event",
                 replay_class="idempotent_side_effect",
-                required_permissions=frozenset({"audit:write"}),
+                required_permissions=frozenset({"events:write"}),
                 idempotency_key_required=True,
             )
         ]
@@ -143,17 +131,22 @@ def test_idempotent_side_effect_requires_registration_and_invocation_key() -> No
     with pytest.raises(ToolIdempotencyKeyRequired):
         registry.authorize(
             "record_event",
-            ToolInvocationContext(granted_permissions=frozenset({"audit:write"})),
+            ToolInvocationContext(granted_permissions=frozenset({"events:write"})),
         )
 
     authorized = registry.authorize(
         "record_event",
         ToolInvocationContext(
-            granted_permissions=frozenset({"audit:write"}),
+            granted_permissions=frozenset({"events:write"}),
             idempotency_key="request-123",
         ),
     )
     assert authorized.idempotency_key == "request-123"
+
+
+def test_network_capable_tool_registration_requires_permission() -> None:
+    with pytest.raises(InvalidToolRegistration, match="application permission"):
+        ToolCapability(name="fetch_research_source", allowed_research_sources=frozenset({"official-docs"}))
 
 
 def test_registry_rejects_duplicate_tools() -> None:
