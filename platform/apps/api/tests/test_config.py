@@ -56,6 +56,7 @@ def test_staging_rejects_sqlite() -> None:
 @pytest.mark.parametrize(
     "database_url",
     [
+        "postgresql://app:secret@db/app",
         "mysql://app:secret@db/app",
         "postgresql+psycopg2://app:secret@db/app",
         "file:///tmp/database",
