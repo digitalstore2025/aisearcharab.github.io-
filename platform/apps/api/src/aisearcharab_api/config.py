@@ -4,7 +4,7 @@ import ipaddress
 import os
 from dataclasses import dataclass
 from functools import lru_cache
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 
 class ConfigurationError(RuntimeError):
@@ -32,7 +32,10 @@ def _valid_origin(value: str, *, require_https: bool) -> bool:
         return False
     if not parsed.netloc or parsed.username or parsed.password:
         return False
-    if parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
+    # Browser Origin headers never include a trailing slash or path. Requiring
+    # an exact origin here prevents a configuration that validates but can
+    # never match CORSMiddleware at runtime.
+    if parsed.path or parsed.params or parsed.query or parsed.fragment:
         return False
     return True
 
@@ -64,6 +67,22 @@ def _proxy_cidrs_cover_entire_family(values: tuple[str, ...]) -> bool:
         if len(collapsed) == 1 and collapsed[0].prefixlen == 0:
             return True
     return False
+
+
+def _secure_database_url_is_postgresql(value: str) -> bool:
+    return urlparse(value).scheme.lower() == "postgresql+psycopg"
+
+
+def _database_url_uses_placeholder_credential(value: str) -> bool:
+    """Detect the documented placeholder after URL decoding.
+
+    Inspecting the decoded password closes the percent-encoding bypass while
+    avoiding false positives in database names or query parameters.
+    """
+
+    parsed = urlparse(value)
+    password = unquote(parsed.password or "").strip().casefold()
+    return password == "change-me"
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,6 +143,7 @@ class Settings:
     def validate(self) -> None:
         if self.environment not in {"development", "test", "staging", "production"}:
             raise ConfigurationError("APP_ENV must be development, test, staging, or production")
+        secure_runtime = self.environment in {"staging", "production"}
         if not self.database_url:
             raise ConfigurationError("DATABASE_URL is required")
         if not self.api_prefix.startswith("/") or self.api_prefix == "/":
@@ -174,8 +194,11 @@ class Settings:
             raise ConfigurationError("MFA_ENCRYPTION_KEY is required when privileged MFA is enabled")
         if not self.allowed_origins:
             raise ConfigurationError("ALLOWED_ORIGINS must contain at least one explicit origin")
-        if any(not _valid_origin(origin, require_https=self.is_production) for origin in self.allowed_origins):
-            raise ConfigurationError("ALLOWED_ORIGINS must contain valid origins without paths, credentials, queries, or fragments")
+        if any(not _valid_origin(origin, require_https=secure_runtime) for origin in self.allowed_origins):
+            raise ConfigurationError(
+                "ALLOWED_ORIGINS must contain valid origins without paths, credentials, queries, or fragments; "
+                "staging and production origins must use HTTPS"
+            )
         if self.log_queries and (self.query_hash_key is None or len(self.query_hash_key.encode("utf-8")) < 32):
             raise ConfigurationError("QUERY_HASH_KEY must contain at least 32 bytes when query logging is enabled")
         if not 5 <= self.openai_timeout_seconds <= 120:
@@ -196,26 +219,26 @@ class Settings:
             raise ConfigurationError("OPENAI_MODEL must contain between 2 and 100 characters")
         if self.generated_answers_enabled and not self.openai_api_key:
             raise ConfigurationError("OPENAI_API_KEY is required when generated answers are enabled")
-        if self.environment in {"staging", "production"}:
+        if secure_runtime:
             if not self.require_mfa_for_privileged:
                 raise ConfigurationError("REQUIRE_MFA_FOR_PRIVILEGED must be enabled in staging and production")
             if not self.mfa_encryption_key:
                 raise ConfigurationError("MFA_ENCRYPTION_KEY is required in staging and production")
             if not self.login_throttle_key:
                 raise ConfigurationError("LOGIN_THROTTLE_KEY is required in staging and production")
+            if not _secure_database_url_is_postgresql(self.database_url):
+                raise ConfigurationError("PostgreSQL with psycopg is required in staging and production")
+            if any("*" in host for host in self.allowed_hosts):
+                raise ConfigurationError("Wildcard hosts are not allowed in staging or production")
+            if _database_url_uses_placeholder_credential(self.database_url):
+                raise ConfigurationError("DATABASE_URL contains a placeholder credential")
         if self.is_production:
             if self.generated_answers_enabled:
                 raise ConfigurationError(
                     "Generated answers cannot be enabled in production until distributed rate limiting and observability are verified"
                 )
-            if self.database_url.startswith("sqlite"):
-                raise ConfigurationError("SQLite is not allowed in production")
             if "*" in self.allowed_origins:
                 raise ConfigurationError("Wildcard CORS origins are not allowed in production")
-            if "*" in self.allowed_hosts:
-                raise ConfigurationError("Wildcard hosts are not allowed in production")
-            if "change-me" in self.database_url.lower():
-                raise ConfigurationError("DATABASE_URL contains a placeholder credential")
             if not self.enforce_separation_of_duties:
                 raise ConfigurationError("ENFORCE_SEPARATION_OF_DUTIES must be enabled in production")
 
