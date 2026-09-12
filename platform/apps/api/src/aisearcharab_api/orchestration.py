@@ -23,6 +23,10 @@ class UnknownWorkerError(OrchestrationError):
     """Raised when an orchestrator selects a worker that is not registered."""
 
 
+class DuplicateRegistrationError(OrchestrationError):
+    """Raised when normalized registry names collide."""
+
+
 @dataclass(frozen=True, slots=True)
 class StepTrace:
     name: str
@@ -86,6 +90,20 @@ def _validate_name(name: str, *, kind: str) -> str:
     return normalized
 
 
+def _normalized_registry(
+    registry: Mapping[str, Callable[[InputT], OutputT]],
+    *,
+    kind: str,
+) -> dict[str, Callable[[InputT], OutputT]]:
+    normalized: dict[str, Callable[[InputT], OutputT]] = {}
+    for raw_name, handler in registry.items():
+        name = _validate_name(raw_name, kind=kind)
+        if name in normalized:
+            raise DuplicateRegistrationError(f"duplicate normalized {kind} name: {name}")
+        normalized[name] = handler
+    return normalized
+
+
 def _timed_call(name: str, function: Callable[[], OutputT]) -> tuple[OutputT, StepTrace]:
     started = perf_counter()
     value = function()
@@ -127,7 +145,8 @@ def run_parallel(
     if max_workers < 1:
         raise ValueError("max_workers must be at least 1")
 
-    ordered_workers = [(_validate_name(name, kind="worker"), worker) for name, worker in workers.items()]
+    normalized_workers = _normalized_registry(workers, kind="worker")
+    ordered_workers = list(normalized_workers.items())
     if not ordered_workers:
         return ParallelResult(outputs={}, traces=())
 
@@ -154,7 +173,8 @@ def run_routed(
 ) -> RoutedResult[OutputT]:
     """Select exactly one registered handler using a local routing function."""
     route = _validate_name(route_selector(input_value), kind="route")
-    handler = handlers.get(route)
+    normalized_handlers = _normalized_registry(handlers, kind="route")
+    handler = normalized_handlers.get(route)
     if handler is None:
         raise UnknownRouteError(f"unregistered route: {route}")
     value, trace = _timed_call(f"route:{route}", lambda: handler(input_value))
@@ -170,12 +190,13 @@ def run_orchestrator_workers(
     max_workers: int = 4,
 ) -> OrchestratedResult[OutputT, AggregateT]:
     """Plan a bounded worker set, run it, then aggregate the outputs."""
+    normalized_workers = _normalized_registry(workers, kind="worker")
     plan = tuple(dict.fromkeys(_validate_name(name, kind="worker") for name in planner(input_value)))
-    unknown = [name for name in plan if name not in workers]
+    unknown = [name for name in plan if name not in normalized_workers]
     if unknown:
         raise UnknownWorkerError(f"unregistered workers: {', '.join(unknown)}")
 
-    selected = {name: workers[name] for name in plan}
+    selected = {name: normalized_workers[name] for name in plan}
     parallel = run_parallel(input_value, selected, max_workers=max_workers)
     aggregate, aggregate_trace = _timed_call("aggregate", lambda: aggregator(parallel.outputs))
     return OrchestratedResult(
