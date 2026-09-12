@@ -25,6 +25,7 @@ _ALLOWED_CONTENT_TYPES = frozenset(
 )
 _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 _MAX_HEADER_BYTES = 64 * 1024
+_MAX_CONNECTION_ATTEMPTS = 8
 _USER_AGENT = "AISearchResearchFetcher/1.0"
 
 
@@ -163,7 +164,7 @@ def _validate_response_framing(response: http.client.HTTPResponse) -> None:
             raise ResearchProtocolError("unsupported Transfer-Encoding")
 
     content_encoding = response.headers.get("Content-Encoding")
-    if content_encoding and content_encoding.strip().lower() not in {"identity"}:
+    if content_encoding and content_encoding.strip().lower() != "identity":
         raise ResearchUnsupportedContent("compressed research responses are not enabled")
 
 
@@ -218,7 +219,7 @@ class ResearchFetcher:
         try:
             preflight = self._registry.preflight(source_id, url)
             while True:
-                response, peer_ip = self._request_once(preflight)
+                response, peer_ip, connection = self._request_once(preflight)
                 try:
                     if response.status in _REDIRECT_STATUSES:
                         location = response.headers.get("Location")
@@ -247,15 +248,22 @@ class ResearchFetcher:
                     )
                 finally:
                     response.close()
+                    connection.close()
         finally:
             if self._trace_sink is not None:
                 duration_ms = round((time.perf_counter() - started) * 1000, 3)
                 self._trace_sink.emit(
                     context=WorkflowTraceContext(workflow="research_fetch", request_id=request_id),
-                    trace=StepTrace(name=f"source:{source_id}", duration_ms=duration_ms),
+                    trace=StepTrace(name="fetch", duration_ms=duration_ms),
                 )
 
-    def _request_once(self, preflight: ResearchTargetPreflight) -> tuple[http.client.HTTPResponse, str]:
+    def _request_once(
+        self,
+        preflight: ResearchTargetPreflight,
+    ) -> tuple[http.client.HTTPResponse, str, http.client.HTTPConnection]:
+        if len(preflight.resolved.addresses) > _MAX_CONNECTION_ATTEMPTS:
+            raise ResearchTargetDenied("research target resolved to too many addresses")
+
         last_error: BaseException | None = None
         for pinned_ip in preflight.resolved.addresses:
             connection = self._connection_factory(preflight, pinned_ip)
@@ -277,7 +285,7 @@ class ResearchFetcher:
                 connection.putheader("Connection", "close")
                 connection.endheaders()
                 response = connection.getresponse()
-                return response, peer_ip
+                return response, peer_ip, connection
             except (OSError, ssl.SSLError, http.client.HTTPException, ResearchTargetDenied) as exc:
                 last_error = exc
                 connection.close()
