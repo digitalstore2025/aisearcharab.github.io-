@@ -70,7 +70,7 @@ def _proxy_cidrs_cover_entire_family(values: tuple[str, ...]) -> bool:
 
 
 def _secure_database_url_is_postgresql(value: str) -> bool:
-    return urlparse(value).scheme.lower() in {"postgresql", "postgresql+psycopg"}
+    return urlparse(value).scheme.lower() == "postgresql+psycopg"
 
 
 def _database_url_uses_placeholder_credential(value: str) -> bool:
