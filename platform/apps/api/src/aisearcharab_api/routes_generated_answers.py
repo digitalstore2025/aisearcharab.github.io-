@@ -28,6 +28,7 @@ from .grounded_workflow import (
     GroundedNoEvidenceError,
     execute_grounded_workflow,
 )
+from .orchestration_observability import LoggingTraceSink, WorkflowTraceContext, emit_traces
 
 router = APIRouter(prefix="/answers", tags=["generated-answers"])
 logger = logging.getLogger(__name__)
@@ -234,10 +235,10 @@ def grounded_answer(
         ) from exc
 
     result = execution.result
-    logger.info(
-        "grounded workflow completed request_id=%s steps=%s",
-        request_id,
-        ",".join(f"{trace.name}:{trace.duration_ms:.3f}ms" for trace in execution.traces),
+    emit_traces(
+        LoggingTraceSink(logger),
+        context=WorkflowTraceContext(workflow="grounded_answer", request_id=request_id),
+        traces=execution.traces,
     )
     _record_result_safely(
         session,
