@@ -1,11 +1,6 @@
-name: CodeQL
+name: Scheduled CodeQL
+
 on:
-  pull_request:
-    branches: ["main"]
-    paths:
-      - "platform/apps/web/**"
-      - "platform/apps/api/**"
-      - ".github/workflows/codeql.yml"
   push:
     branches: ["main"]
     paths:
@@ -21,7 +16,7 @@ permissions:
   security-events: write
 
 concurrency:
-  group: codeql-${{ github.ref }}-${{ matrix.language }}
+  group: codeql-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -48,4 +43,4 @@ jobs:
       - name: Analyze
         uses: github/codeql-action/analyze@b96794f015dfd88f77b49b1c93e0fa7110f94c63 # v4
         with:
-          category: "/language:${{ matrix.language }}"
+          category: "/scheduled/language:${{ matrix.language }}"
