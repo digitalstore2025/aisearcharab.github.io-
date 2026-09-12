@@ -4,7 +4,7 @@ import itertools
 import math
 import re
 from dataclasses import dataclass
-from typing import Mapping, Sequence
+from typing import Sequence
 
 _ID = re.compile(r"^[A-Za-z0-9_.:-]{1,128}$")
 _ALLOWED_LOCALES = frozenset({"ar", "en", "tr", "mixed"})
@@ -204,6 +204,7 @@ def finalize_dataset(dataset: HumanJudgmentDataset) -> FinalizedJudgments:
             )
 
         query_final: dict[str, int] = {}
+        query_unresolved = 0
         for document_id, rows in by_document.items():
             if len({row.annotator_id for row in rows}) < 2:
                 raise JudgmentDatasetError(
@@ -221,6 +222,7 @@ def finalize_dataset(dataset: HumanJudgmentDataset) -> FinalizedJudgments:
                 decision = adjudicated.get(document_id)
                 if decision is None:
                     unresolved += 1
+                    query_unresolved += 1
                     continue
                 if decision.adjudicator_id in {row.annotator_id for row in rows}:
                     raise JudgmentDatasetError(
@@ -228,7 +230,7 @@ def finalize_dataset(dataset: HumanJudgmentDataset) -> FinalizedJudgments:
                     )
                 query_final[document_id] = decision.grade
 
-        if not any(grade > 0 for grade in query_final.values()):
+        if query_unresolved == 0 and not any(grade > 0 for grade in query_final.values()):
             raise JudgmentDatasetError(
                 f"query {query.query_id} has no finalized positively relevant document"
             )
