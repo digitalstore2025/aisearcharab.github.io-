@@ -4,7 +4,7 @@ import ipaddress
 import os
 from dataclasses import dataclass
 from functools import lru_cache
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 
 
 class ConfigurationError(RuntimeError):
@@ -32,7 +32,10 @@ def _valid_origin(value: str, *, require_https: bool) -> bool:
         return False
     if not parsed.netloc or parsed.username or parsed.password:
         return False
-    if parsed.path not in {"", "/"} or parsed.params or parsed.query or parsed.fragment:
+    # Browser Origin headers never include a trailing slash or path. Requiring
+    # an exact origin here prevents a configuration that validates but can
+    # never match CORSMiddleware at runtime.
+    if parsed.path or parsed.params or parsed.query or parsed.fragment:
         return False
     return True
 
@@ -64,6 +67,22 @@ def _proxy_cidrs_cover_entire_family(values: tuple[str, ...]) -> bool:
         if len(collapsed) == 1 and collapsed[0].prefixlen == 0:
             return True
     return False
+
+
+def _secure_database_url_is_postgresql(value: str) -> bool:
+    return urlparse(value).scheme.lower() in {"postgresql", "postgresql+psycopg"}
+
+
+def _database_url_uses_placeholder_credential(value: str) -> bool:
+    """Detect the documented placeholder after URL decoding.
+
+    Inspecting the decoded password closes the percent-encoding bypass while
+    avoiding false positives in database names or query parameters.
+    """
+
+    parsed = urlparse(value)
+    password = unquote(parsed.password or "").strip().casefold()
+    return password == "change-me"
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,11 +226,11 @@ class Settings:
                 raise ConfigurationError("MFA_ENCRYPTION_KEY is required in staging and production")
             if not self.login_throttle_key:
                 raise ConfigurationError("LOGIN_THROTTLE_KEY is required in staging and production")
-            if self.database_url.startswith("sqlite"):
-                raise ConfigurationError("SQLite is not allowed in staging or production")
+            if not _secure_database_url_is_postgresql(self.database_url):
+                raise ConfigurationError("PostgreSQL with psycopg is required in staging and production")
             if any("*" in host for host in self.allowed_hosts):
                 raise ConfigurationError("Wildcard hosts are not allowed in staging or production")
-            if "change-me" in self.database_url.lower():
+            if _database_url_uses_placeholder_credential(self.database_url):
                 raise ConfigurationError("DATABASE_URL contains a placeholder credential")
         if self.is_production:
             if self.generated_answers_enabled:
