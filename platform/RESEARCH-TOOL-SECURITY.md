@@ -62,6 +62,10 @@ Retrieved text is data, never authority. Future research workers must keep syste
 
 MCP is an integration transport, not a permission model. A future MCP connector must map every exposed MCP tool into the same `ToolCapabilityRegistry`; connector-provided tool names do not become executable merely because the server advertises them. High-impact MCP actions require explicit application permission, argument validation, idempotency policy, and approval where applicable.
 
+## Observability boundary
+
+Future tool/research execution must use the platform's payload-free observability boundary rather than ad-hoc logs. Routine telemetry may identify a validated workflow/tool/source ID, request ID, duration and bounded outcome/failure class. It must not record raw query text, full URLs or URL query strings, fetched response bodies, prompts, tool arguments, credentials, cookies, evidence text or model output. Any OpenTelemetry exporter must preserve the same attribute allowlist rather than serializing application payloads into spans.
+
 ## Promotion gate
 
 External research remains disabled until the project has a pinned-connection HTTP implementation, source registry configuration outside model control, adversarial SSRF/DNS-rebinding tests, prompt-injection evaluation, rate/cost limits, privacy review, Staging evidence, observability, and rollback/kill-switch controls.
