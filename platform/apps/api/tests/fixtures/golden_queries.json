@@ -1,9 +1,26 @@
 [
   {"query": "GPT-5", "expected_slug": "gpt-5-arabic-analysis"},
+  {"query": "استخدامات GPT-5 العربية", "expected_slug": "gpt-5-arabic-analysis"},
+  {"query": "الاستدلال والتحقق", "expected_slug": "gpt-5-arabic-analysis"},
+  {"query": "مخرجات النموذج دون مصادر", "expected_slug": "gpt-5-arabic-analysis"},
+
   {"query": "نماذج اللغة الكبيرة", "expected_slug": "model-comparison-gemini-claude"},
   {"query": "مقارنة Gemini 2.5 وClaude", "expected_slug": "model-comparison-gemini-claude"},
+  {"query": "Llama نماذج اللغة", "expected_slug": "model-comparison-gemini-claude"},
+  {"query": "الدقة والسياق والمصادر", "expected_slug": "model-comparison-gemini-claude"},
+
   {"query": "OpenAI API", "expected_slug": "openai-api-arabic-guide"},
+  {"query": "حماية المفاتيح", "expected_slug": "openai-api-arabic-guide"},
   {"query": "Python JavaScript", "expected_slug": "openai-api-arabic-guide"},
+  {"query": "مراقبة التكلفة", "expected_slug": "openai-api-arabic-guide"},
+
   {"query": "التحقق من الصور", "expected_slug": "osint-image-verification"},
-  {"query": "الذكاء الاصطناعي للاطفال", "expected_slug": "ai-children-safety"}
+  {"query": "أدوات OSINT", "expected_slug": "osint-image-verification"},
+  {"query": "البحث العكسي", "expected_slug": "osint-image-verification"},
+  {"query": "البيانات الوصفية", "expected_slug": "osint-image-verification"},
+
+  {"query": "الذكاء الاصطناعي للأطفال", "expected_slug": "ai-children-safety"},
+  {"query": "حماية بيانات الطفل", "expected_slug": "ai-children-safety"},
+  {"query": "الخصوصية للأهل والمعلمين", "expected_slug": "ai-children-safety"},
+  {"query": "المعلومات الشخصية", "expected_slug": "ai-children-safety"}
 ]
