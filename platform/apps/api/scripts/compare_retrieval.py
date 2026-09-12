@@ -54,6 +54,12 @@ def main() -> int:
     parser.add_argument("--candidate", type=Path, required=True)
     parser.add_argument("--output", type=Path)
     parser.add_argument(
+        "--min-mrr-delta",
+        type=float,
+        default=0.0,
+        help="Minimum allowed MRR@10 delta candidate-baseline.",
+    )
+    parser.add_argument(
         "--min-recall-delta",
         type=float,
         default=0.0,
@@ -84,6 +90,8 @@ def main() -> int:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(rendered, encoding="utf-8")
 
+    if comparison.delta_mrr_at_10 < args.min_mrr_delta:
+        return 1
     if comparison.delta_recall_at_5 < args.min_recall_delta:
         return 1
     if comparison.delta_ndcg_at_10 < args.min_ndcg_delta:
