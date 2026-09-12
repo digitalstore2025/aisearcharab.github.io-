@@ -49,7 +49,21 @@ def test_production_rejects_sqlite() -> None:
 
 def test_staging_rejects_sqlite() -> None:
     settings = staging_settings(database_url="sqlite:///unsafe.db")
-    with pytest.raises(ConfigurationError, match="SQLite is not allowed in staging or production"):
+    with pytest.raises(ConfigurationError, match="PostgreSQL with psycopg is required"):
+        settings.validate()
+
+
+@pytest.mark.parametrize(
+    "database_url",
+    [
+        "mysql://app:secret@db/app",
+        "postgresql+psycopg2://app:secret@db/app",
+        "file:///tmp/database",
+    ],
+)
+def test_secure_runtime_requires_reviewed_postgresql_driver(database_url: str) -> None:
+    settings = staging_settings(database_url=database_url)
+    with pytest.raises(ConfigurationError, match="PostgreSQL with psycopg is required"):
         settings.validate()
 
 
@@ -116,10 +130,32 @@ def test_staging_requires_https_origin() -> None:
         settings.validate()
 
 
-def test_staging_rejects_placeholder_database_credential() -> None:
-    settings = staging_settings(database_url="postgresql+psycopg://app:change-me@db/app")
+@pytest.mark.parametrize("environment", ["staging", "production"])
+def test_secure_runtime_rejects_trailing_slash_cors_origin(environment: str) -> None:
+    factory = staging_settings if environment == "staging" else production_settings
+    settings = factory(allowed_origins=("https://staging.aisearcharab.com/",))
+    with pytest.raises(ConfigurationError, match="without paths"):
+        settings.validate()
+
+
+@pytest.mark.parametrize(
+    "database_url",
+    [
+        "postgresql+psycopg://app:change-me@db/app",
+        "postgresql+psycopg://app:change%2Dme@db/app",
+        "postgresql+psycopg://app:%63hange%2Dme@db/app",
+        "postgresql+psycopg://app:CHANGE%2DME@db/app",
+    ],
+)
+def test_staging_rejects_placeholder_database_credential(database_url: str) -> None:
+    settings = staging_settings(database_url=database_url)
     with pytest.raises(ConfigurationError, match="placeholder credential"):
         settings.validate()
+
+
+def test_secure_runtime_accepts_encoded_non_placeholder_database_password() -> None:
+    settings = staging_settings(database_url="postgresql+psycopg://app:s%40fe-secret@db/app")
+    settings.validate()
 
 
 def test_production_requires_separation_of_duties() -> None:
