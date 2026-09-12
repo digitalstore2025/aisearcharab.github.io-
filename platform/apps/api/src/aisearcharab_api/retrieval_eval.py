@@ -28,7 +28,8 @@ class RetrievalComparison:
 
 
 def _dcg(relevances: Sequence[int], cutoff: int) -> float:
-    return sum(float(rel) / math.log2(rank + 2) for rank, rel in enumerate(relevances[:cutoff]))
+    """Compute graded DCG using exponential gain for relevance grades 0..3."""
+    return sum((2.0**rel - 1.0) / math.log2(rank + 2) for rank, rel in enumerate(relevances[:cutoff]))
 
 
 def _validate_judgments(judgments: Mapping[str, Mapping[str, int]]) -> None:
