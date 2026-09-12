@@ -42,12 +42,20 @@ jobs:
             platform/apps/api/pyproject.toml
             platform/experiments/neural_retrieval/requirements.txt
 
-      - name: Install reviewed experiment dependencies
+      - name: Install reviewed CPU-only experiment dependencies
         run: |
           python -m pip install 'pip==26.1.2'
           python -m pip install -e platform/apps/api
+          python -m pip install 'torch==2.14.0' --index-url https://download.pytorch.org/whl/cpu
           python -m pip install -r platform/experiments/neural_retrieval/requirements.txt
           python -m pip check
+          python - <<'PY'
+          import sentencepiece
+          import torch
+          assert torch.__version__.startswith("2.14.0")
+          assert torch.cuda.is_available() is False
+          print("torch", torch.__version__, "sentencepiece", sentencepiece.__version__)
+          PY
 
       - name: Run offline multilingual neural retrieval benchmark
         run: |
@@ -59,12 +67,16 @@ jobs:
             --output /tmp/neural-retrieval-report.json
 
       - name: Validate report JSON
-        run: python -m json.tool /tmp/neural-retrieval-report.json >/dev/null
+        if: always()
+        run: |
+          test -s /tmp/neural-retrieval-report.json
+          python -m json.tool /tmp/neural-retrieval-report.json >/dev/null
 
       - name: Upload benchmark evidence
+        if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: neural-retrieval-e5-base
           path: /tmp/neural-retrieval-report.json
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
