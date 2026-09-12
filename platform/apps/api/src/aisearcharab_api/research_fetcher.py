@@ -26,6 +26,7 @@ _ALLOWED_CONTENT_TYPES = frozenset(
 _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 _MAX_HEADER_BYTES = 64 * 1024
 _MAX_CONNECTION_ATTEMPTS = 8
+_MAX_URL_LENGTH = 8192
 _USER_AGENT = "AISearchResearchFetcher/1.0"
 
 
@@ -77,11 +78,7 @@ class _PinnedHTTPConnection(http.client.HTTPConnection):
         self._pinned_ip = pinned_ip
 
     def connect(self) -> None:
-        self.sock = socket.create_connection(
-            (self._pinned_ip, self.port),
-            self.timeout,
-            self.source_address,
-        )
+        self.sock = socket.create_connection((self._pinned_ip, self.port), self.timeout, self.source_address)
 
 
 class _PinnedHTTPSConnection(http.client.HTTPSConnection):
@@ -100,11 +97,7 @@ class _PinnedHTTPSConnection(http.client.HTTPSConnection):
         self._pinned_ip = pinned_ip
 
     def connect(self) -> None:
-        raw_socket = socket.create_connection(
-            (self._pinned_ip, self.port),
-            self.timeout,
-            self.source_address,
-        )
+        raw_socket = socket.create_connection((self._pinned_ip, self.port), self.timeout, self.source_address)
         try:
             self.sock = self._context.wrap_socket(raw_socket, server_hostname=self.host)
         except BaseException:
@@ -136,6 +129,15 @@ def _default_connection_factory(preflight: ResearchTargetPreflight, pinned_ip: s
             timeout=preflight.timeout_seconds,
         )
     raise ResearchProtocolError("unsupported preflight scheme")
+
+
+def _validate_fetch_url(url: str) -> None:
+    if not isinstance(url, str):
+        raise ResearchProtocolError("research URL must be a string")
+    if not url or len(url) > _MAX_URL_LENGTH:
+        raise ResearchProtocolError("research URL length is outside allowed bounds")
+    if urlsplit(url).fragment:
+        raise ResearchProtocolError("URL fragments are not allowed for research fetches")
 
 
 def _request_target(url: str) -> str:
@@ -217,6 +219,7 @@ class ResearchFetcher:
     def fetch(self, source_id: str, url: str, *, request_id: str | None = None) -> ResearchFetchResult:
         started = time.perf_counter()
         try:
+            _validate_fetch_url(url)
             preflight = self._registry.preflight(source_id, url)
             while True:
                 response, peer_ip, connection = self._request_once(preflight)
@@ -226,6 +229,7 @@ class ResearchFetcher:
                         if not location:
                             raise ResearchProtocolError("redirect response is missing Location")
                         preflight = self._registry.redirect(preflight, location)
+                        _validate_fetch_url(preflight.resolved.url)
                         continue
 
                     if response.status < 200 or response.status >= 300:
@@ -274,7 +278,12 @@ class ResearchFetcher:
                 peer = connection.sock.getpeername()[0]
                 peer_ip = validate_connected_peer(preflight, str(peer))
 
-                connection.putrequest("GET", _request_target(preflight.resolved.url), skip_host=True, skip_accept_encoding=True)
+                connection.putrequest(
+                    "GET",
+                    _request_target(preflight.resolved.url),
+                    skip_host=True,
+                    skip_accept_encoding=True,
+                )
                 connection.putheader("Host", preflight.resolved.host)
                 connection.putheader("User-Agent", _USER_AGENT)
                 connection.putheader(
