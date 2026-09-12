@@ -9,7 +9,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
-from aisearcharab_api.retrieval_eval import compare_rankings  # noqa: E402
+from aisearcharab_api.retrieval_eval import compare_rankings, comparison_passes_gate  # noqa: E402
 
 
 def _load_json(path: Path) -> object:
@@ -90,15 +90,13 @@ def main() -> int:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(rendered, encoding="utf-8")
 
-    if comparison.delta_mrr_at_10 < args.min_mrr_delta:
-        return 1
-    if comparison.delta_recall_at_5 < args.min_recall_delta:
-        return 1
-    if comparison.delta_ndcg_at_10 < args.min_ndcg_delta:
-        return 1
-    if comparison.delta_zero_result_rate > args.max_zero_result_delta:
-        return 1
-    return 0
+    return 0 if comparison_passes_gate(
+        comparison,
+        min_mrr_delta=args.min_mrr_delta,
+        min_recall_delta=args.min_recall_delta,
+        min_ndcg_delta=args.min_ndcg_delta,
+        max_zero_result_delta=args.max_zero_result_delta,
+    ) else 1
 
 
 if __name__ == "__main__":
