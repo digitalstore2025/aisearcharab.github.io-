@@ -101,4 +101,5 @@ jobs:
           name: validated-public-site
           path: public
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 7
