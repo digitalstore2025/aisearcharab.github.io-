@@ -21,6 +21,14 @@ from .generated_answers import (
     revalidate_selected_evidence,
 )
 from .generation_quota import GenerationQuotaExceeded, record_generation_result, reserve_generation_quota
+from .grounded_workflow import (
+    EvidenceChangedDuringGeneration,
+    EvidenceRevalidationUnavailable,
+    GroundedContractViolation,
+    GroundedNoEvidenceError,
+    execute_grounded_workflow,
+)
+from .orchestration_observability import LoggingTraceSink, WorkflowTraceContext, emit_traces
 
 router = APIRouter(prefix="/answers", tags=["generated-answers"])
 logger = logging.getLogger(__name__)
@@ -59,6 +67,31 @@ def _record_result_safely(
         logger.exception("generation result audit failed request_id=%s", request_id)
 
 
+def _record_failure_with_optional_result(
+    session: Session,
+    *,
+    user_id: str,
+    request_id: str,
+    settings: object,
+    started: float,
+    failure_class: str,
+    result: GroundedAnswerResponse | None,
+) -> None:
+    _record_result_safely(
+        session,
+        user_id=user_id,
+        request_id=request_id,
+        outcome="failure",
+        model=result.model if result is not None else str(getattr(settings, "openai_model", "unknown")),
+        latency_ms=(time.perf_counter() - started) * 1000,
+        input_tokens=result.usage.input_tokens if result is not None else None,
+        output_tokens=result.usage.output_tokens if result is not None else None,
+        total_tokens=result.usage.total_tokens if result is not None else None,
+        uncertainty=result.uncertainty if result is not None else None,
+        failure_class=failure_class,
+    )
+
+
 @router.post("/grounded", response_model=GroundedAnswerResponse)
 def grounded_answer(
     payload: GroundedAnswerRequest,
@@ -76,20 +109,19 @@ def grounded_answer(
     user_id = principal.user.id
     request_id = str(uuid.uuid4())
     max_sources = min(payload.max_sources or settings.generated_answer_max_sources, settings.generated_answer_max_sources)
-    evidence = retrieve_evidence(
-        session,
-        payload.query,
-        candidate_limit=settings.search_candidate_limit,
-        max_sources=max_sources,
-        max_evidence_chars=settings.generated_answer_max_evidence_chars,
-    )
-    # Evidence is materialized into immutable dataclasses. End the read transaction
-    # before quota work and, critically, before waiting on the model provider.
-    session.rollback()
-    if not evidence:
-        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="insufficient indexed evidence")
+    latest_result: GroundedAnswerResponse | None = None
+    started = time.perf_counter()
 
-    try:
+    def retrieve_step():
+        return retrieve_evidence(
+            session,
+            payload.query,
+            candidate_limit=settings.search_candidate_limit,
+            max_sources=max_sources,
+            max_evidence_chars=settings.generated_answer_max_evidence_chars,
+        )
+
+    def reserve_quota_step() -> None:
         reserve_generation_quota(
             session,
             user_id=user_id,
@@ -97,16 +129,10 @@ def grounded_answer(
             max_requests=settings.generated_answer_max_requests,
             window_seconds=settings.generated_answer_window_seconds,
         )
-    except GenerationQuotaExceeded as exc:
-        raise HTTPException(
-            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-            detail="generated answer quota exceeded",
-            headers={"Retry-After": str(exc.retry_after_seconds)},
-        ) from exc
 
-    started = time.perf_counter()
-    try:
-        result = generate_grounded_answer(
+    def generate_step(evidence):
+        nonlocal latest_result
+        latest_result = generate_grounded_answer(
             payload.query,
             evidence,
             request_id=request_id,
@@ -116,80 +142,111 @@ def grounded_answer(
             max_retries=settings.openai_max_retries,
             max_output_tokens=settings.openai_max_output_tokens,
         )
+        return latest_result
+
+    def revalidate_step(evidence, result: GroundedAnswerResponse) -> bool:
+        try:
+            return revalidate_selected_evidence(session, evidence, result)
+        except SQLAlchemyError as exc:
+            session.rollback()
+            raise EvidenceRevalidationUnavailable("evidence revalidation unavailable") from exc
+
+    try:
+        execution = execute_grounded_workflow(
+            request_id=request_id,
+            retrieve_step=retrieve_step,
+            # Evidence has already been copied into immutable dataclasses. Closing
+            # the read transaction before quota/provider latency preserves the
+            # original concurrency and freshness boundary.
+            release_read_transaction_step=session.rollback,
+            reserve_quota_step=reserve_quota_step,
+            generate_step=generate_step,
+            revalidate_step=revalidate_step,
+        )
+    except GroundedNoEvidenceError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="insufficient indexed evidence") from exc
+    except GenerationQuotaExceeded as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="generated answer quota exceeded",
+            headers={"Retry-After": str(exc.retry_after_seconds)},
+        ) from exc
     except UpstreamUnavailableError as exc:
-        _record_result_safely(
+        _record_failure_with_optional_result(
             session,
             user_id=user_id,
             request_id=request_id,
-            outcome="failure",
-            model=settings.openai_model,
-            latency_ms=(time.perf_counter() - started) * 1000,
+            settings=settings,
+            started=started,
             failure_class="provider_unavailable",
+            result=latest_result,
         )
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="generation provider unavailable") from exc
     except UpstreamInvalidResponseError as exc:
-        _record_result_safely(
+        _record_failure_with_optional_result(
             session,
             user_id=user_id,
             request_id=request_id,
-            outcome="failure",
-            model=settings.openai_model,
-            latency_ms=(time.perf_counter() - started) * 1000,
+            settings=settings,
+            started=started,
             failure_class="invalid_provider_output",
+            result=latest_result,
         )
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="generation provider returned invalid output") from exc
-
-    # Reacquire the database only after provider latency and verify that every
-    # selected claim is still on the same published/indexed content revision.
-    try:
-        evidence_is_current = revalidate_selected_evidence(session, evidence, result)
-    except SQLAlchemyError as exc:
-        session.rollback()
-        _record_result_safely(
+    except GroundedContractViolation as exc:
+        _record_failure_with_optional_result(
             session,
             user_id=user_id,
             request_id=request_id,
-            outcome="failure",
-            model=result.model,
-            latency_ms=(time.perf_counter() - started) * 1000,
-            input_tokens=result.usage.input_tokens,
-            output_tokens=result.usage.output_tokens,
-            total_tokens=result.usage.total_tokens,
-            uncertainty=result.uncertainty,
+            settings=settings,
+            started=started,
+            failure_class="grounded_contract_violation",
+            result=latest_result,
+        )
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="grounded response failed local validation") from exc
+    except EvidenceRevalidationUnavailable as exc:
+        _record_failure_with_optional_result(
+            session,
+            user_id=user_id,
+            request_id=request_id,
+            settings=settings,
+            started=started,
             failure_class="evidence_revalidation_unavailable",
+            result=latest_result,
         )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="evidence revalidation unavailable",
         ) from exc
-
-    if not evidence_is_current:
+    except EvidenceChangedDuringGeneration as exc:
         session.rollback()
-        _record_result_safely(
+        _record_failure_with_optional_result(
             session,
             user_id=user_id,
             request_id=request_id,
-            outcome="failure",
-            model=result.model,
-            latency_ms=(time.perf_counter() - started) * 1000,
-            input_tokens=result.usage.input_tokens,
-            output_tokens=result.usage.output_tokens,
-            total_tokens=result.usage.total_tokens,
-            uncertainty=result.uncertainty,
+            settings=settings,
+            started=started,
             failure_class="evidence_changed",
+            result=latest_result,
         )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail="evidence changed during generation; retry",
-        )
+        ) from exc
 
+    result = execution.result
+    emit_traces(
+        LoggingTraceSink(logger),
+        context=WorkflowTraceContext(workflow="grounded_answer", request_id=request_id),
+        traces=execution.traces,
+    )
     _record_result_safely(
         session,
         user_id=user_id,
         request_id=request_id,
         outcome="success",
         model=result.model,
-        latency_ms=(time.perf_counter() - started) * 1000,
+        latency_ms=execution.provider_path_latency_ms,
         input_tokens=result.usage.input_tokens,
         output_tokens=result.usage.output_tokens,
         total_tokens=result.usage.total_tokens,
