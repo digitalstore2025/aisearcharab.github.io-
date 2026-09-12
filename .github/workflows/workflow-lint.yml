@@ -1,0 +1,53 @@
+name: Workflow lint
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/**"
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workflow-lint-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  actionlint:
+    name: actionlint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Install verified actionlint 1.7.12
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="1.7.12"
+          archive="actionlint_${version}_linux_amd64.tar.gz"
+          expected_sha256="8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8"
+          url="https://github.com/rhysd/actionlint/releases/download/v${version}/${archive}"
+          curl --proto '=https' --tlsv1.2 --fail --show-error --silent --location --retry 3 --output "/tmp/${archive}" "$url"
+          printf '%s  %s\n' "$expected_sha256" "/tmp/${archive}" | sha256sum --check --strict
+          mkdir -p /tmp/actionlint
+          tar -xzf "/tmp/${archive}" -C /tmp/actionlint actionlint
+          /tmp/actionlint/actionlint -version
+
+      - name: Validate all GitHub Actions workflows
+        shell: bash
+        run: |
+          set -euo pipefail
+          # SC2129 is a style-only ShellCheck suggestion in platform-api.yml;
+          # syntax, expressions, action contracts, injection checks and all other
+          # actionlint/ShellCheck findings remain fail-closed.
+          /tmp/actionlint/actionlint -color -ignore 'SC2129'
