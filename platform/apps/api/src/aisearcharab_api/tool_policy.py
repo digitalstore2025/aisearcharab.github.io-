@@ -43,6 +43,8 @@ class InvalidToolRegistration(ValueError):
 
 
 def _identifier(value: str, *, field: str, pattern: re.Pattern[str]) -> str:
+    if not isinstance(value, str):
+        raise InvalidToolRegistration(f"{field} must be a string")
     normalized = value.strip()
     if not pattern.fullmatch(normalized):
         raise InvalidToolRegistration(f"{field} contains unsupported characters or length")
@@ -66,6 +68,10 @@ class ToolCapability:
         sources = frozenset(
             _identifier(value, field="research source", pattern=_TOOL_NAME) for value in self.allowed_research_sources
         )
+        if not isinstance(self.requires_approval, bool):
+            raise InvalidToolRegistration("requires_approval must be boolean")
+        if not isinstance(self.idempotency_key_required, bool):
+            raise InvalidToolRegistration("idempotency_key_required must be boolean")
         if self.replay_class not in {
             "pure_replay_safe",
             "read_replay_safe",
@@ -73,6 +79,10 @@ class ToolCapability:
             "non_idempotent_side_effect",
         }:
             raise InvalidToolRegistration("unsupported replay_class")
+        if self.replay_class in {"idempotent_side_effect", "non_idempotent_side_effect"} and not permissions:
+            raise InvalidToolRegistration("side-effecting tools must require an application permission")
+        if sources and not permissions:
+            raise InvalidToolRegistration("external research tools must require an application permission")
         if self.replay_class == "idempotent_side_effect" and not self.idempotency_key_required:
             raise InvalidToolRegistration("idempotent side-effect tools must require an idempotency key")
         if self.replay_class == "non_idempotent_side_effect" and not self.requires_approval:
@@ -114,6 +124,8 @@ class ToolCapabilityRegistry:
         self._capabilities = indexed
 
     def get(self, name: str) -> ToolCapability:
+        if not isinstance(name, str):
+            raise UnknownToolError("tool name must be a string")
         normalized = name.strip()
         capability = self._capabilities.get(normalized)
         if capability is None:
@@ -126,7 +138,7 @@ class ToolCapabilityRegistry:
         missing = capability.required_permissions - granted
         if missing:
             raise MissingToolPermission(f"tool permissions missing: {', '.join(sorted(missing))}")
-        if capability.requires_approval and not context.approved:
+        if capability.requires_approval and context.approved is not True:
             raise ToolApprovalRequired(f"tool requires approval: {capability.name}")
 
         source_id = context.research_source_id.strip() if context.research_source_id is not None else None
