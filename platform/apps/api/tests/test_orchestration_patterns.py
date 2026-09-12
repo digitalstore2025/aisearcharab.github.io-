@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from aisearcharab_api.orchestration import (
+    DuplicateRegistrationError,
     Evaluation,
     UnknownRouteError,
     UnknownWorkerError,
@@ -131,4 +132,27 @@ def test_evaluator_loop_enforces_iteration_bounds(value: int) -> None:
             evaluator=lambda _candidate: Evaluation(accepted=True),
             refiner=lambda candidate, _evaluation: candidate,
             max_iterations=value,
+        )
+
+
+def test_parallel_rejects_colliding_normalized_worker_names() -> None:
+    with pytest.raises(DuplicateRegistrationError):
+        run_parallel(
+            "query",
+            {
+                "worker": lambda value: value,
+                " worker ": lambda value: value,
+            },
+        )
+
+
+def test_routing_rejects_colliding_normalized_route_names() -> None:
+    with pytest.raises(DuplicateRegistrationError):
+        run_routed(
+            "search",
+            lambda value: value,
+            {
+                "search": lambda _value: "a",
+                " search ": lambda _value: "b",
+            },
         )
