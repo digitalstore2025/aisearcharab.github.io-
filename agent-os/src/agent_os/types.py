@@ -5,6 +5,17 @@ from enum import Enum
 from typing import Any
 
 
+EXECUTION_ENVIRONMENTS = frozenset({"local", "development", "staging", "production"})
+
+
+def validate_execution_environment(environment: str) -> str:
+    """Require one canonical runtime environment label; never guess or normalize."""
+    if not isinstance(environment, str) or environment not in EXECUTION_ENVIRONMENTS:
+        allowed = ", ".join(sorted(EXECUTION_ENVIRONMENTS))
+        raise ValueError(f"Unsupported execution environment; expected one of: {allowed}")
+    return environment
+
+
 class Decision(str, Enum):
     ALLOW = "allow"
     APPROVAL = "approval"
