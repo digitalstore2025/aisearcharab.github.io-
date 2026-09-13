@@ -9,11 +9,13 @@
 - Bounded `TeamRuntime`: sequential waves, concurrent agents inside a wave, fail-closed continuation, final independent review ordering.
 - Agent tool declarations intersected with active project-profile allowlists.
 - Policy-bound tool/MCP runtime with explicit handler registration; no dynamic model-controlled registration.
-- Exact-scope one-time Approval Ledger; wildcard approvals prohibited.
-- Production read-vs-mutation enforcement before tool execution.
+- Provider function-call round trips with bounded tool rounds and fail-closed handling of unsuccessful provider responses.
+- Exact-scope one-time Approval Ledger bound to canonical tool arguments; wildcard approvals prohibited and consumption is thread-safe.
+- Production read-vs-mutation enforcement keyed by both logical tool and action.
 - Model/cost tier router plus deployment policy aliases (`luna`, `terra`, `sol`, `astra`).
 - Environment-based provider model binding with placeholder fail-closed behavior.
-- Optional OpenAI Responses API execution adapter and deterministic dry-run adapter.
+- Optional stateless OpenAI Responses API execution adapter (`store=False`) and deterministic dry-run adapter.
+- CLI `execute-team` runtime wiring with default-deny tools and an explicit opt-in, workspace-confined, non-sensitive `repo.read` handler; no CLI mutation handler.
 - Thread-safe, payload-minimized JSONL observability tracing for planning, agent execution, team execution, and tools.
 - Memory namespaces and verified/fresh fact gate.
 - RAG dedupe/hybrid scoring/citation metric primitive.
@@ -25,11 +27,11 @@
 - Failure clustering for eval-driven improvement.
 - Artifact hash/provenance records.
 - Project profiles.
-- CI workflow and static/unit eval suites covering routing, runtime ordering, model aliases, approval boundaries, tool authority, trace safety, installed-wheel execution, and release packaging.
+- CI workflow and static/unit eval suites covering routing, runtime ordering, provider/tool round trips, model aliases, argument-bound approvals, concurrency, production boundaries, safe CLI repository access, trace safety, installed-wheel execution, and release packaging.
 
 ## Integration boundaries intentionally left external
 - Actual cloud IAM/network/sandbox enforcement.
-- Vendor-specific remote MCP transport/session adapters; the core now provides the guarded execution contract and explicit handler registry.
+- Vendor-specific remote MCP transport/session adapters; the core provides the guarded execution contract and explicit handler registry.
 - Durable database/vector store.
 - Deployment-specific model IDs, quotas, and prices.
 - Production OpenTelemetry/metrics backend.
