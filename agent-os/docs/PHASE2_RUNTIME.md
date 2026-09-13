@@ -15,21 +15,21 @@ Implemented runtime layers:
 7. `RegisteredToolExecutor` publishes only explicitly registered, schema-described functions to provider adapters. Tool arguments are validated before approvals are consumed and are validated again immediately before handler execution.
 8. `JsonlTracer` is thread-safe and payload-minimized. Raw task text and tool arguments are not written to runtime traces.
 9. `OpenAIResponsesAdapter` is optional and uses stateless Responses API calls with `store=False`. Provider function calls return to the runtime, pass policy/approval gates, execute registered handlers, and are returned as `function_call_output` before the model may continue.
-10. The CLI exposes no mutation handler. Its only built-in tool path is an explicit opt-in `repo.read`, confined to a configured non-sensitive workspace root and blocked from sensitive files and path traversal.
+10. The CLI exposes no mutation handler. Its only built-in tool path is an explicit opt-in `repo.read`, confined to a configured non-sensitive workspace root and opened through no-follow directory/file descriptors.
 11. The default CI/runtime adapter is deterministic `dry-run`.
 
 ## Execution semantics
 
 - Waves are sequential; agents in the same wave may execute concurrently.
 - Team plans fail closed before worker creation if assignments are duplicated, waves contain duplicate or unknown agents, any assignment is unscheduled, or a wave is empty.
-- A wave receives evidence only from completed prior waves, preventing same-wave hidden dependencies.
+- A later wave receives bounded context only from completed prior-wave agents. That context contains both textual output and completed tool evidence; tool evidence is explicitly labeled untrusted data.
 - The independent reviewer remains the dedicated final wave produced by `TeamPlanner`.
 - Verification and independent review receive stronger model policy tiers than ordinary execution.
 - Runtime is fail-closed by default: any adapter failure, unsuccessful provider response, denied tool call, pending approval, malformed provider call, malformed plan, or tool-round limit stops later waves.
 - Tool calls from failed, cancelled, or incomplete provider responses are discarded and never executed.
 - One provider round may execute at most one tool call. The OpenAI adapter requests `parallel_tool_calls=False`, and the runtime independently rejects multi-call rounds before any handler runs. This avoids partial side effects across heterogeneous tools that do not share a transaction.
 - Tool calls are capped by `max_tool_rounds` to prevent unbounded provider/tool loops.
-- Tool output is labeled as untrusted data when returned to the model and is not automatically treated as verified evidence.
+- Tool output is labeled as untrusted data when returned to the model and when forwarded to later waves; it is not automatically treated as verified evidence.
 - Full agent objectives and operating instructions remain in the higher-priority provider `instructions` contract and are not silently truncated.
 
 ## Model deployment bindings
@@ -47,11 +47,13 @@ Provider IDs are deployment configuration. Do not commit credentials or API keys
 
 ## CLI
 
-Plan only:
+Planning-only team construction does not load the policy file:
 
 ```bash
 agent-os team-plan "Implement backend API" --profile aisearch-study
 ```
+
+The `plan` and `execute-team` commands load policy because they perform policy-aware routing or tool execution.
 
 Execute orchestration without provider calls:
 
@@ -73,7 +75,7 @@ agent-os execute-team "Inspect the repository evidence" \
   --trace-jsonl /tmp/astra-runtime.jsonl
 ```
 
-`--enable-repo-read` is opt-in. The configured workspace root itself is rejected if it resolves within a sensitive path such as `.ssh`, `secrets`, or `credentials`. The handler accepts only workspace-relative paths that resolve inside the root, blocks sensitive absolute and relative target paths including `.git`, `.ssh`, `.env` files and common key/certificate suffixes, and rejects files larger than 256 KiB. The CLI registers no mutation-capable handler. Additional tool-enabled deployments instantiate the runtime programmatically and explicitly register the minimum handlers required by that environment.
+`--enable-repo-read` is opt-in. The configured workspace root itself is rejected if it resolves within a sensitive path such as `.ssh`, `secrets`, or `credentials`. On supported POSIX platforms, the root and every requested directory component are opened through directory file descriptors with `O_NOFOLLOW`; the final file is opened with `O_NOFOLLOW`, verified with `fstat`, and read from that same descriptor. This removes the check-then-read symlink race rather than relying on a prior resolved path check. Platforms that cannot provide the required no-follow/dir-fd primitives fail closed. Sensitive paths, `.env` files, common key/certificate suffixes, non-regular files, and files larger than 256 KiB are rejected. The CLI registers no mutation-capable handler.
 
 ## Tool/MCP integration
 
