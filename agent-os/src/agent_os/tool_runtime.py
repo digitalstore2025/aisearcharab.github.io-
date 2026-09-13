@@ -98,7 +98,11 @@ class RegisteredToolExecutor:
 class PolicyBoundToolRuntime:
     """Authorize, approval-gate, and execute tool calls with least authority."""
 
-    _KNOWN_PRODUCTION_READS = frozenset({"repo.read", "search.public", "test.run"})
+    _KNOWN_PRODUCTION_READS = frozenset({
+        ("repo", "repo.read"),
+        ("public_search", "search.public"),
+        ("tests", "test.run"),
+    })
 
     def __init__(
         self,
@@ -155,7 +159,7 @@ class PolicyBoundToolRuntime:
         if (
             environment == "production"
             and not self.production_mutations
-            and call.action not in self._KNOWN_PRODUCTION_READS
+            and (call.tool, call.action) not in self._KNOWN_PRODUCTION_READS
         ):
             result = ToolExecutionResult(
                 call.tool,
