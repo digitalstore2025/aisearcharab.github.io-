@@ -7,7 +7,7 @@ Phase 2 turns the v2.1 planning control plane into a bounded execution plane whi
 Implemented runtime layers:
 
 1. `TeamPlanner` produces bounded waves and explicit handoffs.
-2. `TeamRuntime` validates the plan, executes one wave at a time, and runs agents within a wave concurrently.
+2. `TeamRuntime` validates the plan, requires exactly one independent reviewer in a dedicated final wave, executes one wave at a time, and runs agents within a wave concurrently.
 3. `ModelRouter` assigns policy strength and aliases: `luna` (economy), `terra` (standard), `sol` (strong), `astra` (critical). Aliases must be non-empty strings.
 4. `ModelBindingResolver` maps policy aliases to deployment model IDs through `ASTRA_MODEL_<ALIAS>` environment variables. Policy aliases are not assumed to be provider model IDs.
 5. `PolicyBoundToolRuntime` enforces profile tool allowlists, production-mutation boundaries, schema validation, the MCP preflight gateway, and one-time exact-scope approvals before any registered tool handler executes.
@@ -21,9 +21,9 @@ Implemented runtime layers:
 ## Execution semantics
 
 - Waves are sequential; agents in the same wave may execute concurrently.
-- Team plans fail closed before worker creation if assignments are duplicated, waves contain duplicate or unknown agents, any assignment is unscheduled, or a wave is empty.
+- Team plans fail closed before worker creation if assignments are duplicated, waves contain duplicate or unknown agents, any assignment is unscheduled, a wave is empty, the plan does not contain exactly one independent reviewer, or the reviewer is not alone in the final wave.
 - A later wave receives bounded context only from completed prior-wave agents. That context contains both textual output and completed tool evidence; tool evidence is explicitly labeled untrusted data.
-- The independent reviewer remains the dedicated final wave produced by `TeamPlanner`.
+- `TeamPlanner` creates the final independent-review wave, and `TeamRuntime` independently enforces the same invariant for manually supplied plans.
 - Verification and independent review receive stronger model policy tiers than ordinary execution.
 - Runtime is fail-closed by default: any adapter failure, unsuccessful provider response, denied tool call, pending approval, malformed provider call, malformed plan, or tool-round limit stops later waves.
 - Tool calls from failed, cancelled, or incomplete provider responses are discarded and never executed.
