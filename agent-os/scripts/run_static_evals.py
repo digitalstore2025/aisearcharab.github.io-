@@ -60,12 +60,12 @@ def main() -> int:
             risk=c.get("risk", "medium"),
             max_specialists=c.get("max_specialists", 5),
         )
-        got = set(plan.agents)
-        expected = set(c["expected_agents"])
+        got = list(plan.agents)
+        expected = c["expected_agents"]
         if got == expected:
             passed += 1
         else:
-            failures.append(f"{c['id']}: agents {sorted(got)} != {sorted(expected)}")
+            failures.append(f"{c['id']}: ordered agents {got} != {expected}")
 
     for c in rows("completion.jsonl"):
         total += 1
