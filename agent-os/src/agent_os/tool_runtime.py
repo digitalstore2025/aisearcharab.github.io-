@@ -210,6 +210,8 @@ class RegisteredToolExecutor:
         definition = self._definitions_by_key.get(key)
         if definition is None:
             raise KeyError(f"No registered definition for {call.tool}:{call.action}")
+        if not isinstance(call.arguments, dict):
+            raise ValueError("Tool arguments must be a JSON object")
         arguments = dict(call.arguments)
         _validate_value(arguments, definition.parameters)
         return arguments
@@ -225,7 +227,6 @@ class PolicyBoundToolRuntime:
     _KNOWN_PRODUCTION_READS = frozenset({
         ("repo", "repo.read"),
         ("public_search", "search.public"),
-        ("tests", "test.run"),
     })
 
     def __init__(
