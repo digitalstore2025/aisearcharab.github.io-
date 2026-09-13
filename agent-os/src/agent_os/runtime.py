@@ -110,6 +110,8 @@ class TeamRuntime:
                 raise ValueError("Team plan handoff references an unknown agent")
             if handoff.source == handoff.target:
                 raise ValueError("Team plan handoff cannot target its source agent")
+            if not isinstance(handoff.artifact, str):
+                raise ValueError("Team plan handoff artifact must be text")
             artifact = handoff.artifact.strip()
             if not artifact or len(artifact) > _HANDOFF_ARTIFACT_LIMIT:
                 raise ValueError("Team plan handoff artifact must be a bounded non-empty label")
@@ -295,8 +297,10 @@ class TeamRuntime:
                     tool_results=tuple(all_tool_results),
                 )
 
+            call = result.tool_calls[0]
             continuation = getattr(self.adapter, "continue_with_tools", None)
-            if not callable(continuation):
+            could_execute = call.tool in assignment.allowed_tools and self.tool_runtime is not None
+            if could_execute and not callable(continuation):
                 return self._failed_result(
                     assignment,
                     started=started,
@@ -322,6 +326,17 @@ class TeamRuntime:
                     status="blocked",
                 )
 
+            if not callable(continuation):
+                # Structural denials above cannot reach this point. Keep this
+                # fail-closed guard in case the execution contract changes.
+                return self._failed_result(
+                    assignment,
+                    started=started,
+                    model=model,
+                    output="adapter-does-not-support-tool-continuation",
+                    tool_results=tuple(all_tool_results),
+                    status="blocked",
+                )
             try:
                 result = continuation(request, result, round_results)
             except Exception as exc:
