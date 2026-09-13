@@ -11,6 +11,7 @@ class ModelChoice:
     tier: str
     model: str
     reason: str
+    alias: str = ""
 
 
 class ModelRouter:
@@ -43,4 +44,12 @@ class ModelRouter:
                 raise ValueError("No tool-capable model tier is configured")
             entry = fallback
             tier = "standard"
-        return ModelChoice(tier, entry["model"], f"complexity={complexity}, risk={risk}, tools={requires_tools}")
+        alias = str(entry.get("policy_alias", tier)).strip().lower()
+        if not alias:
+            raise ValueError(f"Model tier {tier} has an empty policy_alias")
+        return ModelChoice(
+            tier,
+            entry["model"],
+            f"complexity={complexity}, risk={risk}, tools={requires_tools}",
+            alias,
+        )
