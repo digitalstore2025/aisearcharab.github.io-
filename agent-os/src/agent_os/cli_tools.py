@@ -152,6 +152,7 @@ def build_cli_tool_runtime(
                 "additionalProperties": False,
             },
             strict=True,
+            production_read=True,
             handler=_repo_reader(workspace_root),
         )
 
