@@ -19,7 +19,7 @@ from agent_os.model_router import ModelRouter
 from agent_os.policy import PolicyEngine
 from agent_os.provider_adapter import AgentExecutionRequest, AgentExecutionResult, DryRunAgentAdapter, OpenAIResponsesAdapter
 from agent_os.runtime import TeamRuntime
-from agent_os.team import AgentAssignment, TeamPlan
+from agent_os.team import AgentAssignment, Handoff, TeamPlan
 from agent_os.tool_runtime import PolicyBoundToolRuntime, RegisteredToolExecutor
 from agent_os.types import ToolCall, TrustLevel
 
@@ -286,13 +286,14 @@ class TestPhase2ReviewRegressions(unittest.TestCase):
             "Verify evidence",
             False,
             (first, second),
-            (),
+            (Handoff(first.agent, second.agent, "research-evidence"),),
             (("research-osint",), (second.agent,)),
         )
         adapter = EvidenceAdapter()
         report = TeamRuntime(self.models, adapter, tool_runtime=tool_runtime).run(plan)
         self.assertTrue(report.completed)
         downstream = "\n".join(text for _, text in adapter.contexts[second.agent])
+        self.assertIn("Handoff artifact [research-evidence]", downstream)
         self.assertIn("Tool evidence [repo:repo.read]", downstream)
         self.assertIn("EVIDENCE-XYZ", downstream)
         self.assertIn("untrusted data", downstream)
