@@ -35,7 +35,7 @@ class TeamExecutionReport:
 
 
 class TeamRuntime:
-    """Execute TeamPlan waves concurrently while preserving phase and review ordering."""
+    """Execute validated TeamPlans with a mandatory isolated final independent review."""
 
     def __init__(
         self,
@@ -73,6 +73,8 @@ class TeamRuntime:
             raise ValueError("Team plan must contain at least one assignment")
         if len(assignment_names) != len(set(assignment_names)):
             raise ValueError("Team plan contains duplicate agent assignments")
+        if not plan.waves:
+            raise ValueError("Team plan must contain execution waves")
         if any(not wave for wave in plan.waves):
             raise ValueError("Team plan contains an empty execution wave")
 
@@ -88,6 +90,14 @@ class TeamRuntime:
         missing = sorted(assignment_set - wave_set)
         if missing:
             raise ValueError(f"Team plan leaves agents unscheduled: {', '.join(missing)}")
+
+        independent = [item.agent for item in plan.assignments if item.independent]
+        if len(independent) != 1:
+            raise ValueError("Team plan must contain exactly one independent reviewer")
+        reviewer = independent[0]
+        if tuple(plan.waves[-1]) != (reviewer,):
+            raise ValueError("Independent reviewer must be the only agent in the final wave")
+
         return {item.agent: item for item in plan.assignments}
 
     @staticmethod
