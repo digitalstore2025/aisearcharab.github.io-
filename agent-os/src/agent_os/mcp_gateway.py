@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 from .injection import assess_untrusted_text
 from .policy import PolicyEngine
-from .types import Action, Decision, ToolCall, TrustLevel
+from .types import Action, Decision, ToolCall, TrustLevel, validate_execution_environment
 
 
 @dataclass(slots=True)
@@ -22,6 +22,11 @@ class MCPGateway:
         self.policy = policy
 
     def authorize(self, call: ToolCall, *, environment: str = "local", retrieved_text: str | None = None) -> GatewayResult:
+        try:
+            environment = validate_execution_environment(environment)
+        except ValueError as exc:
+            return GatewayResult(False, False, str(exc), "invalid-environment")
+
         # Retrieved content is inspected unless the caller explicitly marked the
         # source as trusted. ToolCall defaults to UNTRUSTED so omitted labels do
         # not silently bypass the prompt-injection boundary.
