@@ -11,9 +11,10 @@ from typing import Any
 from .types import TraceEvent
 
 _SAFE_KEYS = frozenset({
-    "action", "allowed_tools", "case_id", "decision", "duration_s", "model",
-    "mode", "profile", "production_mutations", "rule_id", "skills", "status",
-    "task_chars", "task_sha256", "tier", "tool", "tool_calls", "variant",
+    "action", "agents", "allowed_tools", "case_id", "complexity", "decision",
+    "duration_s", "model", "mode", "portfolio_mode", "profile", "production_mutations",
+    "risk", "rule_id", "skills", "status", "task_chars", "task_sha256", "tier",
+    "tool", "tool_calls", "variant", "waves",
 })
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 _SECRET_HINT = re.compile(
