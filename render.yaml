@@ -1,0 +1,58 @@
+# AISearcharab staging runtime contract.
+# This Blueprint intentionally targets the existing staging service/database by name.
+# Production remains blocked until paid managed Postgres/PITR, branch governance,
+# independent security/accessibility review, observability, load SLOs and the
+# >=500-query human-reviewed retrieval benchmark are independently verified.
+
+services:
+  - type: web
+    name: aisearcharab-api-staging-v2
+    runtime: docker
+    repo: https://github.com/digitalstore2025/aisearcharab.github.io-
+    branch: main
+    region: frankfurt
+    plan: free
+    autoDeployTrigger: checksPass
+    dockerfilePath: ./platform/apps/api/Dockerfile
+    dockerContext: ./platform/apps/api
+    # Render pre-deploy commands require a paid web-service plan. The current
+    # free staging instance therefore migrates once, fail-closed, before uvicorn.
+    # Production must move migrations to a dedicated pre-deploy step.
+    dockerCommand: python -m aisearcharab_api.render_runtime migrate-and-serve
+    healthCheckPath: /health/ready
+    maxShutdownDelaySeconds: 30
+    buildFilter:
+      paths:
+        - platform/apps/api/**
+        - render.yaml
+    envVars:
+      - key: RENDER_DATABASE_URL
+        fromDatabase:
+          name: aisearcharab-staging-db
+          property: connectionString
+      - key: APP_ENV
+        value: staging
+      - key: API_PREFIX
+        value: /v1
+      - key: ALLOWED_ORIGINS
+        value: https://digitalstore2025.github.io,https://aisearcharab.com
+      - key: ALLOWED_HOSTS
+        value: aisearcharab-api-staging-v2.onrender.com
+      - key: ENFORCE_SEPARATION_OF_DUTIES
+        value: "true"
+      - key: REQUIRE_MFA_FOR_PRIVILEGED
+        value: "true"
+      - key: MFA_ENCRYPTION_KEY
+        generateValue: true
+      - key: LOGIN_THROTTLE_KEY
+        generateValue: true
+      - key: LOG_SEARCH_QUERIES
+        value: "false"
+      - key: GENERATED_ANSWERS_ENABLED
+        value: "false"
+      - key: MAX_SEARCH_LIMIT
+        value: "20"
+      - key: SEARCH_CANDIDATE_LIMIT
+        value: "300"
+      - key: MAX_REQUEST_BODY_BYTES
+        value: "524288"
