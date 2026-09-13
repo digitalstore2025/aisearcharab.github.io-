@@ -28,19 +28,35 @@ def normalize_postgres_url(raw_url: str) -> str:
     else:
         raise RuntimeError("Render database URL must use PostgreSQL")
 
-    if not parsed.hostname or not parsed.path.lstrip("/"):
+    if (
+        not parsed.hostname
+        or parsed.username is None
+        or parsed.password is None
+        or not parsed.path.lstrip("/")
+    ):
         raise RuntimeError("Render database URL is incomplete")
 
     return urlunsplit((scheme, parsed.netloc, parsed.path, parsed.query, parsed.fragment))
 
 
 def configure_database_url(env: MutableMapping[str, str] | None = None) -> str:
-    """Populate DATABASE_URL without logging or persisting the credential."""
+    """Populate DATABASE_URL without logging or persisting the credential.
+
+    Presence of ``RENDER_DATABASE_URL`` is authoritative. If a Blueprint or
+    operator created the key but failed to bind a value, fail closed rather
+    than silently falling back to a stale ``DATABASE_URL``.
+    """
 
     runtime_env = os.environ if env is None else env
-    raw_url = runtime_env.get(_RENDER_DATABASE_ENV) or runtime_env.get(_RUNTIME_DATABASE_ENV)
-    if not raw_url:
-        raise RuntimeError("RENDER_DATABASE_URL or DATABASE_URL is required")
+    if _RENDER_DATABASE_ENV in runtime_env:
+        raw_url = runtime_env[_RENDER_DATABASE_ENV]
+        if not raw_url.strip():
+            raise RuntimeError("RENDER_DATABASE_URL is present but empty")
+    else:
+        raw_url = runtime_env.get(_RUNTIME_DATABASE_ENV, "")
+        if not raw_url.strip():
+            raise RuntimeError("RENDER_DATABASE_URL or DATABASE_URL is required")
+
     normalized = normalize_postgres_url(raw_url)
     runtime_env[_RUNTIME_DATABASE_ENV] = normalized
     return normalized
