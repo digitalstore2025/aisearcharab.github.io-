@@ -59,6 +59,20 @@ class TestAgentTeam(unittest.TestCase):
         plan = self.planner.plan("Audit auth token handling", complexity="medium", risk="medium")
         self.assertIn("security-redteam", plan.agents)
 
+    def test_plural_security_terms_add_security_verifier(self):
+        for task in ("Review secrets", "Rotate credentials", "Review permissions"):
+            with self.subTest(task=task):
+                plan = self.planner.plan(task, complexity="medium", risk="medium")
+                self.assertIn("security-redteam", plan.agents)
+
+    def test_trigger_matching_uses_unicode_token_boundaries(self):
+        self.assertFalse(self.registry.is_portfolio_task("Migrate data to zero downtime"))
+        security = self.registry.find_by_capability("security")
+        self.assertIsNotNone(security)
+        assert security is not None
+        self.assertFalse(self.registry.agent_matches(security, "إصلاح واجهة المستخدم"))
+        self.assertTrue(self.registry.agent_matches(security, "مراجعة صلاح الحساب"))
+
     def test_portfolio_task_builds_cross_functional_team(self):
         plan = self.planner.plan("Complete the AISearch platform end-to-end", complexity="critical", risk="high")
         expected = {
