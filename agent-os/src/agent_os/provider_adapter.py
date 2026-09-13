@@ -127,11 +127,9 @@ class OpenAIResponsesAdapter:
         )
 
     @staticmethod
-    def _response_status(response: Any, *, has_tool_calls: bool) -> str:
+    def _response_status(response: Any) -> str:
         status = str(getattr(response, "status", "completed") or "completed")
-        if status in {"failed", "cancelled", "incomplete"} and not has_tool_calls:
-            return "failed"
-        return "completed"
+        return "failed" if status in {"failed", "cancelled", "incomplete"} else "completed"
 
     def _parse_response(
         self,
@@ -142,41 +140,43 @@ class OpenAIResponsesAdapter:
         history_prefix: tuple[dict[str, Any], ...] = (),
     ) -> AgentExecutionResult:
         items = tuple(self._dump_item(item) for item in (getattr(response, "output", None) or ()))
+        provider_status = self._response_status(response)
         definitions = {tool.name: tool for tool in request.tools}
         calls: list[ToolCall] = []
-        for item in items:
-            if item.get("type") != "function_call":
-                continue
-            name = str(item.get("name", ""))
-            definition = definitions.get(name)
-            if definition is None:
-                raise RuntimeError(f"Provider requested unknown tool: {name or '<empty>'}")
-            raw_arguments = item.get("arguments", "{}")
-            if not isinstance(raw_arguments, str):
-                raise RuntimeError(f"Provider tool arguments for {name} are not JSON text")
-            try:
-                arguments = json.loads(raw_arguments)
-            except json.JSONDecodeError as exc:
-                raise RuntimeError(f"Provider tool arguments for {name} are invalid JSON") from exc
-            if not isinstance(arguments, dict):
-                raise RuntimeError(f"Provider tool arguments for {name} must be a JSON object")
-            call_id = str(item.get("call_id", ""))
-            if not call_id:
-                raise RuntimeError(f"Provider tool call {name} is missing call_id")
-            calls.append(ToolCall(
-                definition.tool,
-                definition.action,
-                arguments,
-                TrustLevel.UNTRUSTED,
-                call_id,
-                name,
-            ))
+        if provider_status == "completed":
+            for item in items:
+                if item.get("type") != "function_call":
+                    continue
+                name = str(item.get("name", ""))
+                definition = definitions.get(name)
+                if definition is None:
+                    raise RuntimeError(f"Provider requested unknown tool: {name or '<empty>'}")
+                raw_arguments = item.get("arguments", "{}")
+                if not isinstance(raw_arguments, str):
+                    raise RuntimeError(f"Provider tool arguments for {name} are not JSON text")
+                try:
+                    arguments = json.loads(raw_arguments)
+                except json.JSONDecodeError as exc:
+                    raise RuntimeError(f"Provider tool arguments for {name} are invalid JSON") from exc
+                if not isinstance(arguments, dict):
+                    raise RuntimeError(f"Provider tool arguments for {name} must be a JSON object")
+                call_id = str(item.get("call_id", ""))
+                if not call_id:
+                    raise RuntimeError(f"Provider tool call {name} is missing call_id")
+                calls.append(ToolCall(
+                    definition.tool,
+                    definition.action,
+                    arguments,
+                    TrustLevel.UNTRUSTED,
+                    call_id,
+                    name,
+                ))
         return AgentExecutionResult(
             agent=request.agent,
             output=str(getattr(response, "output_text", None) or ""),
             model_id=model_id,
             tool_calls=tuple(calls),
-            status=self._response_status(response, has_tool_calls=bool(calls)),
+            status=provider_status,
             continuation_items=history_prefix + items,
         )
 
