@@ -97,6 +97,10 @@ class AgentRegistry:
             raise KeyError(f"Unknown agent: {name}")
         return self._by_name[name]
 
+    def find_by_capability(self, capability: str) -> AgentDefinition | None:
+        matches = [a for a in self.agents if capability in a.capabilities]
+        return max(matches, key=lambda a: (a.priority, a.name)) if matches else None
+
     @property
     def coordinator(self) -> AgentDefinition:
         return next(a for a in self.agents if a.kind == "coordinator")
@@ -119,6 +123,9 @@ class AgentRegistry:
 
     def matches(self, name: str, task: str) -> bool:
         return self._score(self.get(name), task.lower()) > 0
+
+    def agent_matches(self, agent: AgentDefinition, task: str) -> bool:
+        return self._score(agent, task.lower()) > 0
 
     def is_portfolio_task(self, task: str) -> bool:
         text = task.lower()
