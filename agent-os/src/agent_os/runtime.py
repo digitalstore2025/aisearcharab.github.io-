@@ -88,23 +88,24 @@ class TeamRuntime:
         environment: str,
     ) -> AgentRuntimeResult:
         started = time.perf_counter()
-        model = self._model_for(assignment, complexity=complexity, risk=risk)
-        request = AgentExecutionRequest(
-            agent=assignment.agent,
-            objective=assignment.objective,
-            instructions=assignment.instructions,
-            task=task,
-            context=context,
-            model=model,
-        )
+        model: ModelChoice | None = None
         try:
+            model = self._model_for(assignment, complexity=complexity, risk=risk)
+            request = AgentExecutionRequest(
+                agent=assignment.agent,
+                objective=assignment.objective,
+                instructions=assignment.instructions,
+                task=task,
+                context=context,
+                model=model,
+            )
             result: AgentExecutionResult = self.adapter.execute(request)
         except Exception as exc:
             runtime_result = AgentRuntimeResult(
                 assignment.agent,
                 "failed",
-                f"adapter-error:{type(exc).__name__}",
-                model.alias or model.model,
+                f"adapter-or-routing-error:{type(exc).__name__}",
+                (model.alias or model.model) if model else "unresolved",
                 duration_s=time.perf_counter() - started,
             )
             self._trace_agent(runtime_result)
@@ -165,6 +166,11 @@ class TeamRuntime:
         environment: str = "development",
     ) -> TeamExecutionReport:
         assignments = {item.agent: item for item in plan.assignments}
+        wave_names = [name for wave in plan.waves for name in wave]
+        unknown = sorted(set(wave_names) - set(assignments))
+        if unknown:
+            raise ValueError(f"Team plan waves reference unknown agents: {', '.join(unknown)}")
+
         results: list[AgentRuntimeResult] = []
         context: list[tuple[str, str]] = []
 
@@ -195,7 +201,18 @@ class TeamRuntime:
                     for name in wave
                 }
                 for future in as_completed(future_map):
-                    wave_results.append(future.result())
+                    name = future_map[future]
+                    try:
+                        wave_results.append(future.result())
+                    except Exception as exc:
+                        failed = AgentRuntimeResult(
+                            name,
+                            "failed",
+                            f"worker-error:{type(exc).__name__}",
+                            "unresolved",
+                        )
+                        self._trace_agent(failed)
+                        wave_results.append(failed)
 
             order = {name: index for index, name in enumerate(wave)}
             wave_results.sort(key=lambda item: order[item.agent])
