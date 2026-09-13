@@ -47,7 +47,7 @@ jobs:
           PYTHONPATH: src
         run: python scripts/run_static_evals.py
 
-      - name: Verify installed CLI package resources
+      - name: Verify installed CLI package resources and runtime
         shell: bash
         run: |
           set -euo pipefail
@@ -59,6 +59,7 @@ jobs:
             /tmp/astra-agent-os-venv/bin/agent-os plan "Review auth security before production release" --profile aisearch-study > /tmp/astra-plan.json
             /tmp/astra-agent-os-venv/bin/agent-os team-plan "Complete the AISearch platform end-to-end" --profile aisearch-study --complexity critical --risk high --trace-jsonl /tmp/astra-team-trace.jsonl > /tmp/astra-team.json
             /tmp/astra-agent-os-venv/bin/agent-os team-plan "Audit auth token handling" --profile base --complexity medium --risk medium > /tmp/astra-security-team.json
+            /tmp/astra-agent-os-venv/bin/agent-os execute-team "Implement backend API" --profile aisearch-study --adapter dry-run --trace-jsonl /tmp/astra-runtime-trace.jsonl > /tmp/astra-runtime.json
           )
           /tmp/astra-agent-os-venv/bin/python - <<'PY'
           import json
@@ -66,12 +67,13 @@ jobs:
           from pathlib import Path
           import agent_os
 
-          assert version('astra-agent-os') == agent_os.__version__ == '2.1.0'
+          assert version('astra-agent-os') == agent_os.__version__ == '2.2.0'
 
           data = json.loads(Path('/tmp/astra-plan.json').read_text())
           assert data['profile'] == 'aisearch-study'
           assert data['mode'] == 'shadow'
           assert data['tier'] == 'strong'
+          assert data['model_alias'] == 'sol'
           assert data['production_mutations'] is False
           assert 'repo' in data['allowed_tools']
 
@@ -99,6 +101,17 @@ jobs:
           assert trace['event'] == 'team.plan.created'
           assert trace['data']['agents'] == required
           assert 'Complete the AISearch platform end-to-end' not in Path('/tmp/astra-team-trace.jsonl').read_text()
+
+          runtime = json.loads(Path('/tmp/astra-runtime.json').read_text())
+          assert runtime['completed'] is True
+          assert runtime['results'][-1]['agent'] == 'independent-reviewer'
+          assert runtime['results'][-1]['model'] == 'astra'
+          runtime_trace = Path('/tmp/astra-runtime-trace.jsonl').read_text()
+          events = [json.loads(line)['event'] for line in runtime_trace.splitlines() if line.strip()]
+          assert 'team.execution.started' in events
+          assert 'agent.execution.completed' in events
+          assert 'team.execution.completed' in events
+          assert 'Implement backend API' not in runtime_trace
           PY
 
       - name: Verify reproducible release archive boundary
