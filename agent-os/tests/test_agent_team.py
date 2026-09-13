@@ -19,8 +19,8 @@ class TestAgentTeam(unittest.TestCase):
         cls.planner = TeamPlanner(cls.registry)
 
     @staticmethod
-    def _minimal_registry() -> AgentRegistry:
-        return AgentRegistry([
+    def _custom_registry(include_qa: bool = True) -> AgentRegistry:
+        agents = [
             AgentDefinition(
                 "coordinator", "coordinator", "plan", 100, "Coordinate work", (),
                 ("planning",), ("repo",), "Coordinate bounded work.", False,
@@ -29,11 +29,17 @@ class TestAgentTeam(unittest.TestCase):
                 "custom-builder", "specialist", "build", 50, "Build custom work", ("custom",),
                 ("custom",), ("repo",), "Build the requested custom artifact.", False,
             ),
-            AgentDefinition(
-                "reviewer", "reviewer", "verify", 100, "Review evidence", (),
-                ("independent-review",), ("repo",), "Review evidence independently.", False,
-            ),
-        ])
+        ]
+        if include_qa:
+            agents.append(AgentDefinition(
+                "quality-checker", "verifier", "verify", 80, "Verify quality", (),
+                ("qa",), ("repo",), "Verify acceptance criteria and regressions.", False,
+            ))
+        agents.append(AgentDefinition(
+            "reviewer", "reviewer", "verify", 100, "Review evidence", (),
+            ("independent-review",), ("repo",), "Review evidence independently.", False,
+        ))
+        return AgentRegistry(agents)
 
     def test_each_agent_has_operating_instructions(self):
         self.assertTrue(all(agent.instructions.strip() for agent in self.registry.agents))
@@ -71,6 +77,16 @@ class TestAgentTeam(unittest.TestCase):
             set(plan.agents),
             {"execution-coordinator", "software-architect", "backend-platform", "qa-reliability", "independent-reviewer"},
         )
+
+    def test_max_specialists_is_true_bound_for_high_complexity_narrow_work(self):
+        plan = self.planner.plan(
+            "Improve RAG retrieval eval and citation grounding",
+            complexity="high",
+            max_specialists=1,
+        )
+        specialist_names = {a.name for a in self.registry.agents if a.kind == "specialist"}
+        selected = specialist_names.intersection(plan.agents)
+        self.assertEqual(selected, {"software-architect"})
 
     def test_profile_tool_allowlist_limits_agent_tools(self):
         plan = self.planner.plan(
@@ -110,14 +126,18 @@ class TestAgentTeam(unittest.TestCase):
         security_wave = next(i for i, wave in enumerate(plan.waves) if "security-redteam" in wave)
         self.assertLess(security_wave, len(plan.waves) - 1)
 
-    def test_custom_registry_without_optional_named_roles_can_plan(self):
-        plan = TeamPlanner(self._minimal_registry()).plan("custom task", complexity="high", risk="medium")
-        self.assertEqual(set(plan.agents), {"coordinator", "custom-builder", "reviewer"})
+    def test_custom_registry_uses_capabilities_not_fixed_optional_names(self):
+        plan = TeamPlanner(self._custom_registry()).plan("custom task", complexity="high", risk="medium")
+        self.assertEqual(set(plan.agents), {"coordinator", "custom-builder", "quality-checker", "reviewer"})
         self.assertEqual(plan.waves[-1], ("reviewer",))
+
+    def test_registry_without_qa_fails_closed(self):
+        with self.assertRaisesRegex(ValueError, "qa-capable verifier"):
+            TeamPlanner(self._custom_registry(include_qa=False)).plan("custom task")
 
     def test_high_risk_custom_registry_without_security_fails_closed(self):
         with self.assertRaisesRegex(ValueError, "security-capable verifier"):
-            TeamPlanner(self._minimal_registry()).plan("custom high-risk task", risk="high")
+            TeamPlanner(self._custom_registry()).plan("custom high-risk task", risk="high")
 
     def test_tracer_records_team_without_raw_task(self):
         with tempfile.TemporaryDirectory() as td:
