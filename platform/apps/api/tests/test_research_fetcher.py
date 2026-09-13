@@ -35,7 +35,8 @@ class FakeResponse:
     def __init__(self, *, status: int = 200, headers: list[tuple[str, str]] | None = None, body: bytes = b"ok") -> None:
         self.status = status
         self.headers = Message()
-        for name, value in headers or [("Content-Type", "text/plain; charset=utf-8")]:
+        effective_headers = [("Content-Type", "text/plain; charset=utf-8")] if headers is None else headers
+        for name, value in effective_headers:
             self.headers[name] = value
         self._body = body
         self.closed = False
@@ -229,7 +230,6 @@ def test_binary_content_and_missing_content_type_are_rejected(monkeypatch: pytes
         fetcher.fetch("official-docs", "https://docs.example.com/")
 
     missing = FakeResponse(headers=[])
-    missing.headers.clear()
     fetcher, _connections = _fetcher(monkeypatch, [missing])
     with pytest.raises(ResearchUnsupportedContent, match="missing"):
         fetcher.fetch("official-docs", "https://docs.example.com/")
