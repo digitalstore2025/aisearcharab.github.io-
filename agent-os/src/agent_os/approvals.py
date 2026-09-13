@@ -12,9 +12,15 @@ from .types import ToolCall
 
 
 def _arguments_digest(arguments: dict[str, Any] | None) -> str:
+    if arguments is None:
+        payload: dict[str, Any] = {}
+    elif isinstance(arguments, dict):
+        payload = arguments
+    else:
+        raise ValueError("Approval arguments must be a JSON object")
     try:
         canonical = json.dumps(
-            arguments or {},
+            payload,
             sort_keys=True,
             separators=(",", ":"),
             ensure_ascii=False,
