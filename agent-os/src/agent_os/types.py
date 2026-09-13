@@ -40,6 +40,7 @@ class ToolDefinition:
     description: str
     parameters: dict[str, Any]
     strict: bool = False
+    production_read: bool = False
 
 
 @dataclass(slots=True)
