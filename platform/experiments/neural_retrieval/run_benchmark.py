@@ -125,6 +125,39 @@ def _dense_rankings(
     return rankings, elapsed_ms
 
 
+def _reciprocal_rank_fusion(
+    lexical: dict[str, list[str]],
+    dense: dict[str, list[str]],
+    *,
+    rrf_k: int,
+    lexical_weight: float,
+    dense_weight: float,
+) -> dict[str, list[str]]:
+    if rrf_k < 1:
+        raise ValueError("rrf_k must be positive")
+    if lexical_weight <= 0 or dense_weight <= 0:
+        raise ValueError("RRF weights must be positive")
+    if set(lexical) != set(dense):
+        raise ValueError("lexical and dense rankings must cover the same query IDs")
+
+    fused: dict[str, list[str]] = {}
+    for query_id in sorted(lexical):
+        scores: dict[str, float] = {}
+        first_seen: dict[str, int] = {}
+        sequence = 0
+        for ranking, weight in ((lexical[query_id], lexical_weight), (dense[query_id], dense_weight)):
+            for rank, document_id in enumerate(ranking, start=1):
+                if document_id not in first_seen:
+                    first_seen[document_id] = sequence
+                    sequence += 1
+                scores[document_id] = scores.get(document_id, 0.0) + weight / (rrf_k + rank)
+        fused[query_id] = sorted(
+            scores,
+            key=lambda document_id: (-scores[document_id], first_seen[document_id], document_id),
+        )
+    return fused
+
+
 def _judgments(queries: list[dict[str, str]], known_slugs: set[str]) -> dict[str, dict[str, int]]:
     output: dict[str, dict[str, int]] = {}
     for row in queries:
@@ -150,7 +183,7 @@ def _kind_accuracy(rankings: dict[str, list[str]], queries: list[dict[str, str]]
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Offline neural retrieval benchmark against AISearch lexical baseline.")
+    parser = argparse.ArgumentParser(description="Offline neural and hybrid retrieval benchmark against AISearch lexical baseline.")
     parser.add_argument("--model", default="intfloat/multilingual-e5-base")
     parser.add_argument("--revision", default="f7d866c89004f9c578631ccaca8bb7b28e7315f2")
     parser.add_argument("--family", choices=("e5", "bge", "generic"), default="e5")
@@ -159,6 +192,9 @@ def main() -> int:
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--max-seq-length", type=int, default=512)
     parser.add_argument("--output", type=Path)
+    parser.add_argument("--rrf-k", type=int, default=60)
+    parser.add_argument("--lexical-weight", type=float, default=1.0)
+    parser.add_argument("--dense-weight", type=float, default=1.0)
     parser.add_argument("--min-mrr-delta", type=float, default=0.05)
     parser.add_argument("--min-recall-delta", type=float, default=0.05)
     parser.add_argument("--min-ndcg-delta", type=float, default=0.05)
@@ -186,14 +222,47 @@ def main() -> int:
         batch_size=args.batch_size,
         max_seq_length=args.max_seq_length,
     )
-    comparison = compare_rankings(
+    hybrid = _reciprocal_rank_fusion(
+        lexical,
+        dense,
+        rrf_k=args.rrf_k,
+        lexical_weight=args.lexical_weight,
+        dense_weight=args.dense_weight,
+    )
+
+    dense_vs_lexical = compare_rankings(
         baseline_rankings=lexical,
         candidate_rankings=dense,
         judgments=judgments,
     )
+    hybrid_vs_lexical = compare_rankings(
+        baseline_rankings=lexical,
+        candidate_rankings=hybrid,
+        judgments=judgments,
+    )
+    hybrid_vs_dense = compare_rankings(
+        baseline_rankings=dense,
+        candidate_rankings=hybrid,
+        judgments=judgments,
+    )
+
+    dense_gate_passed = comparison_passes_gate(
+        dense_vs_lexical,
+        min_mrr_delta=args.min_mrr_delta,
+        min_recall_delta=args.min_recall_delta,
+        min_ndcg_delta=args.min_ndcg_delta,
+        max_zero_result_delta=args.max_zero_result_delta,
+    )
+    hybrid_non_regression = comparison_passes_gate(
+        hybrid_vs_dense,
+        min_mrr_delta=0.0,
+        min_recall_delta=0.0,
+        min_ndcg_delta=0.0,
+        max_zero_result_delta=0.0,
+    )
 
     report = {
-        "experiment": "offline-neural-retrieval",
+        "experiment": "offline-neural-hybrid-retrieval",
         "model": args.model,
         "revision": args.revision,
         "family": args.family,
@@ -201,13 +270,32 @@ def main() -> int:
         "query_count": len(queries),
         "document_count": len(documents),
         "neural_elapsed_ms": round(neural_elapsed_ms, 3),
-        "lexical_top1_accuracy": _top1_accuracy(lexical, queries),
-        "candidate_top1_accuracy": _top1_accuracy(dense, queries),
-        "lexical_top1_by_kind": _kind_accuracy(lexical, queries),
-        "candidate_top1_by_kind": _kind_accuracy(dense, queries),
-        "comparison": asdict(comparison),
-        "privacy": "report contains opaque query IDs/aggregate metrics only; query text is not emitted",
-        "promotion_status": "experiment-only; human-reviewed benchmark and staging evidence still required",
+        "rrf": {
+            "k": args.rrf_k,
+            "lexical_weight": args.lexical_weight,
+            "dense_weight": args.dense_weight,
+        },
+        "top1_accuracy": {
+            "lexical": _top1_accuracy(lexical, queries),
+            "dense": _top1_accuracy(dense, queries),
+            "hybrid": _top1_accuracy(hybrid, queries),
+        },
+        "top1_by_kind": {
+            "lexical": _kind_accuracy(lexical, queries),
+            "dense": _kind_accuracy(dense, queries),
+            "hybrid": _kind_accuracy(hybrid, queries),
+        },
+        "comparisons": {
+            "dense_vs_lexical": asdict(dense_vs_lexical),
+            "hybrid_vs_lexical": asdict(hybrid_vs_lexical),
+            "hybrid_vs_dense": asdict(hybrid_vs_dense),
+        },
+        "gates": {
+            "dense_vs_lexical": dense_gate_passed,
+            "hybrid_non_regression_vs_dense": hybrid_non_regression,
+        },
+        "privacy": "report contains aggregate metrics only; query text is not emitted",
+        "promotion_status": "experiment-only; hybrid promotion requires human-reviewed benchmark and staging evidence",
     }
     rendered = json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     print(rendered, end="")
@@ -215,14 +303,7 @@ def main() -> int:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(rendered, encoding="utf-8")
 
-    passed = comparison_passes_gate(
-        comparison,
-        min_mrr_delta=args.min_mrr_delta,
-        min_recall_delta=args.min_recall_delta,
-        min_ndcg_delta=args.min_ndcg_delta,
-        max_zero_result_delta=args.max_zero_result_delta,
-    )
-    return 0 if passed else 1
+    return 0 if dense_gate_passed else 1
 
 
 if __name__ == "__main__":
