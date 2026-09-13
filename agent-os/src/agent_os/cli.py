@@ -80,6 +80,7 @@ def main() -> None:
                 "agent": a.agent,
                 "phase": a.phase,
                 "objective": a.objective,
+                "instructions": a.instructions,
                 "allowed_tools": list(a.allowed_tools),
                 "independent": a.independent,
             }
