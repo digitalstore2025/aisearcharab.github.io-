@@ -20,6 +20,7 @@ REQUIRED_SECURITY_HEADERS = {
     "x-content-type-options": "nosniff",
     "x-frame-options": "DENY",
     "referrer-policy": "no-referrer",
+    "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
     "cross-origin-opener-policy": "same-origin",
     "cross-origin-resource-policy": "same-site",
     "x-permitted-cross-domain-policies": "none",
@@ -83,37 +84,65 @@ def _request(
     parsed: SplitResult,
     path: str,
     *,
+    addresses: list[str],
     timeout: float,
     host_header: str | None = None,
 ) -> tuple[int, dict[str, str], bytes, float]:
+    """Send one HTTPS request over a previously validated public IP set.
+
+    Connecting to the validated IP instead of resolving the hostname again closes
+    the DNS-rebinding window. TLS certificate verification and SNI still use the
+    original hostname, and redirects are never followed.
+    """
+
     host = parsed.hostname
     if host is None:
         raise RuntimeError("validated URL lost hostname")
+    if not addresses:
+        raise RuntimeError("no validated staging addresses available")
     port = parsed.port or 443
-    connection = http.client.HTTPSConnection(
-        host,
-        port,
-        timeout=timeout,
-        context=ssl.create_default_context(),
-    )
     headers = {
         "Accept": "application/json",
         "User-Agent": "AISearcharab-Staging-Evidence/1.0",
     }
     if host_header is not None:
         headers["Host"] = host_header
+
     started = time.perf_counter()
-    try:
-        connection.request("GET", path, headers=headers)
-        response = connection.getresponse()
-        body = response.read(MAX_RESPONSE_BYTES + 1)
-        duration_ms = (time.perf_counter() - started) * 1000
-        if len(body) > MAX_RESPONSE_BYTES:
-            raise RuntimeError(f"response body exceeded {MAX_RESPONSE_BYTES} bytes")
-        normalized_headers = {key.lower(): value for key, value in response.getheaders()}
-        return response.status, normalized_headers, body, duration_ms
-    finally:
-        connection.close()
+    failures: list[str] = []
+    for address in addresses:
+        connection: http.client.HTTPSConnection | None = None
+        raw_socket: socket.socket | None = None
+        try:
+            raw_socket = socket.create_connection((address, port), timeout=timeout)
+            context = ssl.create_default_context()
+            tls_socket = context.wrap_socket(raw_socket, server_hostname=host)
+            raw_socket = None  # Ownership transferred to the TLS socket.
+
+            connection = http.client.HTTPSConnection(
+                host,
+                port,
+                timeout=timeout,
+                context=context,
+            )
+            connection.sock = tls_socket
+            connection.request("GET", path, headers=headers)
+            response = connection.getresponse()
+            body = response.read(MAX_RESPONSE_BYTES + 1)
+            duration_ms = (time.perf_counter() - started) * 1000
+            if len(body) > MAX_RESPONSE_BYTES:
+                raise RuntimeError(f"response body exceeded {MAX_RESPONSE_BYTES} bytes")
+            normalized_headers = {key.lower(): value for key, value in response.getheaders()}
+            return response.status, normalized_headers, body, duration_ms
+        except (OSError, ssl.SSLError, http.client.HTTPException) as exc:
+            failures.append(f"{address}: {type(exc).__name__}")
+        finally:
+            if connection is not None:
+                connection.close()
+            elif raw_socket is not None:
+                raw_socket.close()
+
+    raise RuntimeError("all validated staging addresses failed: " + ", ".join(failures))
 
 
 def _decode_json(body: bytes, label: str) -> dict[str, Any]:
@@ -158,7 +187,7 @@ def run_probe(base_url: str, *, samples: int = 12, timeout: float = 8.0) -> dict
     checks: dict[str, Any] = {}
 
     live_status, live_headers, live_body, live_ms = _request(
-        parsed, "/health/live", timeout=timeout
+        parsed, "/health/live", addresses=resolved_addresses, timeout=timeout
     )
     live_json = _decode_json(live_body, "liveness") if live_status == 200 else {}
     if live_status != 200 or live_json.get("status") != "ok":
@@ -174,7 +203,7 @@ def run_probe(base_url: str, *, samples: int = 12, timeout: float = 8.0) -> dict
     }
 
     ready_status, _ready_headers, ready_body, ready_ms = _request(
-        parsed, "/health/ready", timeout=timeout
+        parsed, "/health/ready", addresses=resolved_addresses, timeout=timeout
     )
     ready_json = _decode_json(ready_body, "readiness") if ready_status == 200 else {}
     if ready_status != 200 or ready_json.get("status") != "ready":
@@ -187,7 +216,10 @@ def run_probe(base_url: str, *, samples: int = 12, timeout: float = 8.0) -> dict
     }
 
     capability_status, _cap_headers, cap_body, cap_ms = _request(
-        parsed, "/v1/meta/capabilities", timeout=timeout
+        parsed,
+        "/v1/meta/capabilities",
+        addresses=resolved_addresses,
+        timeout=timeout,
     )
     capabilities = _decode_json(cap_body, "capabilities") if capability_status == 200 else {}
     if capability_status != 200:
@@ -207,6 +239,7 @@ def run_probe(base_url: str, *, samples: int = 12, timeout: float = 8.0) -> dict
     bad_host_status, _bad_headers, _bad_body, bad_host_ms = _request(
         parsed,
         "/health/live",
+        addresses=resolved_addresses,
         timeout=timeout,
         host_header="invalid-host.aisearcharab.invalid",
     )
@@ -222,7 +255,10 @@ def run_probe(base_url: str, *, samples: int = 12, timeout: float = 8.0) -> dict
     sample_statuses: list[int] = []
     for _ in range(samples):
         status, _headers, _body, duration_ms = _request(
-            parsed, "/health/live", timeout=timeout
+            parsed,
+            "/health/live",
+            addresses=resolved_addresses,
+            timeout=timeout,
         )
         sample_statuses.append(status)
         latency_samples.append(duration_ms)
