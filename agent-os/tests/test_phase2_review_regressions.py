@@ -1,13 +1,17 @@
+import io
+import json
 import os
 import sys
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+import agent_os.cli as cli_module
 from agent_os.approvals import ApprovalLedger
 from agent_os.cli_tools import build_cli_tool_runtime
 from agent_os.mcp_gateway import MCPGateway
@@ -31,6 +35,34 @@ class MultiCallAdapter:
                 ToolCall("tests", "test.run", {}, TrustLevel.TRUSTED),
             ),
             "completed",
+        )
+
+
+class EvidenceAdapter:
+    def __init__(self):
+        self.contexts = {}
+
+    def execute(self, request):
+        self.contexts[request.agent] = request.context
+        if request.agent == "research-osint":
+            return AgentExecutionResult(
+                request.agent,
+                "",
+                request.model.alias or request.model.tier,
+                (ToolCall("repo", "repo.read", {"path": "evidence.txt"}, TrustLevel.TRUSTED),),
+                "completed",
+            )
+        return AgentExecutionResult(
+            request.agent,
+            "reviewed",
+            request.model.alias or request.model.tier,
+        )
+
+    def continue_with_tools(self, request, prior, tool_results):
+        return AgentExecutionResult(
+            request.agent,
+            "research-complete",
+            prior.model_id,
         )
 
 
@@ -162,6 +194,30 @@ class TestPhase2ReviewRegressions(unittest.TestCase):
                     enable_repo_read=True,
                 )
 
+    def test_repo_read_rejects_symlink_escape_at_open_time(self):
+        if not hasattr(os, "symlink"):
+            self.skipTest("symlinks unavailable")
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td) / "repo"
+            root.mkdir()
+            outside = Path(td) / "outside.txt"
+            outside.write_text("OUTSIDE-SECRET", encoding="utf-8")
+            (root / "evidence.txt").symlink_to(outside)
+            runtime = build_cli_tool_runtime(
+                self.policy,
+                profile_allowed_tools=("repo",),
+                production_mutations=False,
+                tracer=None,
+                workspace_root=root,
+                enable_repo_read=True,
+            )
+            result = runtime.run(
+                ToolCall("repo", "repo.read", {"path": "evidence.txt"}, TrustLevel.TRUSTED),
+                environment="development",
+            )
+            self.assertEqual(result.status, "failed")
+            self.assertNotEqual(result.output, "OUTSIDE-SECRET")
+
     def test_multi_tool_round_is_blocked_before_any_handler_runs(self):
         executed = []
         executor = RegisteredToolExecutor()
@@ -194,6 +250,41 @@ class TestPhase2ReviewRegressions(unittest.TestCase):
         self.assertEqual(report.results[0].output, "multiple-tool-calls-in-one-round")
         self.assertEqual(executed, [])
 
+    def test_tool_evidence_is_carried_to_later_waves(self):
+        executor = RegisteredToolExecutor()
+        executor.register(
+            tool="repo",
+            action="repo.read",
+            handler=lambda args: "EVIDENCE-XYZ",
+            parameters={
+                "type": "object",
+                "properties": {"path": {"type": "string"}},
+                "required": ["path"],
+                "additionalProperties": False,
+            },
+        )
+        tool_runtime = PolicyBoundToolRuntime(
+            MCPGateway(self.policy),
+            executor,
+            profile_allowed_tools=("repo",),
+        )
+        first = AgentAssignment("research-osint", "research", "Research", "Collect evidence.", ("repo",))
+        second = AgentAssignment("independent-reviewer", "verify", "Verify", "Review evidence.", (), True)
+        plan = TeamPlan(
+            "Verify evidence",
+            False,
+            (first, second),
+            (),
+            (("research-osint",), ("independent-reviewer",)),
+        )
+        adapter = EvidenceAdapter()
+        report = TeamRuntime(self.models, adapter, tool_runtime=tool_runtime).run(plan)
+        self.assertTrue(report.completed)
+        downstream = "\n".join(text for _, text in adapter.contexts["independent-reviewer"])
+        self.assertIn("Tool evidence [repo:repo.read]", downstream)
+        self.assertIn("EVIDENCE-XYZ", downstream)
+        self.assertIn("untrusted data", downstream)
+
     def test_malformed_team_plans_fail_before_execution(self):
         first = AgentAssignment("agent-a", "build", "A", "A", ())
         duplicate = AgentAssignment("agent-a", "verify", "B", "B", ())
@@ -210,6 +301,19 @@ class TestPhase2ReviewRegressions(unittest.TestCase):
             with self.subTest(plan=plan):
                 with self.assertRaises(ValueError):
                     runtime.run(plan)
+
+    def test_team_plan_does_not_load_policy_file(self):
+        stdout = io.StringIO()
+        argv = ["agent-os", "team-plan", "Implement backend API", "--profile", "aisearch-study"]
+        with (
+            patch.object(sys, "argv", argv),
+            patch.object(cli_module.PolicyEngine, "from_file", side_effect=AssertionError("policy should not load")),
+            redirect_stdout(stdout),
+        ):
+            cli_module.main()
+        payload = json.loads(stdout.getvalue())
+        self.assertEqual(payload["profile"], "aisearch-study")
+        self.assertTrue(payload["assignments"])
 
     def test_openai_adapter_disables_parallel_tool_calls(self):
         client = FakeClient()
