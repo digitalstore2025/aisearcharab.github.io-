@@ -22,6 +22,8 @@ def test_reviewed_sqlalchemy_url_is_preserved() -> None:
         "mysql://app:secret@db/app",
         "file:///tmp/database",
         "postgresql:///missing-host",
+        "postgresql://db.internal/app",
+        "postgresql://app@db.internal/app",
     ],
 )
 def test_render_runtime_rejects_unreviewed_or_incomplete_database_urls(raw: str) -> None:
@@ -37,6 +39,15 @@ def test_render_database_reference_has_precedence() -> None:
     normalized = configure_database_url(env)
     assert normalized == "postgresql+psycopg://app:secret@render-db/app"
     assert env["DATABASE_URL"] == normalized
+
+
+def test_explicit_empty_render_database_reference_fails_closed() -> None:
+    env = {
+        "RENDER_DATABASE_URL": "   ",
+        "DATABASE_URL": "postgresql+psycopg://app:other@wrong-db/app",
+    }
+    with pytest.raises(RuntimeError, match="present but empty"):
+        configure_database_url(env)
 
 
 def test_missing_database_url_fails_closed() -> None:
