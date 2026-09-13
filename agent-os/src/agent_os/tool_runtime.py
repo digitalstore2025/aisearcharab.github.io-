@@ -203,15 +203,20 @@ class RegisteredToolExecutor:
             if self._definitions[name].tool in allowed
         )
 
-    def execute(self, call: ToolCall) -> Any:
+    def validate(self, call: ToolCall) -> dict[str, Any]:
         key = (call.tool, call.action)
-        handler = self._handlers.get(key)
-        definition = self._definitions_by_key.get(key)
-        if handler is None or definition is None:
+        if key not in self._handlers:
             raise KeyError(f"No registered handler for {call.tool}:{call.action}")
+        definition = self._definitions_by_key.get(key)
+        if definition is None:
+            raise KeyError(f"No registered definition for {call.tool}:{call.action}")
         arguments = dict(call.arguments)
         _validate_value(arguments, definition.parameters)
-        return handler(arguments)
+        return arguments
+
+    def execute(self, call: ToolCall) -> Any:
+        arguments = self.validate(call)
+        return self._handlers[(call.tool, call.action)](arguments)
 
 
 class PolicyBoundToolRuntime:
@@ -286,6 +291,19 @@ class PolicyBoundToolRuntime:
                 "denied",
                 reason="Production mutation is disabled by the active profile",
                 rule_id="profile-production-boundary",
+            )
+            self._emit(result, time.perf_counter() - started)
+            return result
+
+        try:
+            self.executor.validate(call)
+        except Exception as exc:
+            result = ToolExecutionResult(
+                call.tool,
+                call.action,
+                "failed",
+                reason=f"Tool schema validation failed: {type(exc).__name__}",
+                rule_id="tool-schema-validation",
             )
             self._emit(result, time.perf_counter() - started)
             return result
