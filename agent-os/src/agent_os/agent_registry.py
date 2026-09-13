@@ -4,6 +4,8 @@ import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
+
 
 @dataclass(frozen=True, slots=True)
 class AgentDefinition:
@@ -17,6 +19,7 @@ class AgentDefinition:
     allowed_tools: tuple[str, ...]
     instructions: str
     portfolio: bool = False
+
 
 class AgentRegistry:
     """Validated deterministic registry for bounded multi-agent routing."""
@@ -33,32 +36,61 @@ class AgentRegistry:
         self.portfolio_triggers = portfolio_triggers
         self._by_name = {a.name: a for a in agents}
 
+    @staticmethod
+    def _string_list(value: Any, field: str) -> tuple[str, ...]:
+        if not isinstance(value, list) or not all(isinstance(x, str) and x.strip() for x in value):
+            raise ValueError(f"{field} must be a list of non-empty strings")
+        return tuple(x.strip() for x in value)
+
     @classmethod
     def from_file(cls, path: str | Path) -> "AgentRegistry":
         data = json.loads(Path(path).read_text(encoding="utf-8"))
+        if not isinstance(data, dict) or not isinstance(data.get("agents"), list):
+            raise ValueError("Agent registry must contain an agents list")
+
         allowed_kinds = {"coordinator", "specialist", "verifier", "reviewer"}
         allowed_phases = {"plan", "build", "verify", "release"}
-        agents = []
+        agents: list[AgentDefinition] = []
         for raw in data["agents"]:
-            if raw["kind"] not in allowed_kinds:
-                raise ValueError(f"Unsupported agent kind: {raw['kind']}")
-            if raw["phase"] not in allowed_phases:
-                raise ValueError(f"Unsupported agent phase: {raw['phase']}")
+            if not isinstance(raw, dict):
+                raise ValueError("Each agent definition must be an object")
+            name = raw.get("name")
+            kind = raw.get("kind")
+            phase = raw.get("phase")
+            description = raw.get("description")
+            instructions = raw.get("instructions")
+            priority = raw.get("priority", 0)
+            portfolio = raw.get("portfolio", False)
+            if not isinstance(name, str) or not name.strip():
+                raise ValueError("Agent name must be a non-empty string")
+            if kind not in allowed_kinds:
+                raise ValueError(f"Unsupported agent kind: {kind}")
+            if phase not in allowed_phases:
+                raise ValueError(f"Unsupported agent phase: {phase}")
+            if not isinstance(description, str) or not description.strip():
+                raise ValueError(f"Agent {name} must define a non-empty description")
+            if not isinstance(instructions, str) or not instructions.strip():
+                raise ValueError(f"Agent {name} must define non-empty instructions")
+            if type(priority) is not int:
+                raise ValueError(f"Agent {name} priority must be an integer")
+            if type(portfolio) is not bool:
+                raise ValueError(f"Agent {name} portfolio must be a JSON boolean")
+
             agents.append(AgentDefinition(
-                name=raw["name"], kind=raw["kind"], phase=raw["phase"],
-                priority=int(raw.get("priority", 0)), description=raw["description"],
-                triggers=tuple(str(x).lower() for x in raw.get("triggers", [])),
-                capabilities=tuple(raw.get("capabilities", [])),
-                allowed_tools=tuple(raw.get("allowed_tools", [])),
-                instructions=str(raw["instructions"]).strip(),
-                portfolio=bool(raw.get("portfolio", False)),
+                name=name.strip(),
+                kind=kind,
+                phase=phase,
+                priority=priority,
+                description=description.strip(),
+                triggers=tuple(x.lower() for x in cls._string_list(raw.get("triggers", []), f"Agent {name} triggers")),
+                capabilities=cls._string_list(raw.get("capabilities", []), f"Agent {name} capabilities"),
+                allowed_tools=cls._string_list(raw.get("allowed_tools", []), f"Agent {name} allowed_tools"),
+                instructions=instructions.strip(),
+                portfolio=portfolio,
             ))
-        if not all(agent.instructions for agent in agents):
-            raise ValueError("Every agent must define non-empty instructions")
-        return cls(
-            agents,
-            tuple(str(x).lower() for x in data.get("portfolio_triggers", [])),
-        )
+
+        portfolio_triggers = cls._string_list(data.get("portfolio_triggers", []), "portfolio_triggers")
+        return cls(agents, tuple(x.lower() for x in portfolio_triggers))
 
     def get(self, name: str) -> AgentDefinition:
         if name not in self._by_name:
@@ -73,10 +105,6 @@ class AgentRegistry:
     def reviewer(self) -> AgentDefinition:
         return next(a for a in self.agents if a.kind == "reviewer")
 
-    def is_portfolio_task(self, task: str) -> bool:
-        text = task.lower()
-        return any(t in text for t in self.portfolio_triggers)
-
     @staticmethod
     def _trigger_matches(trigger: str, text: str) -> bool:
         if not trigger:
@@ -89,6 +117,13 @@ class AgentRegistry:
     def _score(cls, agent: AgentDefinition, text: str) -> int:
         return sum(1 for trigger in agent.triggers if cls._trigger_matches(trigger, text))
 
+    def matches(self, name: str, task: str) -> bool:
+        return self._score(self.get(name), task.lower()) > 0
+
+    def is_portfolio_task(self, task: str) -> bool:
+        text = task.lower()
+        return any(self._trigger_matches(trigger, text) for trigger in self.portfolio_triggers)
+
     def route_specialists(self, task: str, *, max_specialists: int = 5) -> list[AgentDefinition]:
         if max_specialists < 1:
             raise ValueError("max_specialists must be >= 1")
@@ -96,7 +131,10 @@ class AgentRegistry:
         candidates = [a for a in self.agents if a.kind == "specialist"]
         if self.is_portfolio_task(task):
             phase_rank = {"plan": 0, "build": 1, "release": 2, "verify": 3}
-            return sorted([a for a in candidates if a.portfolio], key=lambda a: (phase_rank[a.phase], -a.priority, a.name))
+            return sorted(
+                [a for a in candidates if a.portfolio],
+                key=lambda a: (phase_rank[a.phase], -a.priority, a.name),
+            )
         scored = [(self._score(a, text), a) for a in candidates]
         matched = [item for item in scored if item[0] > 0]
         matched.sort(key=lambda item: (-item[0], -item[1].priority, item[1].name))
