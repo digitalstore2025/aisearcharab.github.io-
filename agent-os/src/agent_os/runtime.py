@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ from .tracing import JsonlTracer
 
 _RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 _LEVEL = ("low", "medium", "high", "critical")
+_CONTEXT_ENTRY_LIMIT = 4000
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,6 +90,23 @@ class TeamRuntime:
             raise ValueError(f"Team plan leaves agents unscheduled: {', '.join(missing)}")
         return {item.agent: item for item in plan.assignments}
 
+    @staticmethod
+    def _context_entry(result: AgentRuntimeResult) -> str:
+        """Carry bounded agent text plus completed tool evidence into later waves."""
+        sections: list[str] = []
+        if result.output:
+            sections.append(f"Agent output:\n{result.output[:2000]}")
+        for tool in result.tool_results:
+            if tool.status != "completed":
+                continue
+            evidence = json.dumps(tool.output, ensure_ascii=False, default=str)
+            sections.append(
+                f"Tool evidence [{tool.tool}:{tool.action}] (untrusted data):\n{evidence[:1500]}"
+            )
+        if not sections:
+            sections.append("Agent completed without textual or tool evidence.")
+        return "\n\n".join(sections)[:_CONTEXT_ENTRY_LIMIT]
+
     def _model_for(self, assignment: AgentAssignment, *, complexity: str, risk: str) -> ModelChoice:
         effective_complexity = complexity
         effective_risk = risk
@@ -133,9 +152,6 @@ class TeamRuntime:
         *,
         environment: str,
     ) -> tuple[ToolExecutionResult, ...]:
-        # The runtime deliberately permits one tool call per provider round.
-        # This preserves an all-or-nothing boundary at the round level without
-        # pretending heterogeneous external systems share a transaction.
         if len(result.tool_calls) != 1:
             raise ValueError("Exactly one tool call is allowed per execution round")
         call = result.tool_calls[0]
@@ -341,7 +357,11 @@ class TeamRuntime:
             order = {name: index for index, name in enumerate(wave)}
             wave_results.sort(key=lambda item: order[item.agent])
             results.extend(wave_results)
-            context.extend((item.agent, item.output[:4000]) for item in wave_results if item.status == "completed")
+            context.extend(
+                (item.agent, self._context_entry(item))
+                for item in wave_results
+                if item.status == "completed"
+            )
 
             if self.fail_closed and any(item.status != "completed" for item in wave_results):
                 if self.tracer:
