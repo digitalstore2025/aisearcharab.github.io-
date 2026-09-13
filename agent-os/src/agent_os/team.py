@@ -72,6 +72,8 @@ class TeamPlanner:
     ) -> TeamPlan:
         if complexity not in _RANK or risk not in _RANK:
             raise ValueError("Unsupported complexity or risk")
+        if max_specialists < 1:
+            raise ValueError("max_specialists must be >= 1")
         if wave_size < 1:
             raise ValueError("wave_size must be >= 1")
 
@@ -79,13 +81,13 @@ class TeamPlanner:
         specialists = self.registry.route_specialists(task, max_specialists=max_specialists)
 
         architect = self.registry.find_by_capability("architecture")
-        if architect is not None and _RANK[complexity] >= _RANK["high"]:
-            specialists.insert(0, architect)
+        if not portfolio and architect is not None and _RANK[complexity] >= _RANK["high"]:
+            specialists = self._dedupe([architect, *specialists])[:max_specialists]
 
-        verifiers: list[AgentDefinition] = []
         qa = self.registry.find_by_capability("qa")
-        if qa is not None:
-            verifiers.append(qa)
+        if qa is None:
+            raise ValueError("Every team plan requires a qa-capable verifier")
+        verifiers: list[AgentDefinition] = [qa]
 
         security = self.registry.find_by_capability("security")
         security_required = portfolio or _RANK[risk] >= _RANK["high"]
