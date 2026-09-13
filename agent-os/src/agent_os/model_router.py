@@ -23,9 +23,11 @@ class ModelRouter:
 
     def choose(self, *, complexity: str, risk: str, requires_tools: bool = False) -> ModelChoice:
         rank = {"low": 0, "medium": 1, "high": 2, "critical": 3}
-        c = rank.get(complexity, 1)
-        r = rank.get(risk, 1)
-        score = max(c, r)
+        if complexity not in rank:
+            raise ValueError(f"Unsupported complexity: {complexity}")
+        if risk not in rank:
+            raise ValueError(f"Unsupported risk: {risk}")
+        score = max(rank[complexity], rank[risk])
         if score >= 3:
             tier = "critical"
         elif score == 2:
@@ -36,6 +38,9 @@ class ModelRouter:
             tier = "economy"
         entry = self.catalog["tiers"][tier]
         if requires_tools and not entry.get("tool_capable", True):
-            entry = self.catalog["tiers"]["standard"]
+            fallback = self.catalog["tiers"].get("standard")
+            if not fallback or not fallback.get("tool_capable", True):
+                raise ValueError("No tool-capable model tier is configured")
+            entry = fallback
             tier = "standard"
         return ModelChoice(tier, entry["model"], f"complexity={complexity}, risk={risk}, tools={requires_tools}")

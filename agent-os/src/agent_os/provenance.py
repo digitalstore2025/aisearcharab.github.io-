@@ -26,4 +26,11 @@ class Claim:
         positive = sum(e.supports for e in self.evidence)
         negative = len(self.evidence) - positive
         self.confidence = positive / len(self.evidence)
-        self.status = "contested" if positive and negative else ("verified" if positive >= 2 else "partially_verified")
+        if positive == 0:
+            self.status = "refuted"
+        elif negative:
+            self.status = "contested"
+        elif positive >= 2:
+            self.status = "verified"
+        else:
+            self.status = "partially_verified"

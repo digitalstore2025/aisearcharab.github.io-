@@ -37,7 +37,8 @@ class ToolCall:
     tool: str
     action: str
     arguments: dict[str, Any] = field(default_factory=dict)
-    source_trust: TrustLevel = TrustLevel.TRUSTED
+    # Fail closed: callers must explicitly designate trusted source material.
+    source_trust: TrustLevel = TrustLevel.UNTRUSTED
 
 
 @dataclass(slots=True)

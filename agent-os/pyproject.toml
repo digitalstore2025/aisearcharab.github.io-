@@ -18,3 +18,9 @@ agent-os = "agent_os.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.data-files]
+"share/astra-agent-os/config/models" = ["config/models/*.json"]
+"share/astra-agent-os/config/policies" = ["config/policies/*.json"]
+"share/astra-agent-os/config/profiles" = ["config/profiles/*.json"]
+"share/astra-agent-os/config/skills" = ["config/skills/*.json"]

@@ -22,7 +22,10 @@ class MCPGateway:
         self.policy = policy
 
     def authorize(self, call: ToolCall, *, environment: str = "local", retrieved_text: str | None = None) -> GatewayResult:
-        if call.source_trust == TrustLevel.UNTRUSTED and retrieved_text:
+        # Retrieved content is inspected unless the caller explicitly marked the
+        # source as trusted. ToolCall defaults to UNTRUSTED so omitted labels do
+        # not silently bypass the prompt-injection boundary.
+        if retrieved_text and call.source_trust != TrustLevel.TRUSTED:
             assessment = assess_untrusted_text(retrieved_text)
             if assessment.suspicious:
                 return GatewayResult(False, False, f"Blocked prompt-injection signals: {', '.join(assessment.signals)}", "prompt-injection")

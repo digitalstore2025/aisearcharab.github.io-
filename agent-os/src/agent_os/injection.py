@@ -9,6 +9,9 @@ _PATTERNS = [
     ("secrets", re.compile(r"\b(reveal|print|send|exfiltrate|show)\b.{0,60}\b(secret|password|api[_ -]?key|token|credential)\b", re.I | re.S)),
     ("privilege", re.compile(r"\b(disable|bypass|remove)\b.{0,40}\b(safety|guardrail|approval|policy|permission)\b", re.I | re.S)),
     ("tool_escalation", re.compile(r"\b(use|call|invoke)\b.{0,30}\b(tool|shell|terminal|browser)\b.{0,60}\b(unrelated|without approval|secret|credential)\b", re.I | re.S)),
+    ("override_ar", re.compile(r"(تجاهل|تجاوز|اهمل|أهمل|تخط(?:ى|ي)).{0,50}(تعليمات|توجيهات|سياسة).{0,30}(النظام|المطور|السابقة|الأمان|الامان)", re.S)),
+    ("secrets_ar", re.compile(r"(اعرض|اكشف|اطبع|ارسل|أرسل|سر[ّ]?ب).{0,70}(كلمة\s*(?:المرور|السر)|مفتاح\s*(?:API|واجهة)|رمز\s*وصول|توكن|بيانات\s*اعتماد|سر)", re.I | re.S)),
+    ("privilege_ar", re.compile(r"(عطل|عط[ّ]?ل|تجاوز|ازل|أزل).{0,50}(الحماية|الأمان|الامان|السياسة|الموافقة|الصلاحيات|القيود)", re.S)),
 ]
 
 

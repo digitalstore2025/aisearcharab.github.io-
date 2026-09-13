@@ -17,8 +17,15 @@ class MemoryItem:
 
     def usable_as_fact(self, now: datetime | None = None) -> bool:
         now = now or datetime.now(timezone.utc)
-        if self.expires_at and self.expires_at <= now:
+        # Ambiguous naive timestamps fail closed instead of raising or being
+        # silently interpreted in the host's local timezone.
+        if now.tzinfo is None:
             return False
+        if self.expires_at:
+            if self.expires_at.tzinfo is None:
+                return False
+            if self.expires_at <= now:
+                return False
         return self.verified
 
 

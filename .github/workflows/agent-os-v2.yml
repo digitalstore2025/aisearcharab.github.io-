@@ -21,7 +21,7 @@ concurrency:
 jobs:
   control-plane:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -46,3 +46,42 @@ jobs:
         env:
           PYTHONPATH: src
         run: python scripts/run_static_evals.py
+
+      - name: Verify installed CLI package resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip wheel --no-deps --no-build-isolation ./agent-os -w /tmp/astra-wheelhouse
+          python -m venv /tmp/astra-agent-os-venv
+          /tmp/astra-agent-os-venv/bin/pip install --no-index /tmp/astra-wheelhouse/astra_agent_os-*.whl
+          (
+            cd /tmp
+            /tmp/astra-agent-os-venv/bin/agent-os plan "Review auth security before production release" --profile aisearch-study > /tmp/astra-plan.json
+          )
+          /tmp/astra-agent-os-venv/bin/python - <<'PY'
+          import json
+          from pathlib import Path
+          data = json.loads(Path('/tmp/astra-plan.json').read_text())
+          assert data['profile'] == 'aisearch-study'
+          assert data['mode'] == 'shadow'
+          assert data['tier'] == 'strong'
+          assert data['production_mutations'] is False
+          assert 'repo' in data['allowed_tools']
+          PY
+
+      - name: Verify reproducible release archive boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          python agent-os/scripts/build_release.py
+          python - <<'PY'
+          from pathlib import Path
+          from zipfile import ZipFile
+          archive = Path('agent-os/dist/astra_agent_os_v2.zip')
+          assert archive.is_file()
+          with ZipFile(archive) as zf:
+              names = set(zf.namelist())
+          assert 'MANIFEST.json' in names
+          assert not any(name.startswith('dist/') for name in names)
+          assert not any(name.endswith('astra_agent_os_v2.zip') for name in names)
+          PY

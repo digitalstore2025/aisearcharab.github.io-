@@ -15,6 +15,12 @@ class TestProvenanceRedteam(unittest.TestCase):
         c.recompute()
         self.assertEqual(c.status, "contested")
 
+    def test_fully_contradicted_claim_is_refuted(self):
+        c = Claim("x", evidence=[Evidence("a", False), Evidence("b", False)])
+        c.recompute()
+        self.assertEqual(c.status, "refuted")
+        self.assertEqual(c.confidence, 0.0)
+
     def test_finding_requires_evidence(self):
         f = Finding("security", "high", "Issue", "proof", "fix")
         f.validate()

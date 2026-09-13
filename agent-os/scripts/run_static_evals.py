@@ -40,8 +40,8 @@ def main() -> int:
     for c in rows("routing.jsonl"):
         total += 1
         got = [s.name for s in registry.route(c["task"])]
-        if all(x in got for x in c["expected"]): passed += 1
-        else: failures.append(f"{c['id']}: routing {got} missing {c['expected']}")
+        if set(got) == set(c["expected"]) and len(got) == len(c["expected"]): passed += 1
+        else: failures.append(f"{c['id']}: routing {got} != {c['expected']}")
 
     for c in rows("completion.jsonl"):
         total += 1

@@ -1,5 +1,6 @@
 import sys
 import unittest
+from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,6 +16,10 @@ class TestMemoryRagDoD(unittest.TestCase):
         store = MemoryStore()
         store.put(MemoryItem("project", "x", "claim", "chat", verified=False))
         self.assertIsNone(store.get("project", "x", require_verified=True))
+
+    def test_naive_expiry_fails_closed(self):
+        item = MemoryItem("verified_knowledge", "x", "claim", "source", verified=True, expires_at=datetime(2099, 1, 1))
+        self.assertFalse(item.usable_as_fact())
 
     def test_rag_dedupes(self):
         chunks = [

@@ -21,3 +21,8 @@ class TestRoutingModels(unittest.TestCase):
         choice = router.choose(complexity="high", risk="critical", requires_tools=True)
         self.assertEqual(choice.tier, "critical")
         self.assertIn("verifier", choice.model)
+
+    def test_invalid_risk_fails_closed(self):
+        router = ModelRouter.from_file(ROOT / "config/models/catalog.json")
+        with self.assertRaises(ValueError):
+            router.choose(complexity="high", risk="critcal", requires_tools=True)

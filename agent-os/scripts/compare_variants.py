@@ -14,7 +14,12 @@ from agent_os.ab_eval import RunMetric, summarize, recommend
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("csv_file", help="CSV columns: variant,case_id,success,latency_s,tool_calls,input_tokens,output_tokens,cost_usd,security_violations")
+    p.add_argument("--baseline", required=True, help="Variant name used as the control/baseline")
+    p.add_argument("--candidate", required=True, help="Variant name being evaluated for promotion")
     args = p.parse_args()
+    if args.baseline == args.candidate:
+        p.error("--baseline and --candidate must be different variants")
+
     rows = []
     with open(args.csv_file, newline="", encoding="utf-8") as f:
         for r in csv.DictReader(f):
@@ -26,8 +31,11 @@ def main():
             ))
     summaries = summarize(rows)
     print(json.dumps([s.to_dict() for s in summaries], indent=2))
-    if len(summaries) == 2:
-        print(recommend(summaries[0], summaries[1]))
+    by_name = {s.variant: s for s in summaries}
+    missing = [name for name in (args.baseline, args.candidate) if name not in by_name]
+    if missing:
+        p.error(f"Unknown variant(s): {', '.join(missing)}")
+    print(recommend(by_name[args.baseline], by_name[args.candidate]))
 
 if __name__ == "__main__":
     main()
