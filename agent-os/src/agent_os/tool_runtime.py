@@ -46,6 +46,8 @@ class RegisteredToolExecutor:
 class PolicyBoundToolRuntime:
     """Authorize, approval-gate, and execute tool calls with least authority."""
 
+    _KNOWN_PRODUCTION_READS = frozenset({"repo.read", "search.public", "test.run"})
+
     def __init__(
         self,
         gateway: MCPGateway,
@@ -94,12 +96,16 @@ class PolicyBoundToolRuntime:
             self._emit(result, time.perf_counter() - started)
             return result
 
-        if environment == "production" and not self.production_mutations:
+        if (
+            environment == "production"
+            and not self.production_mutations
+            and call.action not in self._KNOWN_PRODUCTION_READS
+        ):
             result = ToolExecutionResult(
                 call.tool,
                 call.action,
                 "denied",
-                reason="Production mutations are disabled by the active profile",
+                reason="Production mutation is disabled by the active profile",
                 rule_id="profile-production-boundary",
             )
             self._emit(result, time.perf_counter() - started)
