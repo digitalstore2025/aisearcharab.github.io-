@@ -59,7 +59,7 @@ jobs:
             /tmp/astra-agent-os-venv/bin/agent-os plan "Review auth security before production release" --profile aisearch-study > /tmp/astra-plan.json
             /tmp/astra-agent-os-venv/bin/agent-os team-plan "Complete the AISearch platform end-to-end" --profile aisearch-study --complexity critical --risk high --trace-jsonl /tmp/astra-team-trace.jsonl > /tmp/astra-team.json
             /tmp/astra-agent-os-venv/bin/agent-os team-plan "Audit auth token handling" --profile base --complexity medium --risk medium > /tmp/astra-security-team.json
-            /tmp/astra-agent-os-venv/bin/agent-os execute-team "Implement backend API" --profile aisearch-study --adapter dry-run --trace-jsonl /tmp/astra-runtime-trace.jsonl > /tmp/astra-runtime.json
+            /tmp/astra-agent-os-venv/bin/agent-os execute-team "Implement backend API" --profile aisearch-study --adapter dry-run --enable-repo-read --workspace-root /tmp --trace-jsonl /tmp/astra-runtime-trace.jsonl > /tmp/astra-runtime.json
           )
           /tmp/astra-agent-os-venv/bin/python - <<'PY'
           import json
@@ -104,6 +104,7 @@ jobs:
 
           runtime = json.loads(Path('/tmp/astra-runtime.json').read_text())
           assert runtime['completed'] is True
+          assert runtime['repo_read_enabled'] is True
           assert runtime['results'][-1]['agent'] == 'independent-reviewer'
           assert runtime['results'][-1]['model'] == 'astra'
           runtime_trace = Path('/tmp/astra-runtime-trace.jsonl').read_text()
