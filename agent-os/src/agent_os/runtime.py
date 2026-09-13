@@ -43,15 +43,19 @@ class TeamRuntime:
         tool_runtime: PolicyBoundToolRuntime | None = None,
         tracer: JsonlTracer | None = None,
         max_workers: int = 4,
+        max_tool_rounds: int = 4,
         fail_closed: bool = True,
     ) -> None:
         if max_workers < 1:
             raise ValueError("max_workers must be >= 1")
+        if max_tool_rounds < 1:
+            raise ValueError("max_tool_rounds must be >= 1")
         self.models = models
         self.adapter = adapter
         self.tool_runtime = tool_runtime
         self.tracer = tracer
         self.max_workers = max_workers
+        self.max_tool_rounds = max_tool_rounds
         self.fail_closed = fail_closed
 
     @staticmethod
@@ -77,6 +81,57 @@ class TeamRuntime:
             requires_tools=bool(assignment.allowed_tools),
         )
 
+    def _failed_result(
+        self,
+        assignment: AgentAssignment,
+        *,
+        started: float,
+        model: ModelChoice | None,
+        output: str,
+        tool_results: tuple[ToolExecutionResult, ...] = (),
+        status: str = "failed",
+    ) -> AgentRuntimeResult:
+        result = AgentRuntimeResult(
+            assignment.agent,
+            status,
+            output,
+            (model.alias or model.model) if model else "unresolved",
+            tool_results,
+            time.perf_counter() - started,
+        )
+        self._trace_agent(result)
+        return result
+
+    def _execute_tool_round(
+        self,
+        assignment: AgentAssignment,
+        result: AgentExecutionResult,
+        *,
+        environment: str,
+    ) -> tuple[ToolExecutionResult, ...]:
+        round_results: list[ToolExecutionResult] = []
+        for call in result.tool_calls:
+            if call.tool not in assignment.allowed_tools:
+                round_results.append(ToolExecutionResult(
+                    call.tool,
+                    call.action,
+                    "denied",
+                    reason="Agent assignment does not allow this tool",
+                    rule_id="agent-tool-boundary",
+                ))
+                continue
+            if self.tool_runtime is None:
+                round_results.append(ToolExecutionResult(
+                    call.tool,
+                    call.action,
+                    "denied",
+                    reason="No tool runtime is configured",
+                    rule_id="tool-runtime-missing",
+                ))
+                continue
+            round_results.append(self.tool_runtime.run(call, environment=environment))
+        return tuple(round_results)
+
     def _run_agent(
         self,
         assignment: AgentAssignment,
@@ -89,8 +144,10 @@ class TeamRuntime:
     ) -> AgentRuntimeResult:
         started = time.perf_counter()
         model: ModelChoice | None = None
+        all_tool_results: list[ToolExecutionResult] = []
         try:
             model = self._model_for(assignment, complexity=complexity, risk=risk)
+            tools = self.tool_runtime.definitions_for(assignment.allowed_tools) if self.tool_runtime else ()
             request = AgentExecutionRequest(
                 agent=assignment.agent,
                 objective=assignment.objective,
@@ -98,49 +155,71 @@ class TeamRuntime:
                 task=task,
                 context=context,
                 model=model,
+                tools=tools,
             )
             result: AgentExecutionResult = self.adapter.execute(request)
         except Exception as exc:
-            runtime_result = AgentRuntimeResult(
-                assignment.agent,
-                "failed",
-                f"adapter-or-routing-error:{type(exc).__name__}",
-                (model.alias or model.model) if model else "unresolved",
-                duration_s=time.perf_counter() - started,
+            return self._failed_result(
+                assignment,
+                started=started,
+                model=model,
+                output=f"adapter-or-routing-error:{type(exc).__name__}",
             )
-            self._trace_agent(runtime_result)
-            return runtime_result
 
-        tool_results: list[ToolExecutionResult] = []
-        for call in result.tool_calls:
-            if call.tool not in assignment.allowed_tools:
-                tool_results.append(ToolExecutionResult(
-                    call.tool,
-                    call.action,
-                    "denied",
-                    reason="Agent assignment does not allow this tool",
-                    rule_id="agent-tool-boundary",
-                ))
-                continue
-            if self.tool_runtime is None:
-                tool_results.append(ToolExecutionResult(
-                    call.tool,
-                    call.action,
-                    "denied",
-                    reason="No tool runtime is configured",
-                    rule_id="tool-runtime-missing",
-                ))
-                continue
-            tool_results.append(self.tool_runtime.run(call, environment=environment))
+        tool_round = 0
+        while result.tool_calls:
+            tool_round += 1
+            if tool_round > self.max_tool_rounds:
+                return self._failed_result(
+                    assignment,
+                    started=started,
+                    model=model,
+                    output="tool-round-limit-exceeded",
+                    tool_results=tuple(all_tool_results),
+                )
 
-        blocked = any(item.status != "completed" for item in tool_results)
-        status = "blocked" if blocked else result.status
+            round_results = self._execute_tool_round(
+                assignment,
+                result,
+                environment=environment,
+            )
+            all_tool_results.extend(round_results)
+            if any(item.status != "completed" for item in round_results):
+                return self._failed_result(
+                    assignment,
+                    started=started,
+                    model=model,
+                    output=result.output,
+                    tool_results=tuple(all_tool_results),
+                    status="blocked",
+                )
+
+            continuation = getattr(self.adapter, "continue_with_tools", None)
+            if not callable(continuation):
+                return self._failed_result(
+                    assignment,
+                    started=started,
+                    model=model,
+                    output="adapter-does-not-support-tool-continuation",
+                    tool_results=tuple(all_tool_results),
+                )
+            try:
+                result = continuation(request, result, round_results)
+            except Exception as exc:
+                return self._failed_result(
+                    assignment,
+                    started=started,
+                    model=model,
+                    output=f"tool-continuation-error:{type(exc).__name__}",
+                    tool_results=tuple(all_tool_results),
+                )
+
         runtime_result = AgentRuntimeResult(
             assignment.agent,
-            status,
+            result.status,
             result.output,
             result.model_id,
-            tuple(tool_results),
+            tuple(all_tool_results),
             time.perf_counter() - started,
         )
         self._trace_agent(runtime_result)
