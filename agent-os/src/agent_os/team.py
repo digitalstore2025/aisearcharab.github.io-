@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import Iterable
 
 from .agent_registry import AgentDefinition, AgentRegistry
+from .tracing import JsonlTracer
 
 _RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 
@@ -41,8 +43,9 @@ class TeamPlan:
 class TeamPlanner:
     """Build a bounded, phase-aware team and explicit handoff graph."""
 
-    def __init__(self, registry: AgentRegistry):
+    def __init__(self, registry: AgentRegistry, tracer: JsonlTracer | None = None):
         self.registry = registry
+        self.tracer = tracer
 
     @staticmethod
     def _dedupe(agents: Iterable[AgentDefinition]) -> list[AgentDefinition]:
@@ -52,6 +55,10 @@ class TeamPlanner:
                 result.append(agent)
                 seen.add(agent.name)
         return result
+
+    @staticmethod
+    def _chunk(names: list[str], size: int) -> list[tuple[str, ...]]:
+        return [tuple(names[i:i + size]) for i in range(0, len(names), size)]
 
     def plan(
         self,
@@ -70,13 +77,24 @@ class TeamPlanner:
 
         portfolio = self.registry.is_portfolio_task(task)
         specialists = self.registry.route_specialists(task, max_specialists=max_specialists)
-        if _RANK[complexity] >= _RANK["high"]:
-            specialists.insert(0, self.registry.get("software-architect"))
 
-        verifiers = [self.registry.get("qa-reliability")]
-        security_matches = self.registry.matches("security-redteam", task)
-        if portfolio or security_matches or _RANK[risk] >= _RANK["high"]:
-            verifiers.append(self.registry.get("security-redteam"))
+        architect = self.registry.find_by_capability("architecture")
+        if architect is not None and _RANK[complexity] >= _RANK["high"]:
+            specialists.insert(0, architect)
+
+        verifiers: list[AgentDefinition] = []
+        qa = self.registry.find_by_capability("qa")
+        if qa is not None:
+            verifiers.append(qa)
+
+        security = self.registry.find_by_capability("security")
+        security_required = portfolio or _RANK[risk] >= _RANK["high"]
+        if security is not None and self.registry.agent_matches(security, task):
+            security_required = True
+        if security_required:
+            if security is None:
+                raise ValueError("High-risk or security-scoped work requires a security-capable verifier")
+            verifiers.append(security)
 
         ordered = self._dedupe([
             self.registry.coordinator,
@@ -100,19 +118,14 @@ class TeamPlanner:
             for a in ordered
         )
 
-        phase_names = {
-            p: [a.name for a in ordered if a.phase == p]
-            for p in ("plan", "build", "release", "verify")
-        }
+        reviewer = self.registry.reviewer.name
         waves: list[tuple[str, ...]] = []
-        if phase_names["plan"]:
-            waves.append(tuple(phase_names["plan"]))
-        for i in range(0, len(phase_names["build"]), wave_size):
-            waves.append(tuple(phase_names["build"][i:i + wave_size]))
-        if phase_names["release"]:
-            waves.append(tuple(phase_names["release"]))
-        if phase_names["verify"]:
-            waves.append(tuple(phase_names["verify"]))
+        for phase in ("plan", "build", "release"):
+            names = [a.name for a in ordered if a.phase == phase and a.name != reviewer]
+            waves.extend(self._chunk(names, wave_size))
+        verify_names = [a.name for a in ordered if a.phase == "verify" and a.name != reviewer]
+        waves.extend(self._chunk(verify_names, wave_size))
+        waves.append((reviewer,))
 
         handoffs: list[Handoff] = []
         coordinator = self.registry.coordinator.name
@@ -127,9 +140,21 @@ class TeamPlanner:
             }[agent.phase]
             handoffs.append(Handoff(coordinator, agent.name, artifact))
 
-        reviewer = self.registry.reviewer.name
         for agent in ordered:
             if agent.name not in {coordinator, reviewer}:
                 handoffs.append(Handoff(agent.name, reviewer, "evidence-and-open-risks"))
 
-        return TeamPlan(task, portfolio, assignments, tuple(handoffs), tuple(waves))
+        plan = TeamPlan(task, portfolio, assignments, tuple(handoffs), tuple(waves))
+        if self.tracer:
+            task_bytes = task.encode("utf-8")
+            self.tracer.emit(
+                "team.plan.created",
+                task_sha256=hashlib.sha256(task_bytes).hexdigest(),
+                task_chars=len(task),
+                agents=list(plan.agents),
+                waves=[list(wave) for wave in plan.waves],
+                portfolio_mode=portfolio,
+                complexity=complexity,
+                risk=risk,
+            )
+        return plan
