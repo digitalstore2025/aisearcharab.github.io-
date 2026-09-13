@@ -92,6 +92,10 @@ class TestPhase2ReviewRegressions(unittest.TestCase):
         cls.models = ModelRouter.from_file(ROOT / "config/models/catalog.json")
         cls.policy = PolicyEngine.from_file(ROOT / "config/policies/default.json")
 
+    @staticmethod
+    def _reviewer(name="independent-reviewer"):
+        return AgentAssignment(name, "verify", "Verify", "Independently review prior work.", (), True)
+
     def test_null_policy_alias_is_rejected(self):
         router = ModelRouter({
             "tiers": {
@@ -243,12 +247,20 @@ class TestPhase2ReviewRegressions(unittest.TestCase):
             "Use authorized tools only.",
             ("repo", "tests"),
         )
-        plan = TeamPlan("Guard the round", False, (assignment,), (), (("backend-platform",),))
+        reviewer = self._reviewer()
+        plan = TeamPlan(
+            "Guard the round",
+            False,
+            (assignment, reviewer),
+            (),
+            (("backend-platform",), (reviewer.agent,)),
+        )
         report = TeamRuntime(self.models, MultiCallAdapter(), tool_runtime=tool_runtime).run(plan)
         self.assertFalse(report.completed)
         self.assertEqual(report.results[0].status, "blocked")
         self.assertEqual(report.results[0].output, "multiple-tool-calls-in-one-round")
         self.assertEqual(executed, [])
+        self.assertNotIn(reviewer.agent, [item.agent for item in report.results])
 
     def test_tool_evidence_is_carried_to_later_waves(self):
         executor = RegisteredToolExecutor()
@@ -269,18 +281,18 @@ class TestPhase2ReviewRegressions(unittest.TestCase):
             profile_allowed_tools=("repo",),
         )
         first = AgentAssignment("research-osint", "research", "Research", "Collect evidence.", ("repo",))
-        second = AgentAssignment("independent-reviewer", "verify", "Verify", "Review evidence.", (), True)
+        second = self._reviewer()
         plan = TeamPlan(
             "Verify evidence",
             False,
             (first, second),
             (),
-            (("research-osint",), ("independent-reviewer",)),
+            (("research-osint",), (second.agent,)),
         )
         adapter = EvidenceAdapter()
         report = TeamRuntime(self.models, adapter, tool_runtime=tool_runtime).run(plan)
         self.assertTrue(report.completed)
-        downstream = "\n".join(text for _, text in adapter.contexts["independent-reviewer"])
+        downstream = "\n".join(text for _, text in adapter.contexts[second.agent])
         self.assertIn("Tool evidence [repo:repo.read]", downstream)
         self.assertIn("EVIDENCE-XYZ", downstream)
         self.assertIn("untrusted data", downstream)
@@ -301,6 +313,53 @@ class TestPhase2ReviewRegressions(unittest.TestCase):
             with self.subTest(plan=plan):
                 with self.assertRaises(ValueError):
                     runtime.run(plan)
+
+    def test_runtime_requires_exactly_one_isolated_final_reviewer(self):
+        worker = AgentAssignment("agent-a", "build", "Build", "Build safely.", ())
+        reviewer = self._reviewer()
+        reviewer_two = self._reviewer("reviewer-two")
+        runtime = TeamRuntime(self.models, DryRunAgentAdapter())
+
+        invalid = (
+            TeamPlan("x", False, (worker,), (), ((worker.agent,),)),
+            TeamPlan(
+                "x",
+                False,
+                (worker, reviewer, reviewer_two),
+                (),
+                ((worker.agent,), (reviewer.agent,), (reviewer_two.agent,)),
+            ),
+            TeamPlan(
+                "x",
+                False,
+                (worker, reviewer),
+                (),
+                ((reviewer.agent,), (worker.agent,)),
+            ),
+            TeamPlan(
+                "x",
+                False,
+                (worker, reviewer),
+                (),
+                ((worker.agent, reviewer.agent),),
+            ),
+        )
+        for plan in invalid:
+            with self.subTest(plan=plan):
+                with self.assertRaises(ValueError):
+                    runtime.run(plan)
+
+        valid = TeamPlan(
+            "x",
+            False,
+            (worker, reviewer),
+            (),
+            ((worker.agent,), (reviewer.agent,)),
+        )
+        report = runtime.run(valid)
+        self.assertTrue(report.completed)
+        self.assertEqual([item.agent for item in report.results], [worker.agent, reviewer.agent])
+        self.assertEqual(report.results[-1].model_id, "astra")
 
     def test_team_plan_does_not_load_policy_file(self):
         stdout = io.StringIO()
