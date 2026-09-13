@@ -1,4 +1,6 @@
+import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -29,10 +31,9 @@ class TestAgentTeam(unittest.TestCase):
         self.assertIn("qa-reliability", plan.agents)
         self.assertEqual(plan.agents[-1], "independent-reviewer")
 
-    def test_security_task_adds_security_verifier(self):
-        plan = self.planner.plan("Review auth secrets and prompt injection before release", complexity="high", risk="high")
+    def test_medium_risk_security_task_still_adds_security_verifier(self):
+        plan = self.planner.plan("Audit auth token handling", complexity="medium", risk="medium")
         self.assertIn("security-redteam", plan.agents)
-        self.assertTrue(any(a.independent for a in plan.assignments))
 
     def test_portfolio_task_builds_cross_functional_team(self):
         plan = self.planner.plan("Complete the AISearch platform end-to-end", complexity="critical", risk="high")
@@ -44,6 +45,14 @@ class TestAgentTeam(unittest.TestCase):
         self.assertEqual(set(plan.agents), expected)
         self.assertTrue(plan.portfolio_mode)
         self.assertLessEqual(max(len(w) for w in plan.waves), 4)
+
+    def test_platform_word_alone_does_not_activate_portfolio(self):
+        plan = self.planner.plan("Fix platform API bug", complexity="medium", risk="medium")
+        self.assertFalse(plan.portfolio_mode)
+        self.assertEqual(
+            set(plan.agents),
+            {"execution-coordinator", "software-architect", "backend-platform", "qa-reliability", "independent-reviewer"},
+        )
 
     def test_profile_tool_allowlist_limits_agent_tools(self):
         plan = self.planner.plan(
@@ -62,3 +71,29 @@ class TestAgentTeam(unittest.TestCase):
         plan = self.planner.plan("Implement backend API and tests", complexity="high")
         edges = {(h.source, h.target, h.artifact) for h in plan.handoffs}
         self.assertIn(("backend-platform", "independent-reviewer", "evidence-and-open-risks"), edges)
+
+    def test_assignments_include_operating_instructions(self):
+        plan = self.planner.plan("Implement backend API", complexity="medium")
+        coordinator = next(a for a in plan.assignments if a.agent == "execution-coordinator")
+        reviewer = next(a for a in plan.assignments if a.agent == "independent-reviewer")
+        self.assertTrue(coordinator.instructions)
+        self.assertTrue(reviewer.instructions)
+        self.assertTrue(reviewer.independent)
+
+    def test_registry_rejects_string_boolean_portfolio(self):
+        data = json.loads((ROOT / "config/agents/registry.json").read_text(encoding="utf-8"))
+        data["agents"][0]["portfolio"] = "false"
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "registry.json"
+            path.write_text(json.dumps(data), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "JSON boolean"):
+                AgentRegistry.from_file(path)
+
+    def test_registry_rejects_non_string_trigger(self):
+        data = json.loads((ROOT / "config/agents/registry.json").read_text(encoding="utf-8"))
+        data["agents"][1]["triggers"] = ["product", 7]
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "registry.json"
+            path.write_text(json.dumps(data), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "non-empty strings"):
+                AgentRegistry.from_file(path)
