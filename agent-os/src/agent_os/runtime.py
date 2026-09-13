@@ -10,6 +10,7 @@ from .provider_adapter import AgentExecutionAdapter, AgentExecutionRequest, Agen
 from .team import AgentAssignment, TeamPlan
 from .tool_runtime import PolicyBoundToolRuntime, ToolExecutionResult
 from .tracing import JsonlTracer
+from .types import validate_execution_environment
 
 
 _RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
@@ -378,6 +379,7 @@ class TeamRuntime:
         risk: str = "medium",
         environment: str = "development",
     ) -> TeamExecutionReport:
+        environment = validate_execution_environment(environment)
         assignments = self._validate_plan(plan)
         results: list[AgentRuntimeResult] = []
         completed_context: dict[str, str] = {}
