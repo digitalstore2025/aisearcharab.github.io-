@@ -164,10 +164,13 @@ class RegisteredToolExecutor:
         description: str | None = None,
         parameters: dict[str, Any] | None = None,
         strict: bool = False,
+        production_read: bool = False,
     ) -> ToolDefinition:
         key = (tool, action)
         if key in self._handlers:
             raise ValueError(f"Handler already registered for {tool}:{action}")
+        if not isinstance(production_read, bool):
+            raise ValueError("production_read must be a boolean capability")
         provider_name = name or self._default_name(tool, action)
         if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", provider_name):
             raise ValueError("Provider tool name must match [A-Za-z0-9_-]{1,64}")
@@ -188,6 +191,7 @@ class RegisteredToolExecutor:
             description or f"Execute {action} through {tool}",
             schema,
             strict,
+            production_read,
         )
         self._handlers[key] = handler
         self._definitions[provider_name] = definition
@@ -202,6 +206,11 @@ class RegisteredToolExecutor:
             for name in self._definition_order
             if self._definitions[name].tool in allowed
         )
+
+    def is_production_read(self, call: ToolCall) -> bool:
+        """Return the immutable registration-time production-read capability."""
+        definition = self._definitions_by_key.get((call.tool, call.action))
+        return definition is not None and definition.production_read is True
 
     def validate(self, call: ToolCall) -> dict[str, Any]:
         key = (call.tool, call.action)
@@ -223,11 +232,6 @@ class RegisteredToolExecutor:
 
 class PolicyBoundToolRuntime:
     """Authorize, approval-gate, and execute tool calls with least authority."""
-
-    _KNOWN_PRODUCTION_READS = frozenset({
-        ("repo", "repo.read"),
-        ("public_search", "search.public"),
-    })
 
     def __init__(
         self,
@@ -284,7 +288,7 @@ class PolicyBoundToolRuntime:
         if (
             environment == "production"
             and not self.production_mutations
-            and (call.tool, call.action) not in self._KNOWN_PRODUCTION_READS
+            and not self.executor.is_production_read(call)
         ):
             result = ToolExecutionResult(
                 call.tool,
