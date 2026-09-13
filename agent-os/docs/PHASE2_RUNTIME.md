@@ -12,10 +12,10 @@ Implemented runtime layers:
 4. `ModelBindingResolver` maps policy aliases to deployment model IDs through `ASTRA_MODEL_<ALIAS>` environment variables. Policy aliases are not assumed to be provider model IDs.
 5. `PolicyBoundToolRuntime` enforces profile tool allowlists, production-mutation boundaries, schema validation, the MCP preflight gateway, and one-time exact-scope approvals before any registered tool handler executes.
 6. `ApprovalLedger` binds grants to exact action, resource, environment, and a canonical SHA-256 fingerprint of JSON-object tool arguments. Wildcards and non-object approval arguments are rejected, and grants are consumed once under a lock.
-7. `RegisteredToolExecutor` publishes only explicitly registered, schema-described functions to provider adapters. Tool arguments must be JSON objects and are validated before approvals are consumed and again immediately before handler execution.
+7. `RegisteredToolExecutor` publishes only explicitly registered, schema-described functions to provider adapters. Tool arguments must be JSON objects and are validated before approvals are consumed and again immediately before handler execution. Production-read capability is immutable registration metadata and is not inferred from logical tool/action names.
 8. `JsonlTracer` is thread-safe and payload-minimized. Raw task text and tool arguments are not written to runtime traces. Runtime tracing is best-effort by default so an unavailable observability sink cannot retroactively turn completed agent work into failure; `strict=True` is available when trace durability is itself a required gate.
 9. `OpenAIResponsesAdapter` is optional and uses stateless Responses API calls with `store=False`. Provider function calls return to the runtime, pass policy/approval gates, execute registered handlers, and are returned as `function_call_output` before the model may continue.
-10. The CLI exposes no mutation handler. Its only built-in tool path is an explicit opt-in `repo.read`, confined to a configured non-sensitive workspace root and opened through no-follow directory/file descriptors.
+10. The CLI exposes no mutation handler. Its only built-in tool path is an explicit opt-in `repo.read`, confined to a configured non-sensitive workspace root and opened through no-follow directory/file descriptors. That built-in registration explicitly carries the production-read capability.
 11. The default CI/runtime adapter is deterministic `dry-run`.
 
 ## Execution semantics
@@ -30,7 +30,7 @@ Implemented runtime layers:
 - Runtime is fail-closed by default: any adapter failure, unsuccessful provider response, denied tool call, pending approval, malformed provider call, malformed plan, or tool-round limit stops later waves.
 - Tool calls from failed, cancelled, or incomplete provider responses are discarded and never executed.
 - One provider round may execute at most one tool call. The OpenAI adapter requests `parallel_tool_calls=False`, and the runtime independently rejects multi-call rounds before any handler runs. This avoids partial side effects across heterogeneous tools that do not share a transaction.
-- If an adapter returns a tool call but does not expose callable tool-continuation support, the runtime blocks the agent **before** executing the tool handler. Capability discovery therefore cannot occur after a side effect.
+- If an adapter returns a tool call but does not expose callable tool-continuation support, the runtime blocks the agent **before** executing any structurally executable tool handler. Safe structural denials such as assignment-tool mismatch still fail without requiring continuation capability.
 - Tool calls are capped by `max_tool_rounds` to prevent unbounded provider/tool loops.
 - Tool output is labeled as untrusted data when returned to the model and when forwarded through an explicit handoff; it is not automatically treated as verified evidence.
 - Full agent objectives and operating instructions remain in the higher-priority provider `instructions` contract and are not silently truncated.
@@ -88,7 +88,9 @@ The built-in schema validator supports the bounded JSON Schema subset used by Ag
 
 Only definitions whose logical tool is allowed by both the active profile and the agent assignment are exposed to a provider. A returned provider function call is mapped back to the registered logical `tool` and `action`, then passes the profile boundary, production boundary, schema validation, `MCPGateway`, and approval ledger before the handler can run.
 
-Production read exemptions are deliberately narrow and matched by exact `(tool, action)` pairs. The runtime currently recognizes `repo:repo.read` and `public_search:search.public` as non-mutating production reads when the active profile permits them. `tests:test.run` is **not** a production-read exemption: arbitrary registered test handlers may execute code or create side effects and therefore remain denied when production mutations are disabled.
+Production access is fail-closed when `production_mutations=False`. A handler is exempted from the production-mutation boundary only when its frozen `ToolDefinition` was registered with `production_read=True`. Tool/action strings alone never grant this capability: registering a side-effecting handler under `repo:repo.read`, `public_search:search.public`, or any other read-looking name remains denied unless the trusted registration explicitly marks that exact definition as a production read. The built-in CLI `repo.read` registration is explicitly marked because its implementation is root-confined and read-only. `tests:test.run` is not marked and remains denied in production when mutations are disabled.
+
+`production_read=True` is a trusted code/configuration decision at tool-registration time; it must never be derived from model output, provider names, user arguments, or retrieved content. `ToolDefinition` is frozen so the capability cannot be mutated after registration.
 
 Approval-gated actions return `approval_required` unless an external caller has inserted an exact, unexpired grant into `ApprovalLedger`. Approval scope includes canonical JSON-object tool arguments. For example, a grant for `pr.merge` with `{"pr_number":126,"head_sha":"abc"}` cannot authorize PR 127 or a different head SHA. Invalid or non-object arguments are rejected before a one-time approval can be consumed. The agent/model cannot self-approve.
 
