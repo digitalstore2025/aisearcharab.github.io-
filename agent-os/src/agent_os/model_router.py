@@ -44,9 +44,10 @@ class ModelRouter:
                 raise ValueError("No tool-capable model tier is configured")
             entry = fallback
             tier = "standard"
-        alias = str(entry.get("policy_alias", tier)).strip().lower()
-        if not alias:
-            raise ValueError(f"Model tier {tier} has an empty policy_alias")
+        raw_alias = entry.get("policy_alias", tier)
+        if not isinstance(raw_alias, str) or not raw_alias.strip():
+            raise ValueError(f"Model tier {tier} must define a non-empty string policy_alias")
+        alias = raw_alias.strip().lower()
         return ModelChoice(
             tier,
             entry["model"],
