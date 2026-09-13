@@ -1,0 +1,16 @@
+{
+  "name": "aisearch-study",
+  "mode": "shadow",
+  "allowed_tools": ["repo", "public_search", "tests", "github_pr", "ci"],
+  "default_risk": "high",
+  "default_complexity": "high",
+  "preferred_skills": [
+    "security-review",
+    "seo-geo-audit",
+    "rag-evaluation",
+    "research-verification",
+    "release-readiness"
+  ],
+  "production_mutations": false,
+  "notes": "AISearch.study reference pilot. Feature-branch and PR preparation are allowed; PR landing, production deploy/database/IAM/billing/secrets remain explicit approval or deny boundaries."
+}

@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools==80.9.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "astra-agent-os"
+version = "2.0.0"
+description = "Vendor-neutral policy, routing, eval, observability and security control plane for AI agents."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+openai = ["openai>=1.0"]
+otel = ["opentelemetry-api>=1.20", "opentelemetry-sdk>=1.20"]
+
+[project.scripts]
+agent-os = "agent_os.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.data-files]
+"share/astra-agent-os/config/models" = ["config/models/*.json"]
+"share/astra-agent-os/config/policies" = ["config/policies/*.json"]
+"share/astra-agent-os/config/profiles" = ["config/profiles/*.json"]
+"share/astra-agent-os/config/skills" = ["config/skills/*.json"]

@@ -1,0 +1,10 @@
+{"id":"p1","action":"repo.read","resource":"repo","environment":"local","expected":"allow"}
+{"id":"p2","action":"repo.write","resource":"repo","environment":"local","expected":"allow"}
+{"id":"p3","action":"test.run","resource":"tests","environment":"local","expected":"allow"}
+{"id":"p4","action":"deploy.production","resource":"deploy","environment":"production","expected":"approval"}
+{"id":"p5","action":"db.migrate","resource":"database","environment":"production","expected":"approval"}
+{"id":"p6","action":"iam.change_role","resource":"iam","environment":"production","expected":"approval"}
+{"id":"p7","action":"secret.read","resource":"secrets","environment":"local","expected":"deny"}
+{"id":"p8","action":"secret.export","resource":"secrets","environment":"production","expected":"deny"}
+{"id":"p9","action":"unknown.action","resource":"unknown","environment":"local","expected":"deny"}
+{"id":"p10","action":"repo.read","resource":"slack","environment":"local","expected":"deny"}
