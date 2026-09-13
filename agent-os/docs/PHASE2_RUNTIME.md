@@ -7,25 +7,27 @@ Phase 2 turns the v2.1 planning control plane into a bounded execution plane whi
 Implemented runtime layers:
 
 1. `TeamPlanner` produces bounded waves and explicit handoffs.
-2. `TeamRuntime` executes one wave at a time and runs agents within a wave concurrently.
-3. `ModelRouter` assigns policy strength and aliases: `luna` (economy), `terra` (standard), `sol` (strong), `astra` (critical).
+2. `TeamRuntime` validates the plan, executes one wave at a time, and runs agents within a wave concurrently.
+3. `ModelRouter` assigns policy strength and aliases: `luna` (economy), `terra` (standard), `sol` (strong), `astra` (critical). Aliases must be non-empty strings.
 4. `ModelBindingResolver` maps policy aliases to deployment model IDs through `ASTRA_MODEL_<ALIAS>` environment variables. Policy aliases are not assumed to be provider model IDs.
-5. `PolicyBoundToolRuntime` enforces profile tool allowlists, production-mutation boundaries, the MCP preflight gateway, and one-time exact-scope approvals before any registered tool handler executes.
+5. `PolicyBoundToolRuntime` enforces profile tool allowlists, production-mutation boundaries, schema validation, the MCP preflight gateway, and one-time exact-scope approvals before any registered tool handler executes.
 6. `ApprovalLedger` binds grants to exact action, resource, environment, and a canonical SHA-256 fingerprint of tool arguments. Wildcards are rejected and grants are consumed once under a lock.
-7. `RegisteredToolExecutor` publishes only explicitly registered, schema-described functions to provider adapters. Models cannot register tools dynamically.
+7. `RegisteredToolExecutor` publishes only explicitly registered, schema-described functions to provider adapters. Tool arguments are validated before approvals are consumed and are validated again immediately before handler execution.
 8. `JsonlTracer` is thread-safe and payload-minimized. Raw task text and tool arguments are not written to runtime traces.
 9. `OpenAIResponsesAdapter` is optional and uses stateless Responses API calls with `store=False`. Provider function calls return to the runtime, pass policy/approval gates, execute registered handlers, and are returned as `function_call_output` before the model may continue.
-10. The CLI exposes no mutation handler. Its only built-in tool path is an explicit opt-in `repo.read`, confined to a configured workspace root and blocked from sensitive files and path traversal.
+10. The CLI exposes no mutation handler. Its only built-in tool path is an explicit opt-in `repo.read`, confined to a configured non-sensitive workspace root and blocked from sensitive files and path traversal.
 11. The default CI/runtime adapter is deterministic `dry-run`.
 
 ## Execution semantics
 
 - Waves are sequential; agents in the same wave may execute concurrently.
+- Team plans fail closed before worker creation if assignments are duplicated, waves contain duplicate or unknown agents, any assignment is unscheduled, or a wave is empty.
 - A wave receives evidence only from completed prior waves, preventing same-wave hidden dependencies.
 - The independent reviewer remains the dedicated final wave produced by `TeamPlanner`.
 - Verification and independent review receive stronger model policy tiers than ordinary execution.
-- Runtime is fail-closed by default: any adapter failure, unsuccessful provider response, denied tool call, pending approval, malformed provider call, or tool-round limit stops later waves.
+- Runtime is fail-closed by default: any adapter failure, unsuccessful provider response, denied tool call, pending approval, malformed provider call, malformed plan, or tool-round limit stops later waves.
 - Tool calls from failed, cancelled, or incomplete provider responses are discarded and never executed.
+- One provider round may execute at most one tool call. The OpenAI adapter requests `parallel_tool_calls=False`, and the runtime independently rejects multi-call rounds before any handler runs. This avoids partial side effects across heterogeneous tools that do not share a transaction.
 - Tool calls are capped by `max_tool_rounds` to prevent unbounded provider/tool loops.
 - Tool output is labeled as untrusted data when returned to the model and is not automatically treated as verified evidence.
 - Full agent objectives and operating instructions remain in the higher-priority provider `instructions` contract and are not silently truncated.
@@ -71,17 +73,19 @@ agent-os execute-team "Inspect the repository evidence" \
   --trace-jsonl /tmp/astra-runtime.jsonl
 ```
 
-`--enable-repo-read` is opt-in. The handler accepts only workspace-relative paths that resolve inside `--workspace-root`, blocks `.git`, `.ssh`, `.env` files, common key/certificate suffixes, and sensitive directory names, and rejects files larger than 256 KiB. The CLI registers no mutation-capable handler. Additional tool-enabled deployments instantiate the runtime programmatically and explicitly register the minimum handlers required by that environment.
+`--enable-repo-read` is opt-in. The configured workspace root itself is rejected if it resolves within a sensitive path such as `.ssh`, `secrets`, or `credentials`. The handler accepts only workspace-relative paths that resolve inside the root, blocks sensitive absolute and relative target paths including `.git`, `.ssh`, `.env` files and common key/certificate suffixes, and rejects files larger than 256 KiB. The CLI registers no mutation-capable handler. Additional tool-enabled deployments instantiate the runtime programmatically and explicitly register the minimum handlers required by that environment.
 
 ## Tool/MCP integration
 
-Tool execution is deliberately explicit. Register only known handlers and JSON schemas with `RegisteredToolExecutor`, then wrap it in `PolicyBoundToolRuntime`. There is no dynamic import, arbitrary shell execution, or model-controlled tool registration.
+Tool execution is deliberately explicit. Register only known handlers and supported JSON schemas with `RegisteredToolExecutor`, then wrap it in `PolicyBoundToolRuntime`. There is no dynamic import, arbitrary shell execution, or model-controlled tool registration.
 
-Only definitions whose logical tool is allowed by both the active profile and the agent assignment are exposed to a provider. A returned provider function call is mapped back to the registered logical `tool` and `action`, then passes the profile boundary, production boundary, `MCPGateway`, and approval ledger before the handler can run.
+The built-in schema validator supports the bounded JSON Schema subset used by Agent OS tools: object/array/string/integer/number/boolean/null types, properties, required, additionalProperties, items, enum, string-length limits, numeric limits, and descriptions. Unsupported schema keywords fail registration rather than being silently ignored.
+
+Only definitions whose logical tool is allowed by both the active profile and the agent assignment are exposed to a provider. A returned provider function call is mapped back to the registered logical `tool` and `action`, then passes the profile boundary, production boundary, schema validation, `MCPGateway`, and approval ledger before the handler can run.
 
 Production read exemptions are matched by the `(tool, action)` pair, not by action name alone, preventing a different tool from borrowing a read-like action label.
 
-Approval-gated actions return `approval_required` unless an external caller has inserted an exact, unexpired grant into `ApprovalLedger`. Approval scope includes the canonical tool arguments. For example, a grant for `pr.merge` with `{"pr_number":126,"head_sha":"abc"}` cannot authorize PR 127 or a different head SHA. The agent/model cannot self-approve.
+Approval-gated actions return `approval_required` unless an external caller has inserted an exact, unexpired grant into `ApprovalLedger`. Approval scope includes the canonical tool arguments. For example, a grant for `pr.merge` with `{"pr_number":126,"head_sha":"abc"}` cannot authorize PR 127 or a different head SHA. Invalid arguments are rejected before a one-time approval can be consumed. The agent/model cannot self-approve.
 
 ## Remaining environment-specific boundaries
 
