@@ -1,0 +1,82 @@
+name: Neural retrieval evaluation
+
+on:
+  pull_request:
+    paths:
+      - "platform/experiments/neural_retrieval/**"
+      - "platform/apps/api/src/aisearcharab_api/retrieval_eval.py"
+      - "platform/apps/api/src/aisearcharab_api/search.py"
+      - "platform/apps/api/src/aisearcharab_api/arabic.py"
+      - "platform/apps/api/tests/fixtures/search_documents.json"
+      - ".github/workflows/neural-retrieval-eval.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: neural-retrieval-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  multilingual-e5-base:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      HF_HUB_DISABLE_TELEMETRY: "1"
+      DO_NOT_TRACK: "1"
+      TOKENIZERS_PARALLELISM: "false"
+      TRANSFORMERS_NO_ADVISORY_WARNINGS: "1"
+    steps:
+      - name: Check out tested merge
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            platform/apps/api/pyproject.toml
+            platform/experiments/neural_retrieval/requirements.txt
+
+      - name: Install reviewed CPU-only experiment dependencies
+        run: |
+          python -m pip install 'pip==26.1.2'
+          python -m pip install -e platform/apps/api
+          python -m pip install 'torch==2.14.0' --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install -r platform/experiments/neural_retrieval/requirements.txt
+          python -m pip check
+          python - <<'PY'
+          import sentencepiece
+          import torch
+          assert torch.__version__.startswith("2.14.0")
+          assert torch.cuda.is_available() is False
+          print("torch", torch.__version__, "sentencepiece", sentencepiece.__version__)
+          PY
+
+      - name: Run offline multilingual neural retrieval benchmark
+        run: |
+          python platform/experiments/neural_retrieval/run_benchmark.py \
+            --model intfloat/multilingual-e5-base \
+            --revision f7d866c89004f9c578631ccaca8bb7b28e7315f2 \
+            --family e5 \
+            --device cpu \
+            --output /tmp/neural-retrieval-report.json
+
+      - name: Validate report JSON
+        if: always()
+        run: |
+          test -s /tmp/neural-retrieval-report.json
+          python -m json.tool /tmp/neural-retrieval-report.json >/dev/null
+
+      - name: Upload benchmark evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        with:
+          name: neural-retrieval-e5-base
+          path: /tmp/neural-retrieval-report.json
+          if-no-files-found: warn
+          retention-days: 14
