@@ -6,15 +6,28 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from agent_os.mcp_gateway import MCPGateway
+from agent_os.model_router import ModelRouter
 from agent_os.policy import PolicyEngine
+from agent_os.runtime import TeamRuntime
+from agent_os.team import AgentAssignment, TeamPlan
 from agent_os.tool_runtime import PolicyBoundToolRuntime, RegisteredToolExecutor
 from agent_os.types import Action, ToolCall, TrustLevel, validate_execution_environment
+
+
+class CountingAdapter:
+    def __init__(self):
+        self.calls = 0
+
+    def execute(self, request):
+        self.calls += 1
+        raise AssertionError("adapter must not execute for an invalid environment")
 
 
 class TestEnvironmentBoundary(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         cls.policy = PolicyEngine.from_file(ROOT / "config/policies/default.json")
+        cls.models = ModelRouter.from_file(ROOT / "config/models/catalog.json")
 
     def test_only_canonical_environment_labels_are_accepted(self):
         for environment in ("local", "development", "staging", "production"):
@@ -66,6 +79,32 @@ class TestEnvironmentBoundary(unittest.TestCase):
                 self.assertEqual(result.status, "denied")
                 self.assertEqual(result.rule_id, "invalid-environment")
         self.assertEqual(executed, [])
+
+    def test_team_runtime_rejects_invalid_environment_before_provider_call(self):
+        worker = AgentAssignment("worker", "build", "Build", "Operate safely.", ())
+        reviewer = AgentAssignment(
+            "independent-reviewer",
+            "verify",
+            "Review",
+            "Independently review prior work.",
+            (),
+            True,
+        )
+        plan = TeamPlan(
+            "Do bounded work",
+            False,
+            (worker, reviewer),
+            (),
+            ((worker.agent,), (reviewer.agent,)),
+        )
+        adapter = CountingAdapter()
+        runtime = TeamRuntime(self.models, adapter)
+
+        for environment in ("prod", "Production", "production ", "sandbox"):
+            with self.subTest(environment=environment):
+                with self.assertRaises(ValueError):
+                    runtime.run(plan, environment=environment)
+        self.assertEqual(adapter.calls, 0)
 
     def test_canonical_development_behavior_is_preserved(self):
         executed = []
