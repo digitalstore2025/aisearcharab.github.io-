@@ -37,6 +37,21 @@ class TestHardeningRegressions(unittest.TestCase):
         self.assertIn("repo", plan.allowed_tools)
         self.assertFalse(plan.production_mutations)
 
+    def test_profile_rejects_string_boolean(self):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            (root / "profiles").mkdir()
+            (root / "profiles" / "bad.json").write_text(json.dumps({
+                "name": "bad",
+                "mode": "shadow",
+                "allowed_tools": ["repo"],
+                "default_risk": "high",
+                "default_complexity": "high",
+                "production_mutations": "false",
+            }), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "JSON boolean"):
+                load_profile("bad", root)
+
     def test_tracer_does_not_persist_arbitrary_payload(self):
         with tempfile.TemporaryDirectory() as td:
             path = Path(td) / "trace.jsonl"
@@ -46,6 +61,16 @@ class TestHardeningRegressions(unittest.TestCase):
             self.assertNotIn("super-secret", raw)
             self.assertEqual(event.data["tier"], "strong")
             self.assertIn("task", event.data["redacted_fields"])
+
+    def test_tracer_redacts_secret_inside_allowlisted_string(self):
+        with tempfile.TemporaryDirectory() as td:
+            path = Path(td) / "trace.jsonl"
+            tracer = JsonlTracer(path)
+            tracer.emit("tool", tool="https://example.test/run?token=TOP-SECRET-VALUE", status="ok")
+            raw = path.read_text(encoding="utf-8")
+            self.assertNotIn("TOP-SECRET-VALUE", raw)
+            data = json.loads(raw)
+            self.assertTrue(data["data"]["tool"].startswith("<redacted:sha256:"))
 
     def test_orchestrator_trace_hashes_task(self):
         with tempfile.TemporaryDirectory() as td:

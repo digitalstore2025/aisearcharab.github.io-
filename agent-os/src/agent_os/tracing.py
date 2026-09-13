@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import time
@@ -15,13 +16,20 @@ _SAFE_KEYS = frozenset({
     "task_chars", "task_sha256", "tier", "tool", "tool_calls", "variant",
 })
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+_SECRET_HINT = re.compile(
+    r"(?i)(?:bearer\s+|api[_-]?key|access[_-]?token|token|secret|password|credential|://[^/\s:@]+:[^@\s/]+@)"
+)
 
 
 def _safe_value(value: Any) -> Any:
     if value is None or isinstance(value, (bool, int, float)):
         return value
     if isinstance(value, str):
-        return _CONTROL_CHARS.sub("", value)[:160]
+        normalized = _CONTROL_CHARS.sub("", value)[:160]
+        if _SECRET_HINT.search(normalized):
+            digest = hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16]
+            return f"<redacted:sha256:{digest}>"
+        return normalized
     if isinstance(value, (list, tuple)):
         return [_safe_value(v) for v in value[:32]]
     return f"<{type(value).__name__}:redacted>"

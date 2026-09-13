@@ -27,7 +27,7 @@ def main() -> int:
 
     for c in rows("policy.jsonl"):
         total += 1
-        got = policy.evaluate(Action(c["action"], environment=c["environment"])).decision.value
+        got = policy.evaluate(Action(c["action"], resource=c.get("resource", ""), environment=c["environment"])).decision.value
         if got == c["expected"]: passed += 1
         else: failures.append(f"{c['id']}: policy {got} != {c['expected']}")
 

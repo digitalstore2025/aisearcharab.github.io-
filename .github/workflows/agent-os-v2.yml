@@ -74,6 +74,11 @@ jobs:
         run: |
           set -euo pipefail
           python agent-os/scripts/build_release.py
+          first_hash="$(sha256sum agent-os/dist/astra_agent_os_v2.zip | awk '{print $1}')"
+          touch agent-os/src/agent_os/config.py
+          python agent-os/scripts/build_release.py
+          second_hash="$(sha256sum agent-os/dist/astra_agent_os_v2.zip | awk '{print $1}')"
+          test "$first_hash" = "$second_hash"
           python - <<'PY'
           from pathlib import Path
           from zipfile import ZipFile

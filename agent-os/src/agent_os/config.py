@@ -63,10 +63,13 @@ def load_profile(name: str, root: str | Path | None = None) -> Profile:
         raise ValueError("Profile contains an unsupported risk/complexity level")
     allowed_tools = data.get("allowed_tools", [])
     preferred_skills = data.get("preferred_skills", [])
+    production_mutations = data.get("production_mutations", False)
     if not isinstance(allowed_tools, list) or not all(isinstance(x, str) and x for x in allowed_tools):
         raise ValueError("Profile allowed_tools must be a list of non-empty strings")
     if not isinstance(preferred_skills, list) or not all(isinstance(x, str) and x for x in preferred_skills):
         raise ValueError("Profile preferred_skills must be a list of non-empty strings")
+    if type(production_mutations) is not bool:
+        raise ValueError("Profile production_mutations must be a JSON boolean")
     return Profile(
         name=name,
         mode=str(data.get("mode", "standard")),
@@ -74,5 +77,5 @@ def load_profile(name: str, root: str | Path | None = None) -> Profile:
         default_risk=risk,
         default_complexity=complexity,
         preferred_skills=tuple(preferred_skills),
-        production_mutations=bool(data.get("production_mutations", False)),
+        production_mutations=production_mutations,
     )

@@ -16,9 +16,14 @@ class Rule:
     environment: str
     decision: Decision
     reason: str
+    resource: str = "*"
 
     def matches(self, action: Action) -> bool:
-        return fnmatch(action.name, self.action) and fnmatch(action.environment, self.environment)
+        return (
+            fnmatch(action.name, self.action)
+            and fnmatch(action.environment, self.environment)
+            and fnmatch(action.resource, self.resource)
+        )
 
 
 class PolicyEngine:
@@ -37,6 +42,7 @@ class PolicyEngine:
                 environment=r.get("environment", "*"),
                 decision=Decision(r["decision"]),
                 reason=r["reason"],
+                resource=r.get("resource", "*"),
             )
             for r in data["rules"]
         ]
