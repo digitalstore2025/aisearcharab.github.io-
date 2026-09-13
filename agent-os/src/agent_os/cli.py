@@ -66,8 +66,8 @@ def main() -> None:
     complexity = args.complexity or profile.default_complexity
     risk = args.risk or profile.default_risk
 
-    policy = PolicyEngine.from_file(root / "policies/default.json")
     if args.cmd == "plan":
+        policy = PolicyEngine.from_file(root / "policies/default.json")
         orchestrator = Orchestrator(
             SkillRegistry.from_file(root / "skills/registry.json"),
             ModelRouter.from_file(root / "models/catalog.json"),
@@ -133,6 +133,7 @@ def main() -> None:
         }, ensure_ascii=False, indent=2))
         return
 
+    policy = PolicyEngine.from_file(root / "policies/default.json")
     adapter = DryRunAgentAdapter() if args.adapter == "dry-run" else OpenAIResponsesAdapter()
     tool_runtime = build_cli_tool_runtime(
         policy,
