@@ -24,14 +24,127 @@ class ToolExecutionResult:
 
 ToolHandler = Callable[[dict[str, Any]], Any]
 _TOOL_NAME_INVALID = re.compile(r"[^A-Za-z0-9_-]+")
+_JSON_TYPES = frozenset({"object", "array", "string", "integer", "number", "boolean", "null"})
+_SCHEMA_KEYS = frozenset({
+    "type",
+    "properties",
+    "required",
+    "additionalProperties",
+    "items",
+    "enum",
+    "description",
+    "minLength",
+    "maxLength",
+    "minimum",
+    "maximum",
+})
+
+
+def _validate_schema_definition(schema: dict[str, Any], *, path: str = "$") -> None:
+    if not isinstance(schema, dict):
+        raise ValueError(f"Schema at {path} must be an object")
+    unknown = set(schema) - _SCHEMA_KEYS
+    if unknown:
+        raise ValueError(f"Unsupported schema keyword at {path}: {sorted(unknown)[0]}")
+    schema_type = schema.get("type")
+    if schema_type not in _JSON_TYPES:
+        raise ValueError(f"Schema at {path} must define one supported JSON type")
+    enum = schema.get("enum")
+    if enum is not None and (not isinstance(enum, list) or not enum):
+        raise ValueError(f"Schema enum at {path} must be a non-empty list")
+
+    if schema_type == "object":
+        properties = schema.get("properties", {})
+        if not isinstance(properties, dict):
+            raise ValueError(f"Schema properties at {path} must be an object")
+        required = schema.get("required", [])
+        if not isinstance(required, list) or not all(isinstance(item, str) for item in required):
+            raise ValueError(f"Schema required at {path} must be a string list")
+        if not set(required).issubset(properties):
+            raise ValueError(f"Schema required fields at {path} must exist in properties")
+        additional = schema.get("additionalProperties", True)
+        if not isinstance(additional, (bool, dict)):
+            raise ValueError(f"Schema additionalProperties at {path} must be boolean or schema")
+        for name, child in properties.items():
+            if not isinstance(name, str):
+                raise ValueError(f"Schema property names at {path} must be strings")
+            _validate_schema_definition(child, path=f"{path}.{name}")
+        if isinstance(additional, dict):
+            _validate_schema_definition(additional, path=f"{path}.*")
+    elif schema_type == "array":
+        items = schema.get("items")
+        if not isinstance(items, dict):
+            raise ValueError(f"Array schema at {path} must define items")
+        _validate_schema_definition(items, path=f"{path}[]")
+
+    for key in ("minLength", "maxLength"):
+        if key in schema and (schema_type != "string" or not isinstance(schema[key], int) or schema[key] < 0):
+            raise ValueError(f"{key} at {path} is only valid as a non-negative integer for strings")
+    for key in ("minimum", "maximum"):
+        if key in schema and (schema_type not in {"integer", "number"} or isinstance(schema[key], bool) or not isinstance(schema[key], (int, float))):
+            raise ValueError(f"{key} at {path} is only valid for numeric schemas")
+
+
+def _matches_type(value: Any, schema_type: str) -> bool:
+    if schema_type == "object":
+        return isinstance(value, dict)
+    if schema_type == "array":
+        return isinstance(value, list)
+    if schema_type == "string":
+        return isinstance(value, str)
+    if schema_type == "integer":
+        return isinstance(value, int) and not isinstance(value, bool)
+    if schema_type == "number":
+        return isinstance(value, (int, float)) and not isinstance(value, bool)
+    if schema_type == "boolean":
+        return isinstance(value, bool)
+    return value is None
+
+
+def _validate_value(value: Any, schema: dict[str, Any], *, path: str = "$") -> None:
+    schema_type = str(schema["type"])
+    if not _matches_type(value, schema_type):
+        raise ValueError(f"Tool arguments fail schema type at {path}")
+    if "enum" in schema and value not in schema["enum"]:
+        raise ValueError(f"Tool arguments fail enum at {path}")
+
+    if schema_type == "object":
+        properties: dict[str, Any] = schema.get("properties", {})
+        required: list[str] = schema.get("required", [])
+        missing = [name for name in required if name not in value]
+        if missing:
+            raise ValueError(f"Tool arguments are missing required field at {path}.{missing[0]}")
+        additional = schema.get("additionalProperties", True)
+        for name, child_value in value.items():
+            child_schema = properties.get(name)
+            if child_schema is not None:
+                _validate_value(child_value, child_schema, path=f"{path}.{name}")
+            elif additional is False:
+                raise ValueError(f"Tool arguments contain an unexpected field at {path}.{name}")
+            elif isinstance(additional, dict):
+                _validate_value(child_value, additional, path=f"{path}.{name}")
+    elif schema_type == "array":
+        for index, item in enumerate(value):
+            _validate_value(item, schema["items"], path=f"{path}[{index}]")
+    elif schema_type == "string":
+        if "minLength" in schema and len(value) < schema["minLength"]:
+            raise ValueError(f"Tool arguments violate minLength at {path}")
+        if "maxLength" in schema and len(value) > schema["maxLength"]:
+            raise ValueError(f"Tool arguments violate maxLength at {path}")
+    elif schema_type in {"integer", "number"}:
+        if "minimum" in schema and value < schema["minimum"]:
+            raise ValueError(f"Tool arguments violate minimum at {path}")
+        if "maximum" in schema and value > schema["maximum"]:
+            raise ValueError(f"Tool arguments violate maximum at {path}")
 
 
 class RegisteredToolExecutor:
-    """Explicit in-process MCP/tool adapter registry; no dynamic imports or arbitrary commands."""
+    """Explicit in-process tool registry with fail-closed argument validation."""
 
     def __init__(self) -> None:
         self._handlers: dict[tuple[str, str], ToolHandler] = {}
         self._definitions: dict[str, ToolDefinition] = {}
+        self._definitions_by_key: dict[tuple[str, str], ToolDefinition] = {}
         self._definition_order: list[str] = []
 
     @staticmethod
@@ -60,13 +173,14 @@ class RegisteredToolExecutor:
             raise ValueError("Provider tool name must match [A-Za-z0-9_-]{1,64}")
         if provider_name in self._definitions:
             raise ValueError(f"Provider tool name already registered: {provider_name}")
-        schema = parameters or {
+        schema = parameters if parameters is not None else {
             "type": "object",
             "properties": {},
             "additionalProperties": True,
         }
-        if not isinstance(schema, dict) or schema.get("type") != "object":
-            raise ValueError("Tool parameters must be a JSON object schema")
+        _validate_schema_definition(schema)
+        if schema.get("type") != "object":
+            raise ValueError("Tool parameters must use a top-level object schema")
         definition = ToolDefinition(
             provider_name,
             tool,
@@ -77,6 +191,7 @@ class RegisteredToolExecutor:
         )
         self._handlers[key] = handler
         self._definitions[provider_name] = definition
+        self._definitions_by_key[key] = definition
         self._definition_order.append(provider_name)
         return definition
 
@@ -89,10 +204,14 @@ class RegisteredToolExecutor:
         )
 
     def execute(self, call: ToolCall) -> Any:
-        handler = self._handlers.get((call.tool, call.action))
-        if handler is None:
+        key = (call.tool, call.action)
+        handler = self._handlers.get(key)
+        definition = self._definitions_by_key.get(key)
+        if handler is None or definition is None:
             raise KeyError(f"No registered handler for {call.tool}:{call.action}")
-        return handler(dict(call.arguments))
+        arguments = dict(call.arguments)
+        _validate_value(arguments, definition.parameters)
+        return handler(arguments)
 
 
 class PolicyBoundToolRuntime:
