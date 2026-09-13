@@ -166,8 +166,24 @@ class TeamRuntime:
                 output=f"adapter-or-routing-error:{type(exc).__name__}",
             )
 
+        if result.status != "completed":
+            return self._failed_result(
+                assignment,
+                started=started,
+                model=model,
+                output=result.output or "provider-result-not-completed",
+            )
+
         tool_round = 0
         while result.tool_calls:
+            if result.status != "completed":
+                return self._failed_result(
+                    assignment,
+                    started=started,
+                    model=model,
+                    output=result.output or "provider-result-not-completed",
+                    tool_results=tuple(all_tool_results),
+                )
             tool_round += 1
             if tool_round > self.max_tool_rounds:
                 return self._failed_result(
