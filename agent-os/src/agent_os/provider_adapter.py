@@ -191,7 +191,9 @@ class OpenAIResponsesAdapter:
         tools = self._tool_payloads(request.tools)
         if tools:
             kwargs["tools"] = tools
-            kwargs["parallel_tool_calls"] = True
+            # Runtime executes one tool request per round so a later denial cannot
+            # leave earlier side effects committed in the same provider turn.
+            kwargs["parallel_tool_calls"] = False
         return self.client.responses.create(**kwargs)
 
     def execute(self, request: AgentExecutionRequest) -> AgentExecutionResult:
