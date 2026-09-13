@@ -51,12 +51,15 @@ def _sanitize(data: dict[str, Any]) -> dict[str, Any]:
 
 
 class JsonlTracer:
-    """Append-only payload-minimized trace sink; production can bridge to OpenTelemetry."""
+    """Payload-minimized JSONL trace sink with explicit durability policy."""
 
-    def __init__(self, path: str | Path):
+    def __init__(self, path: str | Path, *, strict: bool = False):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.trace_id = uuid.uuid4().hex
+        self.strict = strict
+        self.write_failures = 0
+        self.last_write_error: str | None = None
         self._lock = threading.Lock()
 
     def emit(self, event: str, **data: Any) -> TraceEvent:
@@ -66,6 +69,12 @@ class JsonlTracer:
             ensure_ascii=False,
         ) + "\n"
         with self._lock:
-            with self.path.open("a", encoding="utf-8") as f:
-                f.write(line)
+            try:
+                with self.path.open("a", encoding="utf-8") as f:
+                    f.write(line)
+            except OSError as exc:
+                self.write_failures += 1
+                self.last_write_error = type(exc).__name__
+                if self.strict:
+                    raise
         return item
