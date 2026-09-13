@@ -8,6 +8,7 @@ from unittest.mock import patch
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from agent_os.approvals import ApprovalLedger
 from agent_os.cli_tools import build_cli_tool_runtime
 from agent_os.mcp_gateway import MCPGateway
 from agent_os.model_router import ModelRouter
@@ -98,6 +99,38 @@ class TestPhase2ReviewRegressions(unittest.TestCase):
             "ok",
         )
         self.assertEqual(executed, [{"path": "README.md"}])
+
+    def test_invalid_schema_payload_does_not_consume_approval(self):
+        executor = RegisteredToolExecutor()
+        executor.register(
+            tool="github_pr",
+            action="pr.merge",
+            handler=lambda args: "merged",
+            parameters={
+                "type": "object",
+                "properties": {"pr_number": {"type": "integer"}},
+                "required": ["pr_number"],
+                "additionalProperties": False,
+            },
+        )
+        approvals = ApprovalLedger()
+        invalid = ToolCall("github_pr", "pr.merge", {"pr_number": "126"}, TrustLevel.TRUSTED)
+        approvals.grant(
+            action="pr.merge",
+            resource="github_pr",
+            environment="development",
+            arguments=invalid.arguments,
+        )
+        runtime = PolicyBoundToolRuntime(
+            MCPGateway(self.policy),
+            executor,
+            approvals=approvals,
+            profile_allowed_tools=("github_pr",),
+        )
+        result = runtime.run(invalid, environment="development")
+        self.assertEqual(result.status, "failed")
+        self.assertEqual(result.rule_id, "tool-schema-validation")
+        self.assertIsNotNone(approvals.consume(invalid, environment="development"))
 
     def test_unsupported_schema_keyword_fails_registration(self):
         executor = RegisteredToolExecutor()
@@ -191,7 +224,6 @@ class TestPhase2ReviewRegressions(unittest.TestCase):
             choice,
             (),
         )
-        # No tools means the provider flag is intentionally absent.
         with patch.dict(os.environ, {"ASTRA_MODEL_TERRA": "provider-model-123"}, clear=True):
             adapter.execute(request)
         self.assertNotIn("parallel_tool_calls", client.responses.calls[0])
