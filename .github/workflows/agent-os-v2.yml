@@ -58,6 +58,7 @@ jobs:
             cd /tmp
             /tmp/astra-agent-os-venv/bin/agent-os plan "Review auth security before production release" --profile aisearch-study > /tmp/astra-plan.json
             /tmp/astra-agent-os-venv/bin/agent-os team-plan "Complete the AISearch platform end-to-end" --profile aisearch-study --complexity critical --risk high > /tmp/astra-team.json
+            /tmp/astra-agent-os-venv/bin/agent-os team-plan "Audit auth token handling" --profile base --complexity medium --risk medium > /tmp/astra-security-team.json
           )
           /tmp/astra-agent-os-venv/bin/python - <<'PY'
           import json
@@ -80,7 +81,13 @@ jobs:
           assert team['portfolio_mode'] is True
           assert names == required
           assert max(map(len, team['waves'])) <= 4
+          assert all(item['instructions'].strip() for item in team['assignments'])
           assert all(set(item['allowed_tools']) <= {'repo','public_search','tests','github_pr','ci'} for item in team['assignments'])
+
+          security_team = json.loads(Path('/tmp/astra-security-team.json').read_text())
+          security_names = {item['agent'] for item in security_team['assignments']}
+          assert security_team['portfolio_mode'] is False
+          assert 'security-redteam' in security_names
           PY
 
       - name: Verify reproducible release archive boundary
