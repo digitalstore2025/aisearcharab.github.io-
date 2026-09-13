@@ -15,7 +15,8 @@ Implemented runtime layers:
 7. `RegisteredToolExecutor` publishes only explicitly registered, schema-described functions to provider adapters. Models cannot register tools dynamically.
 8. `JsonlTracer` is thread-safe and payload-minimized. Raw task text and tool arguments are not written to runtime traces.
 9. `OpenAIResponsesAdapter` is optional and uses stateless Responses API calls with `store=False`. Provider function calls return to the runtime, pass policy/approval gates, execute registered handlers, and are returned as `function_call_output` before the model may continue.
-10. The default CI/runtime adapter is deterministic `dry-run`.
+10. The CLI exposes no mutation handler. Its only built-in tool path is an explicit opt-in `repo.read`, confined to a configured workspace root and blocked from sensitive files and path traversal.
+11. The default CI/runtime adapter is deterministic `dry-run`.
 
 ## Execution semantics
 
@@ -23,10 +24,11 @@ Implemented runtime layers:
 - A wave receives evidence only from completed prior waves, preventing same-wave hidden dependencies.
 - The independent reviewer remains the dedicated final wave produced by `TeamPlanner`.
 - Verification and independent review receive stronger model policy tiers than ordinary execution.
-- Runtime is fail-closed by default: any adapter failure, denied tool call, pending approval, malformed provider call, or tool-round limit stops later waves.
+- Runtime is fail-closed by default: any adapter failure, unsuccessful provider response, denied tool call, pending approval, malformed provider call, or tool-round limit stops later waves.
+- Tool calls from failed, cancelled, or incomplete provider responses are discarded and never executed.
 - Tool calls are capped by `max_tool_rounds` to prevent unbounded provider/tool loops.
 - Tool output is labeled as untrusted data when returned to the model and is not automatically treated as verified evidence.
-- Full agent objectives and operating instructions are retained in the trusted agent contract; they are not silently truncated to fit provider developer-instruction limits.
+- Full agent objectives and operating instructions remain in the higher-priority provider `instructions` contract and are not silently truncated.
 
 ## Model deployment bindings
 
@@ -61,13 +63,15 @@ agent-os execute-team "Implement backend API" \
 Execute using the optional OpenAI adapter after model bindings and provider authentication are configured:
 
 ```bash
-agent-os execute-team "Implement backend API" \
+agent-os execute-team "Inspect the repository evidence" \
   --profile aisearch-study \
   --adapter openai \
+  --enable-repo-read \
+  --workspace-root . \
   --trace-jsonl /tmp/astra-runtime.jsonl
 ```
 
-The CLI intentionally registers no mutation-capable tool handlers. Tool-enabled deployments instantiate the runtime programmatically and explicitly register the minimum handlers required by that environment.
+`--enable-repo-read` is opt-in. The handler accepts only workspace-relative paths that resolve inside `--workspace-root`, blocks `.git`, `.ssh`, `.env` files, common key/certificate suffixes, and sensitive directory names, and rejects files larger than 256 KiB. The CLI registers no mutation-capable handler. Additional tool-enabled deployments instantiate the runtime programmatically and explicitly register the minimum handlers required by that environment.
 
 ## Tool/MCP integration
 
@@ -75,8 +79,10 @@ Tool execution is deliberately explicit. Register only known handlers and JSON s
 
 Only definitions whose logical tool is allowed by both the active profile and the agent assignment are exposed to a provider. A returned provider function call is mapped back to the registered logical `tool` and `action`, then passes the profile boundary, production boundary, `MCPGateway`, and approval ledger before the handler can run.
 
+Production read exemptions are matched by the `(tool, action)` pair, not by action name alone, preventing a different tool from borrowing a read-like action label.
+
 Approval-gated actions return `approval_required` unless an external caller has inserted an exact, unexpired grant into `ApprovalLedger`. Approval scope includes the canonical tool arguments. For example, a grant for `pr.merge` with `{"pr_number":126,"head_sha":"abc"}` cannot authorize PR 127 or a different head SHA. The agent/model cannot self-approve.
 
 ## Remaining environment-specific boundaries
 
-The core runtime does not configure cloud IAM, network sandboxes, vendor-specific remote MCP transports, production secrets, billing, or deployment credentials. Those controls must remain outside the model and be enforced by the target environment. Production deployment, database writes, IAM changes, billing, secret access, external messaging, and PR landing remain policy-controlled actions.
+The core runtime does not configure cloud IAM, network sandboxes, vendor-specific remote MCP transports, production secrets, billing, durable storage, or deployment credentials. Those controls must remain outside the model and be enforced by the target environment. Production deployment, database writes, IAM changes, billing, secret access, external messaging, and PR landing remain policy-controlled actions.
