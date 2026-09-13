@@ -64,6 +64,30 @@ class TeamRuntime:
             raise ValueError("Unsupported execution level")
         return _LEVEL[max(_RANK[level], _RANK[minimum])]
 
+    @staticmethod
+    def _validate_plan(plan: TeamPlan) -> dict[str, AgentAssignment]:
+        assignment_names = [item.agent for item in plan.assignments]
+        if not assignment_names:
+            raise ValueError("Team plan must contain at least one assignment")
+        if len(assignment_names) != len(set(assignment_names)):
+            raise ValueError("Team plan contains duplicate agent assignments")
+        if any(not wave for wave in plan.waves):
+            raise ValueError("Team plan contains an empty execution wave")
+
+        wave_names = [name for wave in plan.waves for name in wave]
+        if len(wave_names) != len(set(wave_names)):
+            raise ValueError("Team plan schedules an agent more than once")
+
+        assignment_set = set(assignment_names)
+        wave_set = set(wave_names)
+        unknown = sorted(wave_set - assignment_set)
+        if unknown:
+            raise ValueError(f"Team plan waves reference unknown agents: {', '.join(unknown)}")
+        missing = sorted(assignment_set - wave_set)
+        if missing:
+            raise ValueError(f"Team plan leaves agents unscheduled: {', '.join(missing)}")
+        return {item.agent: item for item in plan.assignments}
+
     def _model_for(self, assignment: AgentAssignment, *, complexity: str, risk: str) -> ModelChoice:
         effective_complexity = complexity
         effective_risk = risk
@@ -109,28 +133,29 @@ class TeamRuntime:
         *,
         environment: str,
     ) -> tuple[ToolExecutionResult, ...]:
-        round_results: list[ToolExecutionResult] = []
-        for call in result.tool_calls:
-            if call.tool not in assignment.allowed_tools:
-                round_results.append(ToolExecutionResult(
-                    call.tool,
-                    call.action,
-                    "denied",
-                    reason="Agent assignment does not allow this tool",
-                    rule_id="agent-tool-boundary",
-                ))
-                continue
-            if self.tool_runtime is None:
-                round_results.append(ToolExecutionResult(
-                    call.tool,
-                    call.action,
-                    "denied",
-                    reason="No tool runtime is configured",
-                    rule_id="tool-runtime-missing",
-                ))
-                continue
-            round_results.append(self.tool_runtime.run(call, environment=environment))
-        return tuple(round_results)
+        # The runtime deliberately permits one tool call per provider round.
+        # This preserves an all-or-nothing boundary at the round level without
+        # pretending heterogeneous external systems share a transaction.
+        if len(result.tool_calls) != 1:
+            raise ValueError("Exactly one tool call is allowed per execution round")
+        call = result.tool_calls[0]
+        if call.tool not in assignment.allowed_tools:
+            return (ToolExecutionResult(
+                call.tool,
+                call.action,
+                "denied",
+                reason="Agent assignment does not allow this tool",
+                rule_id="agent-tool-boundary",
+            ),)
+        if self.tool_runtime is None:
+            return (ToolExecutionResult(
+                call.tool,
+                call.action,
+                "denied",
+                reason="No tool runtime is configured",
+                rule_id="tool-runtime-missing",
+            ),)
+        return (self.tool_runtime.run(call, environment=environment),)
 
     def _run_agent(
         self,
@@ -183,6 +208,15 @@ class TeamRuntime:
                     model=model,
                     output=result.output or "provider-result-not-completed",
                     tool_results=tuple(all_tool_results),
+                )
+            if len(result.tool_calls) != 1:
+                return self._failed_result(
+                    assignment,
+                    started=started,
+                    model=model,
+                    output="multiple-tool-calls-in-one-round",
+                    tool_results=tuple(all_tool_results),
+                    status="blocked",
                 )
             tool_round += 1
             if tool_round > self.max_tool_rounds:
@@ -260,12 +294,7 @@ class TeamRuntime:
         risk: str = "medium",
         environment: str = "development",
     ) -> TeamExecutionReport:
-        assignments = {item.agent: item for item in plan.assignments}
-        wave_names = [name for wave in plan.waves for name in wave]
-        unknown = sorted(set(wave_names) - set(assignments))
-        if unknown:
-            raise ValueError(f"Team plan waves reference unknown agents: {', '.join(unknown)}")
-
+        assignments = self._validate_plan(plan)
         results: list[AgentRuntimeResult] = []
         context: list[tuple[str, str]] = []
 
@@ -281,7 +310,7 @@ class TeamRuntime:
         for wave_index, wave in enumerate(plan.waves):
             snapshot = tuple(context)
             wave_results: list[AgentRuntimeResult] = []
-            workers = min(self.max_workers, max(1, len(wave)))
+            workers = min(self.max_workers, len(wave))
             with ThreadPoolExecutor(max_workers=workers) as pool:
                 future_map = {
                     pool.submit(
