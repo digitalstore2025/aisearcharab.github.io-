@@ -115,7 +115,21 @@ class TestPhase2Hardening(unittest.TestCase):
             "Use only authorized tools.",
             ("repo",),
         )
-        plan = TeamPlan("Read README", False, (assignment,), (), (("backend-platform",),))
+        reviewer = AgentAssignment(
+            "independent-reviewer",
+            "verify",
+            "Independently verify",
+            "Review prior evidence.",
+            (),
+            True,
+        )
+        plan = TeamPlan(
+            "Read README",
+            False,
+            (assignment, reviewer),
+            (),
+            (("backend-platform",), ("independent-reviewer",)),
+        )
         report = TeamRuntime(
             self.models,
             FailedAdapterWithToolCall(),
@@ -124,6 +138,7 @@ class TestPhase2Hardening(unittest.TestCase):
         self.assertFalse(report.completed)
         self.assertEqual(executed, [])
         self.assertEqual(report.results[0].status, "failed")
+        self.assertNotIn("independent-reviewer", [item.agent for item in report.results])
 
     def test_cli_repo_read_is_opt_in_root_confined_and_sensitive_path_blocked(self):
         with tempfile.TemporaryDirectory() as td:
