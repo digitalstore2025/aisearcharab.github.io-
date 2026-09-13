@@ -1,0 +1,181 @@
+import os
+import sys
+import tempfile
+import unittest
+from pathlib import Path
+from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
+
+from agent_os.agent_registry import AgentRegistry
+from agent_os.approvals import ApprovalLedger
+from agent_os.mcp_gateway import MCPGateway
+from agent_os.model_bindings import ModelBindingResolver
+from agent_os.model_router import ModelRouter
+from agent_os.policy import PolicyEngine
+from agent_os.provider_adapter import AgentExecutionResult, DryRunAgentAdapter
+from agent_os.runtime import TeamRuntime
+from agent_os.team import TeamPlanner
+from agent_os.tool_runtime import PolicyBoundToolRuntime, RegisteredToolExecutor
+from agent_os.tracing import JsonlTracer
+from agent_os.types import ToolCall, TrustLevel
+
+
+class ScriptedAdapter:
+    def __init__(self, calls_by_agent=None):
+        self.calls_by_agent = calls_by_agent or {}
+
+    def execute(self, request):
+        return AgentExecutionResult(
+            request.agent,
+            f"ok:{request.agent}",
+            request.model.alias or request.model.tier,
+            tuple(self.calls_by_agent.get(request.agent, ())),
+        )
+
+
+class TestPhase2Runtime(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.models = ModelRouter.from_file(ROOT / "config/models/catalog.json")
+        cls.registry = AgentRegistry.from_file(ROOT / "config/agents/registry.json")
+        cls.policy = PolicyEngine.from_file(ROOT / "config/policies/default.json")
+
+    def test_policy_aliases_route_by_strength(self):
+        cases = [
+            (("low", "low"), "luna"),
+            (("medium", "low"), "terra"),
+            (("high", "medium"), "sol"),
+            (("critical", "low"), "astra"),
+        ]
+        for (complexity, risk), expected in cases:
+            with self.subTest(expected=expected):
+                choice = self.models.choose(complexity=complexity, risk=risk)
+                self.assertEqual(choice.alias, expected)
+
+    def test_model_binding_requires_explicit_provider_id_for_placeholders(self):
+        choice = self.models.choose(complexity="high", risk="medium")
+        resolver = ModelBindingResolver()
+        with patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "ASTRA_MODEL_SOL"):
+                resolver.resolve(choice)
+        with patch.dict(os.environ, {"ASTRA_MODEL_SOL": "provider-model-123"}, clear=True):
+            self.assertEqual(resolver.resolve(choice), "provider-model-123")
+
+    def test_approval_is_exact_scope_and_one_time(self):
+        ledger = ApprovalLedger()
+        call = ToolCall("github_pr", "pr.merge")
+        ledger.grant(action="pr.merge", resource="github_pr", environment="development")
+        self.assertIsNotNone(ledger.consume(call, environment="development"))
+        self.assertIsNone(ledger.consume(call, environment="development"))
+
+    def test_wildcard_approval_is_rejected(self):
+        with self.assertRaises(ValueError):
+            ApprovalLedger().grant(action="*", resource="github_pr", environment="development")
+
+    def _tool_runtime(self, executor, *, tools=("repo", "github_pr"), production_mutations=False, approvals=None):
+        return PolicyBoundToolRuntime(
+            MCPGateway(self.policy),
+            executor,
+            approvals=approvals,
+            profile_allowed_tools=tools,
+            production_mutations=production_mutations,
+        )
+
+    def test_tool_outside_profile_is_denied_before_execution(self):
+        executor = RegisteredToolExecutor()
+        executor.register(tool="github_pr", action="pr.merge", handler=lambda _: "merged")
+        result = self._tool_runtime(executor, tools=("repo",)).run(
+            ToolCall("github_pr", "pr.merge"), environment="development"
+        )
+        self.assertEqual(result.status, "denied")
+        self.assertEqual(result.rule_id, "profile-tool-boundary")
+
+    def test_approval_gated_tool_requires_and_consumes_grant(self):
+        executor = RegisteredToolExecutor()
+        executor.register(tool="github_pr", action="pr.merge", handler=lambda _: "merged")
+        approvals = ApprovalLedger()
+        runtime = self._tool_runtime(executor, approvals=approvals)
+        call = ToolCall("github_pr", "pr.merge", source_trust=TrustLevel.TRUSTED)
+        pending = runtime.run(call, environment="development")
+        self.assertEqual(pending.status, "approval_required")
+        approvals.grant(action="pr.merge", resource="github_pr", environment="development")
+        completed = runtime.run(call, environment="development")
+        self.assertEqual(completed.status, "completed")
+        self.assertEqual(completed.output, "merged")
+        self.assertEqual(runtime.run(call, environment="development").status, "approval_required")
+
+    def test_production_read_allowed_but_unknown_mutation_denied(self):
+        executor = RegisteredToolExecutor()
+        executor.register(tool="repo", action="repo.read", handler=lambda _: "content")
+        executor.register(tool="repo", action="repo.write", handler=lambda _: "changed")
+        runtime = self._tool_runtime(executor, tools=("repo",), production_mutations=False)
+        read_result = runtime.run(
+            ToolCall("repo", "repo.read", source_trust=TrustLevel.TRUSTED),
+            environment="production",
+        )
+        self.assertEqual(read_result.status, "completed")
+        write_result = runtime.run(
+            ToolCall("repo", "repo.write", source_trust=TrustLevel.TRUSTED),
+            environment="production",
+        )
+        self.assertEqual(write_result.status, "denied")
+        self.assertEqual(write_result.rule_id, "profile-production-boundary")
+
+    def test_team_runtime_preserves_wave_and_final_review_order(self):
+        plan = TeamPlanner(self.registry).plan(
+            "Complete the AISearch platform end-to-end",
+            complexity="critical",
+            risk="high",
+        )
+        report = TeamRuntime(self.models, DryRunAgentAdapter(), max_workers=4).run(
+            plan, complexity="critical", risk="high"
+        )
+        self.assertTrue(report.completed)
+        self.assertEqual(report.results[-1].agent, "independent-reviewer")
+        self.assertEqual(report.results[-1].model_id, "astra")
+
+    def test_agent_tool_boundary_blocks_and_stops_later_waves(self):
+        plan = TeamPlanner(self.registry).plan(
+            "Implement backend API",
+            complexity="medium",
+            risk="medium",
+        )
+        calls = {
+            "backend-platform": (ToolCall("billing", "billing.update", source_trust=TrustLevel.TRUSTED),)
+        }
+        executor = RegisteredToolExecutor()
+        runtime = TeamRuntime(
+            self.models,
+            ScriptedAdapter(calls),
+            tool_runtime=self._tool_runtime(executor, tools=("repo", "billing")),
+            max_workers=2,
+        )
+        report = runtime.run(plan, environment="development")
+        self.assertFalse(report.completed)
+        self.assertNotIn("independent-reviewer", [item.agent for item in report.results])
+        backend = next(item for item in report.results if item.agent == "backend-platform")
+        self.assertEqual(backend.status, "blocked")
+        self.assertEqual(backend.tool_results[0].rule_id, "agent-tool-boundary")
+
+    def test_runtime_trace_never_persists_raw_task(self):
+        plan = TeamPlanner(self.registry).plan("Implement backend API", complexity="medium")
+        with tempfile.TemporaryDirectory() as td:
+            trace_path = Path(td) / "runtime.jsonl"
+            task = "Implement backend API with SECRET-CONTEXT-123"
+            plan = type(plan)(task, plan.portfolio_mode, plan.assignments, plan.handoffs, plan.waves)
+            report = TeamRuntime(
+                self.models,
+                DryRunAgentAdapter(),
+                tracer=JsonlTracer(trace_path),
+            ).run(plan)
+            self.assertTrue(report.completed)
+            raw = trace_path.read_text(encoding="utf-8")
+            self.assertNotIn(task, raw)
+            self.assertIn("agent.execution.completed", raw)
+            self.assertIn("team.execution.completed", raw)
+
+
+if __name__ == "__main__":
+    unittest.main()
