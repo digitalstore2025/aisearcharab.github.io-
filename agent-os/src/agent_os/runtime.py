@@ -15,6 +15,7 @@ from .tracing import JsonlTracer
 _RANK = {"low": 0, "medium": 1, "high": 2, "critical": 3}
 _LEVEL = ("low", "medium", "high", "critical")
 _CONTEXT_ENTRY_LIMIT = 4000
+_HANDOFF_ARTIFACT_LIMIT = 160
 
 
 @dataclass(frozen=True, slots=True)
@@ -35,7 +36,7 @@ class TeamExecutionReport:
 
 
 class TeamRuntime:
-    """Execute validated TeamPlans with a mandatory isolated final independent review."""
+    """Execute validated TeamPlans with explicit handoffs and an isolated final review."""
 
     def __init__(
         self,
@@ -98,11 +99,32 @@ class TeamRuntime:
         if tuple(plan.waves[-1]) != (reviewer,):
             raise ValueError("Independent reviewer must be the only agent in the final wave")
 
+        wave_index = {
+            name: index
+            for index, wave in enumerate(plan.waves)
+            for name in wave
+        }
+        handoff_pairs: set[tuple[str, str]] = set()
+        for handoff in plan.handoffs:
+            if handoff.source not in assignment_set or handoff.target not in assignment_set:
+                raise ValueError("Team plan handoff references an unknown agent")
+            if handoff.source == handoff.target:
+                raise ValueError("Team plan handoff cannot target its source agent")
+            artifact = handoff.artifact.strip()
+            if not artifact or len(artifact) > _HANDOFF_ARTIFACT_LIMIT:
+                raise ValueError("Team plan handoff artifact must be a bounded non-empty label")
+            pair = (handoff.source, handoff.target)
+            if pair in handoff_pairs:
+                raise ValueError("Team plan contains duplicate handoff routing")
+            handoff_pairs.add(pair)
+            if wave_index[handoff.source] >= wave_index[handoff.target]:
+                raise ValueError("Team plan handoffs must flow from an earlier wave to a later wave")
+
         return {item.agent: item for item in plan.assignments}
 
     @staticmethod
     def _context_entry(result: AgentRuntimeResult) -> str:
-        """Carry bounded agent text plus completed tool evidence into later waves."""
+        """Build bounded text and completed tool evidence for an explicit handoff."""
         sections: list[str] = []
         if result.output:
             sections.append(f"Agent output:\n{result.output[:2000]}")
@@ -116,6 +138,25 @@ class TeamRuntime:
         if not sections:
             sections.append("Agent completed without textual or tool evidence.")
         return "\n\n".join(sections)[:_CONTEXT_ENTRY_LIMIT]
+
+    @staticmethod
+    def _context_for(
+        plan: TeamPlan,
+        target: str,
+        completed_context: dict[str, str],
+    ) -> tuple[tuple[str, str], ...]:
+        entries: list[tuple[str, str]] = []
+        for handoff in plan.handoffs:
+            if handoff.target != target:
+                continue
+            source_context = completed_context.get(handoff.source)
+            if source_context is None:
+                continue
+            entries.append((
+                handoff.source,
+                f"Handoff artifact [{handoff.artifact.strip()}] (untrusted prior-wave data):\n{source_context}",
+            ))
+        return tuple(entries)
 
     def _model_for(self, assignment: AgentAssignment, *, complexity: str, risk: str) -> ModelChoice:
         effective_complexity = complexity
@@ -254,6 +295,17 @@ class TeamRuntime:
                     tool_results=tuple(all_tool_results),
                 )
 
+            continuation = getattr(self.adapter, "continue_with_tools", None)
+            if not callable(continuation):
+                return self._failed_result(
+                    assignment,
+                    started=started,
+                    model=model,
+                    output="adapter-does-not-support-tool-continuation",
+                    tool_results=tuple(all_tool_results),
+                    status="blocked",
+                )
+
             round_results = self._execute_tool_round(
                 assignment,
                 result,
@@ -270,15 +322,6 @@ class TeamRuntime:
                     status="blocked",
                 )
 
-            continuation = getattr(self.adapter, "continue_with_tools", None)
-            if not callable(continuation):
-                return self._failed_result(
-                    assignment,
-                    started=started,
-                    model=model,
-                    output="adapter-does-not-support-tool-continuation",
-                    tool_results=tuple(all_tool_results),
-                )
             try:
                 result = continuation(request, result, round_results)
             except Exception as exc:
@@ -322,7 +365,7 @@ class TeamRuntime:
     ) -> TeamExecutionReport:
         assignments = self._validate_plan(plan)
         results: list[AgentRuntimeResult] = []
-        context: list[tuple[str, str]] = []
+        completed_context: dict[str, str] = {}
 
         if self.tracer:
             self.tracer.emit(
@@ -334,7 +377,6 @@ class TeamRuntime:
             )
 
         for wave_index, wave in enumerate(plan.waves):
-            snapshot = tuple(context)
             wave_results: list[AgentRuntimeResult] = []
             workers = min(self.max_workers, len(wave))
             with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -343,7 +385,7 @@ class TeamRuntime:
                         self._run_agent,
                         assignments[name],
                         plan.task,
-                        snapshot,
+                        self._context_for(plan, name, completed_context),
                         complexity=complexity,
                         risk=risk,
                         environment=environment,
@@ -367,11 +409,9 @@ class TeamRuntime:
             order = {name: index for index, name in enumerate(wave)}
             wave_results.sort(key=lambda item: order[item.agent])
             results.extend(wave_results)
-            context.extend(
-                (item.agent, self._context_entry(item))
-                for item in wave_results
-                if item.status == "completed"
-            )
+            for item in wave_results:
+                if item.status == "completed":
+                    completed_context[item.agent] = self._context_entry(item)
 
             if self.fail_closed and any(item.status != "completed" for item in wave_results):
                 if self.tracer:
