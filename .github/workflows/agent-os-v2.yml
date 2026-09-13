@@ -62,7 +62,12 @@ jobs:
           )
           /tmp/astra-agent-os-venv/bin/python - <<'PY'
           import json
+          from importlib.metadata import version
           from pathlib import Path
+          import agent_os
+
+          assert version('astra-agent-os') == agent_os.__version__ == '2.1.0'
+
           data = json.loads(Path('/tmp/astra-plan.json').read_text())
           assert data['profile'] == 'aisearch-study'
           assert data['mode'] == 'shadow'
@@ -71,13 +76,13 @@ jobs:
           assert 'repo' in data['allowed_tools']
 
           team = json.loads(Path('/tmp/astra-team.json').read_text())
-          names = {item['agent'] for item in team['assignments']}
-          required = {
-              'execution-coordinator', 'product-strategy', 'software-architect',
-              'backend-platform', 'frontend-accessibility', 'ai-rag', 'data-evals',
-              'research-osint', 'seo-geo', 'devops-release', 'qa-reliability',
-              'security-redteam', 'independent-reviewer',
-          }
+          names = [item['agent'] for item in team['assignments']]
+          required = [
+              'execution-coordinator', 'software-architect', 'product-strategy',
+              'ai-rag', 'data-evals', 'research-osint', 'backend-platform',
+              'frontend-accessibility', 'seo-geo', 'devops-release',
+              'qa-reliability', 'security-redteam', 'independent-reviewer',
+          ]
           assert team['portfolio_mode'] is True
           assert names == required
           assert max(map(len, team['waves'])) <= 4
@@ -92,7 +97,7 @@ jobs:
 
           trace = json.loads(Path('/tmp/astra-team-trace.jsonl').read_text())
           assert trace['event'] == 'team.plan.created'
-          assert set(trace['data']['agents']) == required
+          assert trace['data']['agents'] == required
           assert 'Complete the AISearch platform end-to-end' not in Path('/tmp/astra-team-trace.jsonl').read_text()
           PY
 
