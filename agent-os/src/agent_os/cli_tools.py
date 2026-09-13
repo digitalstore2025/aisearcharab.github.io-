@@ -28,6 +28,8 @@ def _repo_reader(workspace_root: str | Path):
     root = Path(workspace_root).expanduser().resolve()
     if not root.is_dir():
         raise ValueError(f"workspace root is not a directory: {root}")
+    if _is_sensitive_path(root):
+        raise PermissionError("repo.read refuses a sensitive workspace root")
 
     def read(arguments: dict[str, Any]) -> str:
         raw_path = arguments.get("path")
@@ -45,7 +47,7 @@ def _repo_reader(workspace_root: str | Path):
         except ValueError as exc:
             raise PermissionError("repo.read path escapes the workspace root") from exc
         relative = candidate.relative_to(root)
-        if _is_sensitive_path(relative):
+        if _is_sensitive_path(relative) or _is_sensitive_path(candidate):
             raise PermissionError("repo.read blocks sensitive repository paths")
         if not candidate.is_file():
             raise FileNotFoundError("repo.read target is not a regular file")
@@ -67,7 +69,8 @@ def build_cli_tool_runtime(
 ) -> PolicyBoundToolRuntime:
     """Build the CLI's explicit default-deny tool runtime.
 
-    The CLI ships no mutation handlers. Repository reads are opt-in and root-confined.
+    The CLI ships no mutation handlers. Repository reads are opt-in, root-confined,
+    and refuse sensitive workspace roots as well as sensitive target paths.
     """
 
     executor = RegisteredToolExecutor()
