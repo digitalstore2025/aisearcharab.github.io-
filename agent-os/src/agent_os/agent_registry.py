@@ -111,11 +111,10 @@ class AgentRegistry:
 
     @staticmethod
     def _trigger_matches(trigger: str, text: str) -> bool:
+        """Match a complete Unicode-aware token or phrase, never an arbitrary substring."""
         if not trigger:
             return False
-        if any(ord(ch) > 127 for ch in trigger) or not trigger.replace("-", "").isalnum():
-            return trigger in text
-        return re.search(rf"(?<!\w){re.escape(trigger)}(?!\w)", text) is not None
+        return re.search(rf"(?<!\w){re.escape(trigger)}(?!\w)", text, flags=re.UNICODE) is not None
 
     @classmethod
     def _score(cls, agent: AgentDefinition, text: str) -> int:
