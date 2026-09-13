@@ -4,6 +4,7 @@ import argparse
 import json
 
 from .agent_registry import AgentRegistry
+from .cli_tools import build_cli_tool_runtime
 from .config import config_root, load_profile
 from .model_router import ModelRouter
 from .policy import PolicyEngine
@@ -48,6 +49,16 @@ def main() -> None:
         choices=("local", "development", "staging", "production"),
         default="development",
     )
+    execute_p.add_argument(
+        "--enable-repo-read",
+        action="store_true",
+        help="Expose a root-confined, non-sensitive repo.read function to eligible agents.",
+    )
+    execute_p.add_argument(
+        "--workspace-root",
+        default=".",
+        help="Workspace root used by opt-in local repository tools.",
+    )
 
     args = p.parse_args()
     root = config_root()
@@ -55,11 +66,12 @@ def main() -> None:
     complexity = args.complexity or profile.default_complexity
     risk = args.risk or profile.default_risk
 
+    policy = PolicyEngine.from_file(root / "policies/default.json")
     if args.cmd == "plan":
         orchestrator = Orchestrator(
             SkillRegistry.from_file(root / "skills/registry.json"),
             ModelRouter.from_file(root / "models/catalog.json"),
-            PolicyEngine.from_file(root / "policies/default.json"),
+            policy,
         )
         plan = orchestrator.plan(
             args.task,
@@ -122,9 +134,18 @@ def main() -> None:
         return
 
     adapter = DryRunAgentAdapter() if args.adapter == "dry-run" else OpenAIResponsesAdapter()
+    tool_runtime = build_cli_tool_runtime(
+        policy,
+        profile_allowed_tools=profile.allowed_tools,
+        production_mutations=profile.production_mutations,
+        tracer=tracer,
+        workspace_root=args.workspace_root,
+        enable_repo_read=args.enable_repo_read,
+    )
     report = TeamRuntime(
         ModelRouter.from_file(root / "models/catalog.json"),
         adapter,
+        tool_runtime=tool_runtime,
         tracer=tracer,
         max_workers=args.max_workers,
     ).run(
@@ -137,6 +158,7 @@ def main() -> None:
         "task": team.task,
         "profile": profile.name,
         "adapter": args.adapter,
+        "repo_read_enabled": args.enable_repo_read,
         "completed": report.completed,
         "stopped_after_wave": report.stopped_after_wave,
         "results": [
