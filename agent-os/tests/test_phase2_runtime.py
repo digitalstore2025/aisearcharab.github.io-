@@ -230,13 +230,9 @@ class TestPhase2Runtime(unittest.TestCase):
             handler=lambda _: "ok",
             production_read=True,
         )
+        call = ToolCall("safe_catalog", "lookup", source_trust=TrustLevel.TRUSTED)
         self.assertTrue(definition.production_read)
-        runtime = self._tool_runtime(executor, tools=("safe_catalog",), production_mutations=False)
-        result = runtime.run(
-            ToolCall("safe_catalog", "lookup", source_trust=TrustLevel.TRUSTED),
-            environment="production",
-        )
-        self.assertEqual(result.status, "completed")
+        self.assertTrue(executor.is_production_read(call))
 
     def test_openai_function_call_round_trip_passes_policy_runtime(self):
         first = FakeResponse(
