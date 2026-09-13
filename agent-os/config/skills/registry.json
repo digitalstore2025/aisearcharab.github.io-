@@ -1,7 +1,7 @@
 {
   "skills": [
     {"name":"security-review","description":"Review a concrete code, auth, dependency, API, secret, or deployment security change.","triggers":["security","auth","secret","credential","dependency","owasp","vulnerability"],"risk":"high","cost":"medium","requires":["repository"]},
-    {"name":"db-migration","description":"Create or review schema, migration, data backfill, rollback, or persistence changes.","triggers":["database","migration","schema","postgres","sql","backfill","rls"],"risk":"high","cost":"medium","requires":["repository","database-docs"]},
+    {"name":"db-migration","description":"Create or review schema, migration, data backfill, rollback, or persistence changes.","triggers":["database","migration","database schema","postgres","sql","backfill","rls"],"risk":"high","cost":"medium","requires":["repository","database-docs"]},
     {"name":"rag-evaluation","description":"Measure retrieval, reranking, citation grounding, faithfulness, or RAG regressions.","triggers":["rag","retrieval","rerank","citation","faithfulness","recall@","ndcg","mrr"],"risk":"medium","cost":"medium","requires":["evaluation-data"]},
     {"name":"release-readiness","description":"Check whether an implementation is ready for staging or production release.","triggers":["release","deploy","production","staging","ci/cd","readiness"],"risk":"high","cost":"medium","requires":["repository"]},
     {"name":"seo-geo-audit","description":"Audit a public web property for technical SEO, structured data, GEO, crawlability, and answer-engine visibility.","triggers":["seo","geo","structured data","schema.org","crawl","ai search","search visibility"],"risk":"low","cost":"medium","requires":["public-site"]},
