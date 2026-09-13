@@ -134,6 +134,8 @@ class OpenAIResponsesAdapter:
         response: Any,
         request: AgentExecutionRequest,
         model_id: str,
+        *,
+        history_prefix: tuple[dict[str, Any], ...] = (),
     ) -> AgentExecutionResult:
         items = tuple(self._dump_item(item) for item in (getattr(response, "output", None) or ()))
         definitions = {tool.name: tool for tool in request.tools}
@@ -171,7 +173,7 @@ class OpenAIResponsesAdapter:
             model_id=model_id,
             tool_calls=tuple(calls),
             status=self._response_status(response, has_tool_calls=bool(calls)),
-            continuation_items=items,
+            continuation_items=history_prefix + items,
         )
 
     def _create(self, *, model_id: str, input_data: Any, request: AgentExecutionRequest) -> Any:
@@ -190,12 +192,18 @@ class OpenAIResponsesAdapter:
 
     def execute(self, request: AgentExecutionRequest) -> AgentExecutionResult:
         model_id = self.resolver.resolve(request.model)
+        initial_message = {"role": "user", "content": self._initial_input(request)}
         response = self._create(
             model_id=model_id,
-            input_data=self._initial_input(request),
+            input_data=[initial_message],
             request=request,
         )
-        return self._parse_response(response, request, model_id)
+        return self._parse_response(
+            response,
+            request,
+            model_id,
+            history_prefix=(initial_message,),
+        )
 
     def continue_with_tools(
         self,
@@ -224,4 +232,9 @@ class OpenAIResponsesAdapter:
             input_data=continuation,
             request=request,
         )
-        return self._parse_response(response, request, prior.model_id)
+        return self._parse_response(
+            response,
+            request,
+            prior.model_id,
+            history_prefix=tuple(continuation),
+        )
