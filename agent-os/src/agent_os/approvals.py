@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -25,6 +26,7 @@ class ApprovalLedger:
 
     def __init__(self) -> None:
         self._grants: dict[str, ApprovalGrant] = {}
+        self._lock = threading.Lock()
 
     def grant(
         self,
@@ -42,22 +44,24 @@ class ApprovalLedger:
             raise ValueError("ttl_seconds must be positive or None")
         expires_at = None if ttl_seconds is None else time.time() + ttl_seconds
         grant = ApprovalGrant(uuid.uuid4().hex, action, resource, environment, expires_at)
-        self._grants[grant.grant_id] = grant
+        with self._lock:
+            self._grants[grant.grant_id] = grant
         return grant
 
     def consume(self, call: ToolCall, *, environment: str) -> ApprovalGrant | None:
         now = time.time()
-        expired = [gid for gid, grant in self._grants.items() if not grant.active(now)]
-        for gid in expired:
-            self._grants.pop(gid, None)
-
-        for gid, grant in tuple(self._grants.items()):
-            if (
-                grant.action == call.action
-                and grant.resource == call.tool
-                and grant.environment == environment
-                and grant.active(now)
-            ):
+        with self._lock:
+            expired = [gid for gid, grant in self._grants.items() if not grant.active(now)]
+            for gid in expired:
                 self._grants.pop(gid, None)
-                return grant
+
+            for gid, grant in tuple(self._grants.items()):
+                if (
+                    grant.action == call.action
+                    and grant.resource == call.tool
+                    and grant.environment == environment
+                    and grant.active(now)
+                ):
+                    self._grants.pop(gid, None)
+                    return grant
         return None
