@@ -1,7 +1,11 @@
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT / "src"))
 
 from agent_os.approvals import ApprovalLedger
 from agent_os.mcp_gateway import MCPGateway
@@ -13,8 +17,6 @@ from agent_os.team import AgentAssignment, Handoff, TeamPlan
 from agent_os.tool_runtime import PolicyBoundToolRuntime, RegisteredToolExecutor
 from agent_os.tracing import JsonlTracer
 from agent_os.types import ToolCall, TrustLevel
-
-ROOT = Path(__file__).resolve().parents[1]
 
 
 class ToolOnlyAdapter:
