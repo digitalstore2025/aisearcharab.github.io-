@@ -222,7 +222,8 @@ class TestPhase2Runtime(unittest.TestCase):
             },),
         )
         second = FakeResponse(output_text="final-answer", output=())
-        client = FakeOpenAIClient([first, second])
+        third = FakeResponse(output_text="review-ok", output=())
+        client = FakeOpenAIClient([first, second, third])
         adapter = OpenAIResponsesAdapter(client=client)
 
         executor = RegisteredToolExecutor()
@@ -248,14 +249,29 @@ class TestPhase2Runtime(unittest.TestCase):
             "Use repository evidence and report the result.",
             ("repo",),
         )
+        reviewer = AgentAssignment(
+            "independent-reviewer",
+            "verify",
+            "Independently verify the result",
+            "Review prior evidence and identify unsupported claims.",
+            (),
+            True,
+        )
         plan = TeamPlan(
             "Read README.md",
             False,
-            (assignment,),
+            (assignment, reviewer),
             (),
-            (("backend-platform",),),
+            (("backend-platform",), ("independent-reviewer",)),
         )
-        with patch.dict(os.environ, {"ASTRA_MODEL_TERRA": "provider-model-123"}, clear=True):
+        with patch.dict(
+            os.environ,
+            {
+                "ASTRA_MODEL_TERRA": "provider-model-123",
+                "ASTRA_MODEL_ASTRA": "provider-model-critical",
+            },
+            clear=True,
+        ):
             report = TeamRuntime(
                 self.models,
                 adapter,
@@ -268,6 +284,8 @@ class TestPhase2Runtime(unittest.TestCase):
         self.assertEqual(result.output, "final-answer")
         self.assertEqual(result.tool_results[0].status, "completed")
         self.assertEqual(result.tool_results[0].output, "content:README.md")
+        self.assertEqual(report.results[-1].agent, "independent-reviewer")
+        self.assertEqual(report.results[-1].output, "review-ok")
         self.assertEqual(client.responses.calls[0]["tools"][0]["name"], "repo_read")
         second_input = client.responses.calls[1]["input"]
         self.assertTrue(any(item.get("type") == "function_call_output" for item in second_input))
