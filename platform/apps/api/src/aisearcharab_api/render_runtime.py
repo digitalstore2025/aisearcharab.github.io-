@@ -60,14 +60,23 @@ def _serve_command(env: MutableMapping[str, str]) -> list[str]:
     ]
 
 
+def _migrate() -> None:
+    subprocess.run(["alembic", "upgrade", "head"], check=True)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
-    if len(args) != 1 or args[0] not in {"migrate", "serve"}:
-        raise SystemExit("usage: python -m aisearcharab_api.render_runtime [migrate|serve]")
+    modes = {"migrate", "serve", "migrate-and-serve"}
+    if len(args) != 1 or args[0] not in modes:
+        raise SystemExit(
+            "usage: python -m aisearcharab_api.render_runtime "
+            "[migrate|serve|migrate-and-serve]"
+        )
 
     configure_database_url()
+    if args[0] in {"migrate", "migrate-and-serve"}:
+        _migrate()
     if args[0] == "migrate":
-        subprocess.run(["alembic", "upgrade", "head"], check=True)
         return 0
 
     os.execvp("uvicorn", _serve_command(os.environ))
