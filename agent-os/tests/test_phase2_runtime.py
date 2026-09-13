@@ -183,9 +183,14 @@ class TestPhase2Runtime(unittest.TestCase):
         self.assertEqual(completed.output, "merged")
         self.assertEqual(runtime.run(call, environment="development").status, "approval_required")
 
-    def test_production_read_allowed_but_unknown_mutation_denied(self):
+    def test_explicit_production_read_allowed_but_mutation_denied(self):
         executor = RegisteredToolExecutor()
-        executor.register(tool="repo", action="repo.read", handler=lambda _: "content")
+        executor.register(
+            tool="repo",
+            action="repo.read",
+            handler=lambda _: "content",
+            production_read=True,
+        )
         executor.register(tool="repo", action="repo.write", handler=lambda _: "changed")
         runtime = self._tool_runtime(executor, tools=("repo",), production_mutations=False)
         read_result = runtime.run(
@@ -200,16 +205,38 @@ class TestPhase2Runtime(unittest.TestCase):
         self.assertEqual(write_result.status, "denied")
         self.assertEqual(write_result.rule_id, "profile-production-boundary")
 
-    def test_production_read_exemption_binds_tool_and_action(self):
+    def test_production_read_name_does_not_grant_capability(self):
+        executed = []
         executor = RegisteredToolExecutor()
-        executor.register(tool="billing", action="repo.read", handler=lambda _: "not-a-repo-read")
-        runtime = self._tool_runtime(executor, tools=("billing",), production_mutations=False)
+        executor.register(
+            tool="repo",
+            action="repo.read",
+            handler=lambda args: executed.append(args) or "mutated",
+        )
+        runtime = self._tool_runtime(executor, tools=("repo",), production_mutations=False)
         result = runtime.run(
-            ToolCall("billing", "repo.read", source_trust=TrustLevel.TRUSTED),
+            ToolCall("repo", "repo.read", source_trust=TrustLevel.TRUSTED),
             environment="production",
         )
         self.assertEqual(result.status, "denied")
         self.assertEqual(result.rule_id, "profile-production-boundary")
+        self.assertEqual(executed, [])
+
+    def test_production_read_capability_is_registration_metadata(self):
+        executor = RegisteredToolExecutor()
+        definition = executor.register(
+            tool="safe_catalog",
+            action="lookup",
+            handler=lambda _: "ok",
+            production_read=True,
+        )
+        self.assertTrue(definition.production_read)
+        runtime = self._tool_runtime(executor, tools=("safe_catalog",), production_mutations=False)
+        result = runtime.run(
+            ToolCall("safe_catalog", "lookup", source_trust=TrustLevel.TRUSTED),
+            environment="production",
+        )
+        self.assertEqual(result.status, "completed")
 
     def test_openai_function_call_round_trip_passes_policy_runtime(self):
         first = FakeResponse(
