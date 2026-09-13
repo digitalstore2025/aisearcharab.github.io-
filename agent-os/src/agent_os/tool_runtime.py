@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from typing import Any, Callable
@@ -7,7 +8,7 @@ from typing import Any, Callable
 from .approvals import ApprovalLedger
 from .mcp_gateway import MCPGateway
 from .tracing import JsonlTracer
-from .types import ToolCall
+from .types import ToolCall, ToolDefinition
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +23,7 @@ class ToolExecutionResult:
 
 
 ToolHandler = Callable[[dict[str, Any]], Any]
+_TOOL_NAME_INVALID = re.compile(r"[^A-Za-z0-9_-]+")
 
 
 class RegisteredToolExecutor:
@@ -29,12 +31,62 @@ class RegisteredToolExecutor:
 
     def __init__(self) -> None:
         self._handlers: dict[tuple[str, str], ToolHandler] = {}
+        self._definitions: dict[str, ToolDefinition] = {}
+        self._definition_order: list[str] = []
 
-    def register(self, *, tool: str, action: str, handler: ToolHandler) -> None:
+    @staticmethod
+    def _default_name(tool: str, action: str) -> str:
+        name = _TOOL_NAME_INVALID.sub("_", f"{tool}__{action}").strip("_")[:64]
+        if not name:
+            raise ValueError("Tool definition name cannot be empty")
+        return name
+
+    def register(
+        self,
+        *,
+        tool: str,
+        action: str,
+        handler: ToolHandler,
+        name: str | None = None,
+        description: str | None = None,
+        parameters: dict[str, Any] | None = None,
+        strict: bool = False,
+    ) -> ToolDefinition:
         key = (tool, action)
         if key in self._handlers:
             raise ValueError(f"Handler already registered for {tool}:{action}")
+        provider_name = name or self._default_name(tool, action)
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", provider_name):
+            raise ValueError("Provider tool name must match [A-Za-z0-9_-]{1,64}")
+        if provider_name in self._definitions:
+            raise ValueError(f"Provider tool name already registered: {provider_name}")
+        schema = parameters or {
+            "type": "object",
+            "properties": {},
+            "additionalProperties": True,
+        }
+        if not isinstance(schema, dict) or schema.get("type") != "object":
+            raise ValueError("Tool parameters must be a JSON object schema")
+        definition = ToolDefinition(
+            provider_name,
+            tool,
+            action,
+            description or f"Execute {action} through {tool}",
+            schema,
+            strict,
+        )
         self._handlers[key] = handler
+        self._definitions[provider_name] = definition
+        self._definition_order.append(provider_name)
+        return definition
+
+    def definitions_for(self, allowed_tools: tuple[str, ...] | set[str] | frozenset[str]) -> tuple[ToolDefinition, ...]:
+        allowed = set(allowed_tools)
+        return tuple(
+            self._definitions[name]
+            for name in self._definition_order
+            if self._definitions[name].tool in allowed
+        )
 
     def execute(self, call: ToolCall) -> Any:
         handler = self._handlers.get((call.tool, call.action))
@@ -64,6 +116,10 @@ class PolicyBoundToolRuntime:
         self.tracer = tracer
         self.profile_allowed_tools = frozenset(profile_allowed_tools)
         self.production_mutations = production_mutations
+
+    def definitions_for(self, assignment_allowed_tools: tuple[str, ...]) -> tuple[ToolDefinition, ...]:
+        effective = self.profile_allowed_tools.intersection(assignment_allowed_tools)
+        return self.executor.definitions_for(effective)
 
     def _emit(self, result: ToolExecutionResult, duration_s: float) -> None:
         if self.tracer:
