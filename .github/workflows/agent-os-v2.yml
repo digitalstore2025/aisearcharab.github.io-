@@ -51,7 +51,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python -m pip wheel --no-deps --no-build-isolation ./agent-os -w /tmp/astra-wheelhouse
+          python -m pip wheel --no-deps ./agent-os -w /tmp/astra-wheelhouse
           python -m venv /tmp/astra-agent-os-venv
           /tmp/astra-agent-os-venv/bin/pip install --no-index /tmp/astra-wheelhouse/astra_agent_os-*.whl
           (
