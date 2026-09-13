@@ -40,4 +40,4 @@ COPY alembic ./alembic
 
 USER app
 EXPOSE 8000
-CMD ["uvicorn", "aisearcharab_api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["python", "-m", "aisearcharab_api.render_runtime", "serve"]
