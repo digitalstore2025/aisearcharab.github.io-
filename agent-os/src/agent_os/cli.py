@@ -10,6 +10,7 @@ from .policy import PolicyEngine
 from .skill_registry import SkillRegistry
 from .orchestrator import Orchestrator
 from .team import TeamPlanner
+from .tracing import JsonlTracer
 
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
@@ -28,6 +29,7 @@ def main() -> None:
     _add_common_args(team_p)
     team_p.add_argument("--max-specialists", type=int, default=5)
     team_p.add_argument("--wave-size", type=int, default=4)
+    team_p.add_argument("--trace-jsonl", help="Optional sanitized JSONL trace output path")
     args = p.parse_args()
 
     root = config_root()
@@ -62,7 +64,11 @@ def main() -> None:
         }, ensure_ascii=False, indent=2))
         return
 
-    planner = TeamPlanner(AgentRegistry.from_file(root / "agents/registry.json"))
+    tracer = JsonlTracer(args.trace_jsonl) if args.trace_jsonl else None
+    planner = TeamPlanner(
+        AgentRegistry.from_file(root / "agents/registry.json"),
+        tracer=tracer,
+    )
     team = planner.plan(
         args.task,
         complexity=complexity,
