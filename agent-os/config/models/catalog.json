@@ -1,8 +1,8 @@
 {
   "tiers": {
-    "economy": {"model":"economy-model", "tool_capable": true, "purpose":"classification, extraction, simple transforms"},
-    "standard": {"model":"standard-reasoning-model", "tool_capable": true, "purpose":"normal tool use and routine engineering"},
-    "strong": {"model":"strong-reasoning-model", "tool_capable": true, "purpose":"architecture, complex debugging, research synthesis"},
-    "critical": {"model":"strong-reasoning-model+independent-verifier", "tool_capable": true, "purpose":"high-risk decisions with independent verification"}
+    "economy": {"model":"economy-model", "policy_alias":"luna", "tool_capable": true, "purpose":"classification, extraction, simple transforms"},
+    "standard": {"model":"standard-reasoning-model", "policy_alias":"terra", "tool_capable": true, "purpose":"normal tool use and routine engineering"},
+    "strong": {"model":"strong-reasoning-model", "policy_alias":"sol", "tool_capable": true, "purpose":"architecture, complex debugging, research synthesis"},
+    "critical": {"model":"strong-reasoning-model+independent-verifier", "policy_alias":"astra", "tool_capable": true, "purpose":"high-risk decisions with independent verification"}
   }
 }
