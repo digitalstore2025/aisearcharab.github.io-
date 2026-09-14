@@ -5,6 +5,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
+from agent_os.approvals import ApprovalLedger
 from agent_os.mcp_gateway import MCPGateway
 from agent_os.model_router import ModelRouter
 from agent_os.policy import PolicyEngine
@@ -38,6 +39,31 @@ class TestEnvironmentBoundary(unittest.TestCase):
             with self.subTest(environment=environment):
                 with self.assertRaises(ValueError):
                     validate_execution_environment(environment)  # type: ignore[arg-type]
+
+    def test_approval_ledger_rejects_noncanonical_environments(self):
+        call = ToolCall("repo", "repo.write", {"path": "x"}, TrustLevel.TRUSTED)
+        for environment in ("prod", "Production", "production ", "", "sandbox", None):
+            with self.subTest(environment=environment):
+                ledger = ApprovalLedger()
+                with self.assertRaises(ValueError):
+                    ledger.grant(
+                        action="repo.write",
+                        resource="repo",
+                        environment=environment,  # type: ignore[arg-type]
+                        arguments=call.arguments,
+                    )
+                with self.assertRaises(ValueError):
+                    ledger.consume(call, environment=environment)  # type: ignore[arg-type]
+
+        ledger = ApprovalLedger()
+        grant = ledger.grant(
+            action="repo.write",
+            resource="repo",
+            environment="development",
+            arguments=call.arguments,
+        )
+        self.assertEqual(grant.environment, "development")
+        self.assertEqual(ledger.consume(call, environment="development"), grant)
 
     def test_policy_wildcards_cannot_authorize_unknown_environment(self):
         for environment in ("prod", "Production", "production ", "sandbox"):
