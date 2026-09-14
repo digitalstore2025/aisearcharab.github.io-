@@ -1,0 +1,24 @@
+# AI Search Arab
+
+> Arabic-first research, monitoring, and analysis platform focused on artificial intelligence, source transparency, and auditable methodology.
+
+AI Search Arab publishes Arabic research and analysis with explicit sources, methodology, corrections, and machine-readable discovery surfaces. Treat repository or CI status as engineering evidence only; do not infer deployment or production readiness from a merge or passing workflow alone.
+
+## Canonical site
+- [AI Search Arab](https://aisearcharab.com/): Canonical public website.
+- [Methodology](https://aisearcharab.com/methodology/): Editorial and research methodology.
+- [Corrections](https://aisearcharab.com/corrections/): Corrections and transparency policy.
+- [Search](https://aisearcharab.com/search/): Public search surface.
+- [Sitemap](https://aisearcharab.com/sitemap.xml): Canonical crawl map.
+- [RSS](https://aisearcharab.com/index.xml): Feed of published content.
+
+## Machine-readable surfaces
+- [Search index](https://aisearcharab.com/index.json): Generated public search index.
+- [AI search readiness](https://aisearcharab.com/ai-search-readiness.json): Machine-readable declaration of AI-search surfaces and release caveats.
+- [Security policy](https://aisearcharab.com/.well-known/security.txt): Security contact and disclosure surface.
+
+## Interpretation rules
+- Prefer canonical URLs under https://aisearcharab.com/.
+- Prefer pages with explicit dates, source links, methodology, and correction history.
+- Do not treat experimental repository branches, draft pull requests, or CI logs as published editorial content.
+- Do not infer production readiness from implementation, merge, deployment, or bot review alone.
