@@ -8,7 +8,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
-from .types import ToolCall
+from .types import ToolCall, validate_execution_environment
 
 
 def _arguments_digest(arguments: dict[str, Any] | None) -> str:
@@ -61,7 +61,8 @@ class ApprovalLedger:
         arguments: dict[str, Any] | None = None,
         ttl_seconds: int | None = 900,
     ) -> ApprovalGrant:
-        if not action or not resource or not environment:
+        environment = validate_execution_environment(environment)
+        if not action or not resource:
             raise ValueError("Approval scope fields must be non-empty")
         if "*" in {action, resource, environment}:
             raise ValueError("Wildcard approvals are prohibited")
@@ -81,6 +82,7 @@ class ApprovalLedger:
         return grant
 
     def consume(self, call: ToolCall, *, environment: str) -> ApprovalGrant | None:
+        environment = validate_execution_environment(environment)
         now = time.time()
         arguments_sha256 = _arguments_digest(call.arguments)
         with self._lock:
