@@ -1,2 +1,2 @@
-"""Astra Agent OS v2: minimal control plane for production AI agents."""
-__version__ = "2.1.0"
+"""Astra Agent OS: bounded control and execution plane for production AI agents."""
+__version__ = "2.2.0"

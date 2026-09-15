@@ -120,17 +120,26 @@ class TeamPlanner:
             for a in ordered
         )
 
+        coordinator = self.registry.coordinator.name
         reviewer = self.registry.reviewer.name
-        waves: list[tuple[str, ...]] = []
+        # The coordinator owns the task contract that downstream handoffs carry.
+        # Keep it in a dedicated first wave so every coordinator handoff has a
+        # completed source before the target starts.
+        waves: list[tuple[str, ...]] = [(coordinator,)]
         for phase in ("plan", "build", "release"):
-            names = [a.name for a in ordered if a.phase == phase and a.name != reviewer]
+            names = [
+                a.name for a in ordered
+                if a.phase == phase and a.name not in {coordinator, reviewer}
+            ]
             waves.extend(self._chunk(names, wave_size))
-        verify_names = [a.name for a in ordered if a.phase == "verify" and a.name != reviewer]
+        verify_names = [
+            a.name for a in ordered
+            if a.phase == "verify" and a.name not in {coordinator, reviewer}
+        ]
         waves.extend(self._chunk(verify_names, wave_size))
         waves.append((reviewer,))
 
         handoffs: list[Handoff] = []
-        coordinator = self.registry.coordinator.name
         for agent in ordered:
             if agent.name == coordinator:
                 continue

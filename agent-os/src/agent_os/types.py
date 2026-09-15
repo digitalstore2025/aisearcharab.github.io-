@@ -5,6 +5,17 @@ from enum import Enum
 from typing import Any
 
 
+EXECUTION_ENVIRONMENTS = frozenset({"local", "development", "staging", "production"})
+
+
+def validate_execution_environment(environment: str) -> str:
+    """Require one canonical runtime environment label; never guess or normalize."""
+    if not isinstance(environment, str) or environment not in EXECUTION_ENVIRONMENTS:
+        allowed = ", ".join(sorted(EXECUTION_ENVIRONMENTS))
+        raise ValueError(f"Unsupported execution environment; expected one of: {allowed}")
+    return environment
+
+
 class Decision(str, Enum):
     ALLOW = "allow"
     APPROVAL = "approval"
@@ -32,6 +43,17 @@ class PolicyResult:
     rule_id: str
 
 
+@dataclass(frozen=True, slots=True)
+class ToolDefinition:
+    name: str
+    tool: str
+    action: str
+    description: str
+    parameters: dict[str, Any]
+    strict: bool = False
+    production_read: bool = False
+
+
 @dataclass(slots=True)
 class ToolCall:
     tool: str
@@ -39,6 +61,8 @@ class ToolCall:
     arguments: dict[str, Any] = field(default_factory=dict)
     # Fail closed: callers must explicitly designate trusted source material.
     source_trust: TrustLevel = TrustLevel.UNTRUSTED
+    provider_call_id: str = ""
+    provider_name: str = ""
 
 
 @dataclass(slots=True)
