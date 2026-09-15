@@ -58,6 +58,7 @@ jobs:
         run: |
           python scripts/validate_build.py
           python scripts/validate_pwa.py
+          python scripts/validate_ai_search_surfaces.py
 
       - name: Validate project-pages subpath portability
         shell: bash
@@ -94,6 +95,8 @@ jobs:
           test -f public/icons/icon-192.png
           test -f public/icons/icon-512.png
           test -f public/.well-known/security.txt
+          test -f public/llms.txt
+          test -f public/ai-search-readiness.json
 
       - name: Upload validated preview artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
