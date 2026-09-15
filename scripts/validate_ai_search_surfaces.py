@@ -3,13 +3,20 @@ from __future__ import annotations
 import json
 import os
 import sys
+from html.parser import HTMLParser
 from pathlib import Path
 from urllib.parse import urlparse
 
 PUBLIC = Path(os.environ.get("PUBLIC_DIR", "public")).resolve()
 REQUIRED = ("llms.txt", "ai-search-readiness.json")
 EXPECTED_ORIGIN = "https://aisearcharab.com/"
-REQUIRED_DISCOVERY_KEYS = {"robots", "sitemap", "rss", "search_index", "llms_txt"}
+EXPECTED_DISCOVERY = {
+    "robots": "https://aisearcharab.com/robots.txt",
+    "sitemap": "https://aisearcharab.com/sitemap.xml",
+    "rss": "https://aisearcharab.com/index.xml",
+    "search_index": "https://aisearcharab.com/index.json",
+    "llms_txt": "https://aisearcharab.com/llms.txt",
+}
 REQUIRED_EVIDENCE = [
     "implementation",
     "ci",
@@ -20,16 +27,27 @@ REQUIRED_EVIDENCE = [
 ]
 
 
+class LinkCollector(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__()
+        self.links: list[dict[str, str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag.lower() != "link":
+            return
+        self.links.append({key.lower(): value or "" for key, value in attrs})
+
+
 def fail(message: str, errors: list[str]) -> None:
     errors.append(message)
 
 
-def valid_https_under_origin(value: object) -> bool:
-    if not isinstance(value, str):
+def is_exact_https_url(value: object, expected: str) -> bool:
+    if not isinstance(value, str) or value != expected:
         return False
     parsed = urlparse(value)
     origin = urlparse(EXPECTED_ORIGIN)
-    return parsed.scheme == "https" and parsed.netloc == origin.netloc and bool(parsed.path)
+    return parsed.scheme == "https" and parsed.netloc == origin.netloc and not parsed.query and not parsed.fragment
 
 
 def main() -> int:
@@ -67,20 +85,28 @@ def main() -> int:
                 if not isinstance(discovery, dict):
                     fail("discovery must be an object", errors)
                 else:
-                    missing = REQUIRED_DISCOVERY_KEYS - set(discovery)
+                    missing = set(EXPECTED_DISCOVERY) - set(discovery)
+                    extra = set(discovery) - set(EXPECTED_DISCOVERY)
                     if missing:
                         fail(f"discovery missing keys: {sorted(missing)}", errors)
-                    for key in REQUIRED_DISCOVERY_KEYS & set(discovery):
-                        if not valid_https_under_origin(discovery[key]):
-                            fail(f"discovery.{key} must be an HTTPS canonical-origin URL", errors)
+                    if extra:
+                        fail(f"discovery has unexpected keys: {sorted(extra)}", errors)
+                    for key, expected in EXPECTED_DISCOVERY.items():
+                        if key in discovery and not is_exact_https_url(discovery[key], expected):
+                            fail(f"discovery.{key} must equal {expected}", errors)
                 if data.get("evidence_model") != REQUIRED_EVIDENCE:
                     fail("evidence_model must preserve the ordered release-evidence ladder", errors)
 
     homepage = PUBLIC / "index.html"
-    if homepage.is_file():
-        html = homepage.read_text(encoding="utf-8")
-        if 'rel="describedby"' not in html or "llms.txt" not in html:
-            fail("homepage must advertise llms.txt via rel=describedby", errors)
+    if not homepage.is_file():
+        fail("missing homepage for AI Search link validation", errors)
+    else:
+        parser = LinkCollector()
+        parser.feed(homepage.read_text(encoding="utf-8"))
+        describedby = [link for link in parser.links if "describedby" in link.get("rel", "").lower().split()]
+        expected_href = EXPECTED_DISCOVERY["llms_txt"]
+        if not any(link.get("href") == expected_href and link.get("type", "").lower() == "text/markdown" for link in describedby):
+            fail(f"homepage must advertise {expected_href} via rel=describedby type=text/markdown", errors)
 
     if errors:
         print("\n".join(f"ERROR: {error}" for error in errors), file=sys.stderr)
