@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import http.client
 import ipaddress
 import json
@@ -44,25 +45,41 @@ def _validate_base_url(raw: str) -> SplitResult:
         raise ValueError("staging URL must not contain query parameters or fragments")
     if parsed.path not in {"", "/"}:
         raise ValueError("staging URL must be an origin, not a nested path")
+    try:
+        parsed.port
+    except ValueError as exc:
+        raise ValueError("staging URL contains an invalid port") from exc
     return parsed
 
 
 def _safe_origin(raw: str) -> str | None:
     try:
         parsed = _validate_base_url(raw)
+        port = parsed.port
     except ValueError:
         return None
     host = parsed.hostname
     if host is None:
         return None
-    return f"https://{host}" + (f":{parsed.port}" if parsed.port else "")
+    return f"https://{host}" + (f":{port}" if port else "")
 
 
-def _resolve_public_addresses(hostname: str, port: int) -> list[str]:
+def _resolve_public_addresses(hostname: str, port: int, *, timeout: float) -> list[str]:
+    def resolve() -> list[tuple[Any, ...]]:
+        return socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+
+    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(resolve)
+    try:
+        records = future.result(timeout=timeout)
+    except concurrent.futures.TimeoutError as exc:
+        future.cancel()
+        raise RuntimeError("staging DNS resolution timed out") from exc
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
     addresses: set[str] = set()
-    for family, socktype, proto, _canonname, sockaddr in socket.getaddrinfo(
-        hostname, port, type=socket.SOCK_STREAM
-    ):
+    for family, socktype, proto, _canonname, sockaddr in records:
         del family, socktype, proto
         raw_ip = sockaddr[0]
         ip = ipaddress.ip_address(raw_ip)
@@ -157,6 +174,17 @@ def _decode_json_evidence(body: bytes, label: str, failures: list[str]) -> dict[
         return {}
 
 
+def _parse_csp(csp: str) -> dict[str, list[str]]:
+    directives: dict[str, list[str]] = {}
+    for raw_directive in csp.split(";"):
+        parts = raw_directive.strip().split()
+        if not parts:
+            continue
+        name = parts[0].lower()
+        directives[name] = parts[1:]
+    return directives
+
+
 def _check_security_headers(headers: dict[str, str]) -> list[str]:
     failures: list[str] = []
     for name, expected in REQUIRED_SECURITY_HEADERS.items():
@@ -166,9 +194,9 @@ def _check_security_headers(headers: dict[str, str]) -> list[str]:
     request_id = headers.get("x-request-id", "")
     if not REQUEST_ID_PATTERN.fullmatch(request_id):
         failures.append("x-request-id: missing or invalid")
-    csp = headers.get("content-security-policy", "")
-    if "default-src 'none'" not in csp or "frame-ancestors 'none'" not in csp:
-        failures.append("content-security-policy: API deny-by-default policy missing")
+    directives = _parse_csp(headers.get("content-security-policy", ""))
+    if directives.get("default-src") != ["'none'"] or directives.get("frame-ancestors") != ["'none'"]:
+        failures.append("content-security-policy: default-src and frame-ancestors must each be exactly 'none'")
     return failures
 
 
@@ -183,7 +211,7 @@ def run_probe(base_url: str, *, samples: int = 12, timeout: float = 8.0) -> dict
     if host is None:
         raise RuntimeError("validated URL lost hostname")
     port = parsed.port or 443
-    resolved_addresses = _resolve_public_addresses(host, port)
+    resolved_addresses = _resolve_public_addresses(host, port, timeout=timeout)
     failures: list[str] = []
     checks: dict[str, Any] = {}
 
