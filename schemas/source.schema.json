@@ -13,6 +13,7 @@
     "published_at": {"type": ["string", "null"]},
     "accessed_at": {"type": "string"},
     "source_type": {"enum": ["official-document", "dataset", "webpage", "social-post", "interview", "media-report", "academic-paper", "legal-record", "other"]},
+    "schema_type": {"enum": ["CreativeWork", "NewsArticle", "VideoObject"]},
     "language": {"type": "string", "minLength": 2, "maxLength": 8},
     "reliability": {"enum": ["primary", "secondary", "tertiary", "unverified"]},
     "integrity": {"type": "object"},
