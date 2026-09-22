@@ -1,0 +1,1 @@
+evaluator_id,task_id,persona,ais_mode,query_source,winner,ais_task_success,ais_retrieval_success,ais_zero_result,ais_citation_usefulness,ais_citation_accuracy_pct,ais_citation_completeness_pct,ais_groundedness_pct,ais_trust,ais_completion_seconds,would_return,reason,notes
