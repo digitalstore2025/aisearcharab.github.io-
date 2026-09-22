@@ -4,7 +4,9 @@ import pytest
 
 from aisearcharab_api.staging_probe import (
     _check_security_headers,
+    _decode_json_evidence,
     _percentile,
+    _safe_origin,
     _validate_base_url,
 )
 
@@ -21,6 +23,21 @@ def test_staging_origin_requires_https_without_credentials_or_nested_path() -> N
     ):
         with pytest.raises(ValueError):
             _validate_base_url(invalid)
+
+
+def test_safe_origin_never_echoes_invalid_secret_bearing_urls() -> None:
+    assert _safe_origin("https://aisearcharab-api-staging-v2.onrender.com/") == (
+        "https://aisearcharab-api-staging-v2.onrender.com"
+    )
+    assert _safe_origin("https://user:secret@aisearcharab-api-staging-v2.onrender.com") is None
+    assert _safe_origin("https://aisearcharab-api-staging-v2.onrender.com/?token=secret") is None
+
+
+def test_malformed_json_is_recorded_without_discarding_evidence() -> None:
+    failures: list[str] = []
+    value = _decode_json_evidence(b"not-json", "liveness", failures)
+    assert value == {}
+    assert failures == ["liveness did not return valid UTF-8 JSON"]
 
 
 def test_percentile_interpolates_deterministically() -> None:
@@ -70,4 +87,5 @@ def test_security_header_gate_reports_missing_hsts_and_bad_request_id() -> None:
     }
     failures = _check_security_headers(headers)
     assert any(item.startswith("strict-transport-security:") for item in failures)
+    assert any(item.startswith("permissions-policy:") for item in failures)
     assert "x-request-id: missing or invalid" in failures
