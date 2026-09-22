@@ -47,6 +47,17 @@ def _validate_base_url(raw: str) -> SplitResult:
     return parsed
 
 
+def _safe_origin(raw: str) -> str | None:
+    try:
+        parsed = _validate_base_url(raw)
+    except ValueError:
+        return None
+    host = parsed.hostname
+    if host is None:
+        return None
+    return f"https://{host}" + (f":{parsed.port}" if parsed.port else "")
+
+
 def _resolve_public_addresses(hostname: str, port: int) -> list[str]:
     addresses: set[str] = set()
     for family, socktype, proto, _canonname, sockaddr in socket.getaddrinfo(
@@ -88,23 +99,13 @@ def _request(
     timeout: float,
     host_header: str | None = None,
 ) -> tuple[int, dict[str, str], bytes, float]:
-    """Send one HTTPS request over a previously validated public IP set.
-
-    Connecting to the validated IP instead of resolving the hostname again closes
-    the DNS-rebinding window. TLS certificate verification and SNI still use the
-    original hostname, and redirects are never followed.
-    """
-
     host = parsed.hostname
     if host is None:
         raise RuntimeError("validated URL lost hostname")
     if not addresses:
         raise RuntimeError("no validated staging addresses available")
     port = parsed.port or 443
-    headers = {
-        "Accept": "application/json",
-        "User-Agent": "AISearcharab-Staging-Evidence/1.0",
-    }
+    headers = {"Accept": "application/json", "User-Agent": "AISearcharab-Staging-Evidence/1.0"}
     if host_header is not None:
         headers["Host"] = host_header
 
@@ -117,14 +118,8 @@ def _request(
             raw_socket = socket.create_connection((address, port), timeout=timeout)
             context = ssl.create_default_context()
             tls_socket = context.wrap_socket(raw_socket, server_hostname=host)
-            raw_socket = None  # Ownership transferred to the TLS socket.
-
-            connection = http.client.HTTPSConnection(
-                host,
-                port,
-                timeout=timeout,
-                context=context,
-            )
+            raw_socket = None
+            connection = http.client.HTTPSConnection(host, port, timeout=timeout, context=context)
             connection.sock = tls_socket
             connection.request("GET", path, headers=headers)
             response = connection.getresponse()
@@ -141,7 +136,6 @@ def _request(
                 connection.close()
             elif raw_socket is not None:
                 raw_socket.close()
-
     raise RuntimeError("all validated staging addresses failed: " + ", ".join(failures))
 
 
@@ -153,6 +147,14 @@ def _decode_json(body: bytes, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise RuntimeError(f"{label} JSON must be an object")
     return value
+
+
+def _decode_json_evidence(body: bytes, label: str, failures: list[str]) -> dict[str, Any]:
+    try:
+        return _decode_json(body, label)
+    except RuntimeError as exc:
+        failures.append(str(exc))
+        return {}
 
 
 def _check_security_headers(headers: dict[str, str]) -> list[str]:
@@ -182,118 +184,55 @@ def run_probe(base_url: str, *, samples: int = 12, timeout: float = 8.0) -> dict
         raise RuntimeError("validated URL lost hostname")
     port = parsed.port or 443
     resolved_addresses = _resolve_public_addresses(host, port)
-
     failures: list[str] = []
     checks: dict[str, Any] = {}
 
-    live_status, live_headers, live_body, live_ms = _request(
-        parsed, "/health/live", addresses=resolved_addresses, timeout=timeout
-    )
-    live_json = _decode_json(live_body, "liveness") if live_status == 200 else {}
+    live_status, live_headers, live_body, live_ms = _request(parsed, "/health/live", addresses=resolved_addresses, timeout=timeout)
+    live_json = _decode_json_evidence(live_body, "liveness", failures) if live_status == 200 else {}
     if live_status != 200 or live_json.get("status") != "ok":
         failures.append(f"liveness failed: HTTP {live_status}, status={live_json.get('status')!r}")
     header_failures = _check_security_headers(live_headers)
     failures.extend(f"security header: {item}" for item in header_failures)
-    checks["liveness"] = {
-        "http_status": live_status,
-        "status": live_json.get("status"),
-        "version": live_json.get("version"),
-        "duration_ms": round(live_ms, 3),
-        "security_headers_pass": not header_failures,
-    }
+    checks["liveness"] = {"http_status": live_status, "status": live_json.get("status"), "version": live_json.get("version"), "duration_ms": round(live_ms, 3), "security_headers_pass": not header_failures}
 
-    ready_status, _ready_headers, ready_body, ready_ms = _request(
-        parsed, "/health/ready", addresses=resolved_addresses, timeout=timeout
-    )
-    ready_json = _decode_json(ready_body, "readiness") if ready_status == 200 else {}
+    ready_status, _ready_headers, ready_body, ready_ms = _request(parsed, "/health/ready", addresses=resolved_addresses, timeout=timeout)
+    ready_json = _decode_json_evidence(ready_body, "readiness", failures) if ready_status == 200 else {}
     if ready_status != 200 or ready_json.get("status") != "ready":
         failures.append(f"readiness failed: HTTP {ready_status}, status={ready_json.get('status')!r}")
-    checks["readiness"] = {
-        "http_status": ready_status,
-        "status": ready_json.get("status"),
-        "version": ready_json.get("version"),
-        "duration_ms": round(ready_ms, 3),
-    }
+    checks["readiness"] = {"http_status": ready_status, "status": ready_json.get("status"), "version": ready_json.get("version"), "duration_ms": round(ready_ms, 3)}
 
-    capability_status, _cap_headers, cap_body, cap_ms = _request(
-        parsed,
-        "/v1/meta/capabilities",
-        addresses=resolved_addresses,
-        timeout=timeout,
-    )
-    capabilities = _decode_json(cap_body, "capabilities") if capability_status == 200 else {}
+    capability_status, _cap_headers, cap_body, cap_ms = _request(parsed, "/v1/meta/capabilities", addresses=resolved_addresses, timeout=timeout)
+    capabilities = _decode_json_evidence(cap_body, "capabilities", failures) if capability_status == 200 else {}
     if capability_status != 200:
         failures.append(f"capabilities failed: HTTP {capability_status}")
     if capabilities.get("generated_answers") is not False:
         failures.append("generated answers must remain disabled on staging evidence runs")
     if capabilities.get("rag") is not False:
         failures.append("RAG generation must remain disabled on staging evidence runs")
-    checks["capabilities"] = {
-        "http_status": capability_status,
-        "api_version": capabilities.get("api_version"),
-        "generated_answers": capabilities.get("generated_answers"),
-        "rag": capabilities.get("rag"),
-        "duration_ms": round(cap_ms, 3),
-    }
+    checks["capabilities"] = {"http_status": capability_status, "api_version": capabilities.get("api_version"), "generated_answers": capabilities.get("generated_answers"), "rag": capabilities.get("rag"), "duration_ms": round(cap_ms, 3)}
 
-    bad_host_status, _bad_headers, _bad_body, bad_host_ms = _request(
-        parsed,
-        "/health/live",
-        addresses=resolved_addresses,
-        timeout=timeout,
-        host_header="invalid-host.aisearcharab.invalid",
-    )
+    bad_host_status, _bad_headers, _bad_body, bad_host_ms = _request(parsed, "/health/live", addresses=resolved_addresses, timeout=timeout, host_header="invalid-host.aisearcharab.invalid")
     if bad_host_status not in {400, 404, 421}:
         failures.append(f"invalid Host header was not rejected: HTTP {bad_host_status}")
-    checks["host_policy"] = {
-        "invalid_host_http_status": bad_host_status,
-        "duration_ms": round(bad_host_ms, 3),
-        "pass": bad_host_status in {400, 404, 421},
-    }
+    checks["host_policy"] = {"invalid_host_http_status": bad_host_status, "duration_ms": round(bad_host_ms, 3), "pass": bad_host_status in {400, 404, 421}}
 
     latency_samples: list[float] = []
     sample_statuses: list[int] = []
     for _ in range(samples):
-        status, _headers, _body, duration_ms = _request(
-            parsed,
-            "/health/live",
-            addresses=resolved_addresses,
-            timeout=timeout,
-        )
+        status, _headers, _body, duration_ms = _request(parsed, "/health/live", addresses=resolved_addresses, timeout=timeout)
         sample_statuses.append(status)
         latency_samples.append(duration_ms)
     if any(status != 200 for status in sample_statuses):
         failures.append("one or more latency samples returned a non-200 response")
+    checks["latency"] = {"samples": samples, "p50_ms": round(_percentile(latency_samples, 0.50), 3), "p95_ms": round(_percentile(latency_samples, 0.95), 3), "p99_ms": round(_percentile(latency_samples, 0.99), 3), "max_ms": round(max(latency_samples), 3)}
 
-    latency = {
-        "samples": samples,
-        "p50_ms": round(_percentile(latency_samples, 0.50), 3),
-        "p95_ms": round(_percentile(latency_samples, 0.95), 3),
-        "p99_ms": round(_percentile(latency_samples, 0.99), 3),
-        "max_ms": round(max(latency_samples), 3),
-    }
-    checks["latency"] = latency
-
-    return {
-        "schema_version": 1,
-        "generated_at": datetime.now(UTC).isoformat(),
-        "target": {
-            "origin": f"https://{host}" + (f":{parsed.port}" if parsed.port else ""),
-            "resolved_public_addresses": resolved_addresses,
-        },
-        "checks": checks,
-        "failures": failures,
-        "overall_pass": not failures,
-    }
+    return {"schema_version": 1, "generated_at": datetime.now(UTC).isoformat(), "target": {"origin": f"https://{host}" + (f":{parsed.port}" if parsed.port else ""), "resolved_public_addresses": resolved_addresses}, "checks": checks, "failures": failures, "overall_pass": not failures}
 
 
 def _write_evidence(path: str | Path, evidence: dict[str, Any]) -> None:
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(
-        json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
+    destination.write_text(json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def main() -> int:
@@ -306,11 +245,11 @@ def main() -> int:
 
     try:
         evidence = run_probe(args.base_url, samples=args.samples, timeout=args.timeout)
-    except Exception as exc:  # Evidence is still emitted for operational diagnosis.
+    except Exception as exc:
         evidence = {
             "schema_version": 1,
             "generated_at": datetime.now(UTC).isoformat(),
-            "target": {"origin": args.base_url},
+            "target": {"origin": _safe_origin(args.base_url)},
             "checks": {},
             "failures": [f"probe exception: {type(exc).__name__}: {exc}"],
             "overall_pass": False,
