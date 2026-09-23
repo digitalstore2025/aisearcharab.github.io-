@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import concurrent.futures
-
 import pytest
 
 from aisearcharab_api.staging_probe import (
@@ -14,10 +12,31 @@ from aisearcharab_api.staging_probe import (
 )
 
 
+def _hardened_headers() -> dict[str, str]:
+    return {
+        "x-content-type-options": "nosniff",
+        "x-frame-options": "DENY",
+        "referrer-policy": "no-referrer",
+        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
+        "cross-origin-opener-policy": "same-origin",
+        "cross-origin-resource-policy": "same-site",
+        "x-permitted-cross-domain-policies": "none",
+        "x-dns-prefetch-control": "off",
+        "origin-agent-cluster": "?1",
+        "x-robots-tag": "noindex, nofollow",
+        "cache-control": "no-store",
+        "strict-transport-security": "max-age=31536000; includeSubDomains",
+        "x-request-id": "staging-probe-request-1234",
+        "content-security-policy": (
+            "default-src 'none'; object-src 'none'; frame-ancestors 'none'; "
+            "base-uri 'none'; form-action 'none'"
+        ),
+    }
+
+
 def test_staging_origin_requires_https_without_credentials_or_nested_path() -> None:
     parsed = _validate_base_url("https://aisearcharab-api-staging-v2.onrender.com/")
     assert parsed.hostname == "aisearcharab-api-staging-v2.onrender.com"
-
     for invalid in (
         "http://aisearcharab-api-staging-v2.onrender.com",
         "https://user:secret@aisearcharab-api-staging-v2.onrender.com",
@@ -31,9 +50,7 @@ def test_staging_origin_requires_https_without_credentials_or_nested_path() -> N
 
 
 def test_safe_origin_never_echoes_invalid_secret_bearing_urls_or_ports() -> None:
-    assert _safe_origin("https://aisearcharab-api-staging-v2.onrender.com/") == (
-        "https://aisearcharab-api-staging-v2.onrender.com"
-    )
+    assert _safe_origin("https://aisearcharab-api-staging-v2.onrender.com/") == "https://aisearcharab-api-staging-v2.onrender.com"
     assert _safe_origin("https://user:secret@aisearcharab-api-staging-v2.onrender.com") is None
     assert _safe_origin("https://aisearcharab-api-staging-v2.onrender.com/?token=secret") is None
     assert _safe_origin("https://aisearcharab-api-staging-v2.onrender.com:99999") is None
@@ -55,43 +72,14 @@ def test_percentile_interpolates_deterministically() -> None:
 
 
 def test_security_header_gate_accepts_hardened_api_headers() -> None:
-    headers = {
-        "x-content-type-options": "nosniff",
-        "x-frame-options": "DENY",
-        "referrer-policy": "no-referrer",
-        "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
-        "cross-origin-opener-policy": "same-origin",
-        "cross-origin-resource-policy": "same-site",
-        "x-permitted-cross-domain-policies": "none",
-        "x-dns-prefetch-control": "off",
-        "origin-agent-cluster": "?1",
-        "x-robots-tag": "noindex, nofollow",
-        "cache-control": "no-store",
-        "strict-transport-security": "max-age=31536000; includeSubDomains",
-        "x-request-id": "staging-probe-request-1234",
-        "content-security-policy": (
-            "default-src 'none'; object-src 'none'; frame-ancestors 'none'; "
-            "base-uri 'none'; form-action 'none'"
-        ),
-    }
-    assert _check_security_headers(headers) == []
+    assert _check_security_headers(_hardened_headers()) == []
 
 
-def test_security_header_gate_reports_missing_hsts_bad_request_id_and_permissions_policy() -> None:
-    headers = {
-        "x-content-type-options": "nosniff",
-        "x-frame-options": "DENY",
-        "referrer-policy": "no-referrer",
-        "cross-origin-opener-policy": "same-origin",
-        "cross-origin-resource-policy": "same-site",
-        "x-permitted-cross-domain-policies": "none",
-        "x-dns-prefetch-control": "off",
-        "origin-agent-cluster": "?1",
-        "x-robots-tag": "noindex, nofollow",
-        "cache-control": "no-store",
-        "x-request-id": "bad",
-        "content-security-policy": "default-src 'none'; frame-ancestors 'none'",
-    }
+def test_security_header_gate_reports_missing_controls() -> None:
+    headers = _hardened_headers()
+    headers.pop("strict-transport-security")
+    headers.pop("permissions-policy")
+    headers["x-request-id"] = "bad"
     failures = _check_security_headers(headers)
     assert any(item.startswith("strict-transport-security:") for item in failures)
     assert any(item.startswith("permissions-policy:") for item in failures)
@@ -99,47 +87,53 @@ def test_security_header_gate_reports_missing_hsts_bad_request_id_and_permission
 
 
 def test_security_header_gate_rejects_csp_none_combined_with_other_sources() -> None:
-    headers = {
-        **{
-            key: value
-            for key, value in {
-                "x-content-type-options": "nosniff",
-                "x-frame-options": "DENY",
-                "referrer-policy": "no-referrer",
-                "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",
-                "cross-origin-opener-policy": "same-origin",
-                "cross-origin-resource-policy": "same-site",
-                "x-permitted-cross-domain-policies": "none",
-                "x-dns-prefetch-control": "off",
-                "origin-agent-cluster": "?1",
-                "x-robots-tag": "noindex, nofollow",
-                "cache-control": "no-store",
-                "strict-transport-security": "max-age=31536000; includeSubDomains",
-            }.items()
-        },
-        "x-request-id": "staging-probe-request-1234",
-        "content-security-policy": "default-src 'none' https:; frame-ancestors 'none' https:",
-    }
+    headers = _hardened_headers()
+    headers["content-security-policy"] = "default-src 'none' https:; frame-ancestors 'none' https:"
     failures = _check_security_headers(headers)
     assert any(item.startswith("content-security-policy:") for item in failures)
 
 
-def test_dns_resolution_timeout_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
-    class DummyFuture:
-        def result(self, timeout: float):
-            raise concurrent.futures.TimeoutError
+def test_security_header_gate_rejects_duplicate_csp_directives() -> None:
+    headers = _hardened_headers()
+    headers["content-security-policy"] = "default-src 'none'; default-src https:; frame-ancestors 'none'"
+    failures = _check_security_headers(headers)
+    assert "content-security-policy: duplicate directives are not accepted" in failures
 
-        def cancel(self) -> bool:
+
+def test_security_header_gate_requires_request_id_correlation() -> None:
+    headers = _hardened_headers()
+    headers["x-request-id"] = "different-request-id-1234"
+    failures = _check_security_headers(headers, expected_request_id="staging-probe-request-1234")
+    assert "x-request-id: response did not preserve the supplied correlation ID" in failures
+
+
+def test_dns_resolution_timeout_fails_closed(monkeypatch: pytest.MonkeyPatch) -> None:
+    class DummyQueue:
+        def close(self) -> None:
+            pass
+        def empty(self) -> bool:
             return True
 
-    class DummyExecutor:
-        def submit(self, fn):
-            return DummyFuture()
+    class DummyProcess:
+        def __init__(self) -> None:
+            self.terminated = False
+        def start(self) -> None:
+            pass
+        def join(self, timeout: float) -> None:
+            pass
+        def is_alive(self) -> bool:
+            return not self.terminated
+        def terminate(self) -> None:
+            self.terminated = True
 
-        def shutdown(self, wait: bool, cancel_futures: bool) -> None:
-            assert wait is False
-            assert cancel_futures is True
+    class DummyContext:
+        def Queue(self, maxsize: int):
+            assert maxsize == 1
+            return DummyQueue()
+        def Process(self, *, target, args, daemon: bool):
+            assert daemon is True
+            return DummyProcess()
 
-    monkeypatch.setattr(concurrent.futures, "ThreadPoolExecutor", lambda max_workers: DummyExecutor())
+    monkeypatch.setattr("aisearcharab_api.staging_probe.multiprocessing.get_context", lambda mode: DummyContext())
     with pytest.raises(RuntimeError, match="DNS resolution timed out"):
         _resolve_public_addresses("example.com", 443, timeout=0.01)
