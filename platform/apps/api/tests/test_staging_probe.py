@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+import aisearcharab_api.staging_probe as staging_probe
+
 from aisearcharab_api.staging_probe import (
     _check_security_headers,
     _decode_json_evidence,
@@ -137,3 +139,39 @@ def test_dns_resolution_timeout_fails_closed(monkeypatch: pytest.MonkeyPatch) ->
     monkeypatch.setattr("aisearcharab_api.staging_probe.multiprocessing.get_context", lambda mode: DummyContext())
     with pytest.raises(RuntimeError, match="DNS resolution timed out"):
         _resolve_public_addresses("example.com", 443, timeout=0.01)
+
+
+def test_http_read_enforces_wall_clock_deadline(monkeypatch: pytest.MonkeyPatch) -> None:
+    class DummySocket:
+        def settimeout(self, value: float) -> None:
+            pass
+        def close(self) -> None:
+            pass
+
+    class DummyResponse:
+        status = 200
+        def getheaders(self):
+            return []
+        def read(self, size: int) -> bytes:
+            return b"x"
+
+    class DummyConnection:
+        def __init__(self, *args, **kwargs) -> None:
+            self.sock = None
+        def request(self, *args, **kwargs) -> None:
+            pass
+        def getresponse(self):
+            return DummyResponse()
+        def close(self) -> None:
+            pass
+
+    clock = iter([0.0, 0.0, 0.1, 0.2, 1.1])
+    monkeypatch.setattr(staging_probe.time, "monotonic", lambda: next(clock))
+    monkeypatch.setattr(staging_probe.time, "perf_counter", lambda: 0.0)
+    monkeypatch.setattr(staging_probe.socket, "create_connection", lambda *args, **kwargs: DummySocket())
+    monkeypatch.setattr(staging_probe.ssl, "create_default_context", lambda: type("C", (), {"wrap_socket": lambda self, sock, server_hostname: DummySocket()})())
+    monkeypatch.setattr(staging_probe.http.client, "HTTPSConnection", DummyConnection)
+
+    parsed = staging_probe._validate_base_url("https://aisearcharab-api-staging-v2.onrender.com")
+    with pytest.raises(RuntimeError, match="all validated staging addresses failed"):
+        staging_probe._request(parsed, "/health/live", addresses=["8.8.8.8"], timeout=1.0)
