@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import argparse
-import concurrent.futures
+import multiprocessing
 import http.client
 import ipaddress
 import json
@@ -10,6 +10,7 @@ import re
 import socket
 import ssl
 import time
+from uuid import uuid4
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -64,19 +65,32 @@ def _safe_origin(raw: str) -> str | None:
     return f"https://{host}" + (f":{port}" if port else "")
 
 
-def _resolve_public_addresses(hostname: str, port: int, *, timeout: float) -> list[str]:
-    def resolve() -> list[tuple[Any, ...]]:
-        return socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
-
-    executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-    future = executor.submit(resolve)
+def _dns_worker(hostname: str, port: int, output: Any) -> None:
     try:
-        records = future.result(timeout=timeout)
-    except concurrent.futures.TimeoutError as exc:
-        future.cancel()
-        raise RuntimeError("staging DNS resolution timed out") from exc
-    finally:
-        executor.shutdown(wait=False, cancel_futures=True)
+        output.put(("ok", socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)))
+    except BaseException as exc:
+        output.put(("error", f"{type(exc).__name__}: {exc}"))
+
+
+def _resolve_public_addresses(hostname: str, port: int, *, timeout: float) -> list[str]:
+    context = multiprocessing.get_context("spawn")
+    output = context.Queue(maxsize=1)
+    process = context.Process(target=_dns_worker, args=(hostname, port, output), daemon=True)
+    process.start()
+    process.join(timeout)
+    if process.is_alive():
+        process.terminate()
+        process.join(1.0)
+        output.close()
+        raise RuntimeError("staging DNS resolution timed out")
+    if output.empty():
+        output.close()
+        raise RuntimeError("staging DNS resolution failed without a result")
+    status, payload = output.get()
+    output.close()
+    if status != "ok":
+        raise RuntimeError(f"staging DNS resolution failed: {payload}")
+    records = payload
 
     addresses: set[str] = set()
     for family, socktype, proto, _canonname, sockaddr in records:
@@ -115,6 +129,7 @@ def _request(
     addresses: list[str],
     timeout: float,
     host_header: str | None = None,
+    request_id: str | None = None,
 ) -> tuple[int, dict[str, str], bytes, float]:
     host = parsed.hostname
     if host is None:
@@ -125,6 +140,8 @@ def _request(
     headers = {"Accept": "application/json", "User-Agent": "AISearcharab-Staging-Evidence/1.0"}
     if host_header is not None:
         headers["Host"] = host_header
+    if request_id is not None:
+        headers["X-Request-ID"] = request_id
 
     started = time.perf_counter()
     failures: list[str] = []
@@ -174,18 +191,22 @@ def _decode_json_evidence(body: bytes, label: str, failures: list[str]) -> dict[
         return {}
 
 
-def _parse_csp(csp: str) -> dict[str, list[str]]:
+def _parse_csp(csp: str) -> tuple[dict[str, list[str]], set[str]]:
     directives: dict[str, list[str]] = {}
+    duplicates: set[str] = set()
     for raw_directive in csp.split(";"):
         parts = raw_directive.strip().split()
         if not parts:
             continue
         name = parts[0].lower()
+        if name in directives:
+            duplicates.add(name)
+            continue
         directives[name] = parts[1:]
-    return directives
+    return directives, duplicates
 
 
-def _check_security_headers(headers: dict[str, str]) -> list[str]:
+def _check_security_headers(headers: dict[str, str], *, expected_request_id: str | None = None) -> list[str]:
     failures: list[str] = []
     for name, expected in REQUIRED_SECURITY_HEADERS.items():
         actual = headers.get(name)
@@ -194,17 +215,29 @@ def _check_security_headers(headers: dict[str, str]) -> list[str]:
     request_id = headers.get("x-request-id", "")
     if not REQUEST_ID_PATTERN.fullmatch(request_id):
         failures.append("x-request-id: missing or invalid")
-    directives = _parse_csp(headers.get("content-security-policy", ""))
+    elif expected_request_id is not None and request_id != expected_request_id:
+        failures.append("x-request-id: response did not preserve the supplied correlation ID")
+    directives, duplicates = _parse_csp(headers.get("content-security-policy", ""))
+    if duplicates:
+        failures.append("content-security-policy: duplicate directives are not accepted")
     if directives.get("default-src") != ["'none'"] or directives.get("frame-ancestors") != ["'none'"]:
         failures.append("content-security-policy: default-src and frame-ancestors must each be exactly 'none'")
     return failures
 
 
-def run_probe(base_url: str, *, samples: int = 12, timeout: float = 8.0) -> dict[str, Any]:
+def run_probe(
+    base_url: str,
+    *,
+    samples: int = 12,
+    timeout: float = 8.0,
+    expected_revision: str | None = None,
+) -> dict[str, Any]:
     if not 3 <= samples <= 100:
         raise ValueError("samples must be between 3 and 100")
     if not 1.0 <= timeout <= 30.0:
         raise ValueError("timeout must be between 1 and 30 seconds")
+    if expected_revision is not None and not re.fullmatch(r"[0-9a-f]{40}", expected_revision.lower()):
+        raise ValueError("expected revision must be a full 40-character Git SHA")
 
     parsed = _validate_base_url(base_url)
     host = parsed.hostname
@@ -215,11 +248,18 @@ def run_probe(base_url: str, *, samples: int = 12, timeout: float = 8.0) -> dict
     failures: list[str] = []
     checks: dict[str, Any] = {}
 
-    live_status, live_headers, live_body, live_ms = _request(parsed, "/health/live", addresses=resolved_addresses, timeout=timeout)
+    correlation_id = f"staging-probe-{uuid4()}"
+    live_status, live_headers, live_body, live_ms = _request(
+        parsed,
+        "/health/live",
+        addresses=resolved_addresses,
+        timeout=timeout,
+        request_id=correlation_id,
+    )
     live_json = _decode_json_evidence(live_body, "liveness", failures) if live_status == 200 else {}
     if live_status != 200 or live_json.get("status") != "ok":
         failures.append(f"liveness failed: HTTP {live_status}, status={live_json.get('status')!r}")
-    header_failures = _check_security_headers(live_headers)
+    header_failures = _check_security_headers(live_headers, expected_request_id=correlation_id)
     failures.extend(f"security header: {item}" for item in header_failures)
     checks["liveness"] = {"http_status": live_status, "status": live_json.get("status"), "version": live_json.get("version"), "duration_ms": round(live_ms, 3), "security_headers_pass": not header_failures}
 
@@ -228,6 +268,27 @@ def run_probe(base_url: str, *, samples: int = 12, timeout: float = 8.0) -> dict
     if ready_status != 200 or ready_json.get("status") != "ready":
         failures.append(f"readiness failed: HTTP {ready_status}, status={ready_json.get('status')!r}")
     checks["readiness"] = {"http_status": ready_status, "status": ready_json.get("status"), "version": ready_json.get("version"), "duration_ms": round(ready_ms, 3)}
+
+    deployment_status, _deployment_headers, deployment_body, deployment_ms = _request(
+        parsed, "/v1/meta/deployment", addresses=resolved_addresses, timeout=timeout
+    )
+    deployment = _decode_json_evidence(deployment_body, "deployment provenance", failures) if deployment_status == 200 else {}
+    deployed_revision = str(deployment.get("revision") or "").lower()
+    if deployment_status != 200:
+        failures.append(f"deployment provenance failed: HTTP {deployment_status}")
+    if not re.fullmatch(r"[0-9a-f]{40}", deployed_revision):
+        failures.append("deployment provenance did not expose a full immutable Git SHA")
+    if expected_revision is not None and deployed_revision != expected_revision.lower():
+        failures.append(
+            f"deployed revision mismatch: expected {expected_revision.lower()}, got {deployed_revision or 'missing'}"
+        )
+    checks["deployment"] = {
+        "http_status": deployment_status,
+        "revision": deployed_revision or None,
+        "expected_revision": expected_revision.lower() if expected_revision else None,
+        "match": bool(expected_revision and deployed_revision == expected_revision.lower()),
+        "duration_ms": round(deployment_ms, 3),
+    }
 
     capability_status, _cap_headers, cap_body, cap_ms = _request(parsed, "/v1/meta/capabilities", addresses=resolved_addresses, timeout=timeout)
     capabilities = _decode_json_evidence(cap_body, "capabilities", failures) if capability_status == 200 else {}
@@ -268,11 +329,17 @@ def main() -> int:
     parser.add_argument("--base-url", required=True)
     parser.add_argument("--samples", type=int, default=12)
     parser.add_argument("--timeout", type=float, default=8.0)
+    parser.add_argument("--expected-revision")
     parser.add_argument("--output", default="/tmp/aisearcharab-staging-evidence.json")
     args = parser.parse_args()
 
     try:
-        evidence = run_probe(args.base_url, samples=args.samples, timeout=args.timeout)
+        evidence = run_probe(
+            args.base_url,
+            samples=args.samples,
+            timeout=args.timeout,
+            expected_revision=args.expected_revision,
+        )
     except Exception as exc:
         evidence = {
             "schema_version": 1,
