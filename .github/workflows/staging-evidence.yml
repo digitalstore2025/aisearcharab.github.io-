@@ -22,6 +22,7 @@ jobs:
     env:
       STAGING_BASE_URL: https://aisearcharab-api-staging-v2.onrender.com
       EVIDENCE_PATH: /tmp/aisearcharab-staging-evidence.json
+      EXPECTED_REVISION: ${{ inputs.expected_revision }}
     steps:
       - name: Checkout exact revision
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6.0.2
@@ -40,7 +41,7 @@ jobs:
               --base-url "$STAGING_BASE_URL" \
               --samples 12 \
               --timeout 8 \
-              --expected-revision "${{ inputs.expected_revision }}" \
+              --expected-revision "$EXPECTED_REVISION" \
               --output "$EVIDENCE_PATH"
           code=$?
           echo "PROBE_EXIT=$code" >> "$GITHUB_ENV"
