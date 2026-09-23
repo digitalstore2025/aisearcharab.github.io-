@@ -155,15 +155,32 @@ def _request(
             raw_socket = None
             connection = http.client.HTTPSConnection(host, port, timeout=timeout, context=context)
             connection.sock = tls_socket
+            deadline = time.monotonic() + timeout
             connection.request("GET", path, headers=headers)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("HTTP request exceeded wall-clock deadline")
+            tls_socket.settimeout(remaining)
             response = connection.getresponse()
-            body = response.read(MAX_RESPONSE_BYTES + 1)
+            chunks: list[bytes] = []
+            total = 0
+            while total <= MAX_RESPONSE_BYTES:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise TimeoutError("HTTP response exceeded wall-clock deadline")
+                tls_socket.settimeout(remaining)
+                chunk = response.read(min(65536, MAX_RESPONSE_BYTES + 1 - total))
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+            body = b"".join(chunks)
             duration_ms = (time.perf_counter() - started) * 1000
             if len(body) > MAX_RESPONSE_BYTES:
                 raise RuntimeError(f"response body exceeded {MAX_RESPONSE_BYTES} bytes")
             normalized_headers = {key.lower(): value for key, value in response.getheaders()}
             return response.status, normalized_headers, body, duration_ms
-        except (OSError, ssl.SSLError, http.client.HTTPException) as exc:
+        except (OSError, ssl.SSLError, http.client.HTTPException, TimeoutError) as exc:
             failures.append(f"{address}: {type(exc).__name__}")
         finally:
             if connection is not None:
