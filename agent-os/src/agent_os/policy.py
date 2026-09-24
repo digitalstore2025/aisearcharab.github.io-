@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Iterable
 
 from .config import load_json
-from .types import Action, Decision, PolicyResult
+from .types import Action, Decision, PolicyResult, validate_execution_environment
 
 
 @dataclass(slots=True)
@@ -49,6 +49,10 @@ class PolicyEngine:
         return cls(rules)
 
     def evaluate(self, action: Action) -> PolicyResult:
+        # Environment is a security boundary, not free-form metadata. Reject
+        # aliases/casing/whitespace instead of letting wildcard rules turn an
+        # unknown environment into an accidental allow.
+        validate_execution_environment(action.environment)
         for rule in self.rules:
             if rule.matches(action):
                 return PolicyResult(rule.decision, rule.reason, rule.id)
