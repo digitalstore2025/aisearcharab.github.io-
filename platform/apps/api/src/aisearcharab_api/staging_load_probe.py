@@ -22,6 +22,7 @@ from .staging_probe import (
 ALLOWED_STAGING_ORIGIN = "https://aisearcharab-api-staging-v2.onrender.com"
 EXPECTED_DATABASE_BINDING = "aisearcharab-staging-db-v2"
 SEARCH_QUERY = "الذكاء الاصطناعي"
+LOAD_EVIDENCE_MARKER = "bounded-load-v1"
 TOTAL_REQUESTS = 40
 CONCURRENCY = 4
 REQUEST_TIMEOUT_SECONDS = 8.0
@@ -48,10 +49,13 @@ def _validated_fixed_origin(raw: str) -> Any:
 
 
 def _search_path() -> str:
-    return "/v1/search?" + urlencode({"q": SEARCH_QUERY, "limit": 5})
+    return "/v1/search?" + urlencode(
+        {"q": SEARCH_QUERY, "limit": 5, "_evidence": LOAD_EVIDENCE_MARKER}
+    )
 
 
 def _one_search(parsed: Any, addresses: list[str]) -> Sample:
+    started = time.perf_counter()
     try:
         status, _headers, body, duration_ms = _request(
             parsed,
@@ -72,9 +76,10 @@ def _one_search(parsed: Any, addresses: list[str]) -> Sample:
             return Sample(status=status, duration_ms=duration_ms, app_took_ms=None, error="search_took_ms_invalid")
         return Sample(status=status, duration_ms=duration_ms, app_took_ms=float(app_took), error=None)
     except Exception as exc:
+        duration_ms = (time.perf_counter() - started) * 1000
         return Sample(
             status=None,
-            duration_ms=None,
+            duration_ms=duration_ms,
             app_took_ms=None,
             error=f"{type(exc).__name__}",
         )
@@ -183,6 +188,8 @@ def run_load_probe(base_url: str, *, expected_revision: str) -> dict[str, Any]:
             "endpoint": "/v1/search",
             "query_fixture": SEARCH_QUERY,
             "read_only": True,
+            "query_logging_suppressed": True,
+            "evidence_marker": LOAD_EVIDENCE_MARKER,
             "generated_answers": False,
             "summary": summary,
         },
