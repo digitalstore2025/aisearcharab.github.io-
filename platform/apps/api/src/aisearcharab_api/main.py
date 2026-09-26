@@ -5,7 +5,7 @@ import re
 import time
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, HTTPException, Query, status
+from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -38,6 +38,7 @@ _PUBLIC_CLAIM_STATES = {"reviewed", "published"}
 EXPECTED_ALEMBIC_REVISION = "20260816_0008"
 GIT_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
 DATABASE_BINDING_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{3,128}$")
+BOUNDED_LOAD_EVIDENCE_MARKER = "bounded-load-v1"
 
 
 def _public_content(item) -> PublicContentDetail:
@@ -157,6 +158,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get(f"{runtime_settings.api_prefix}/search", response_model=SearchResponse, tags=["search"])
     def search_content(
+        request: Request,
         q: str = Query(min_length=2, max_length=120),
         limit: int = Query(default=10, ge=1),
         offset: int = Query(default=0, ge=0, le=10_000),
@@ -181,7 +183,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         page = ranked[offset : offset + limit]
         took_ms = round((time.perf_counter() - started) * 1000, 3)
 
-        if runtime_settings.log_queries:
+        bounded_load_evidence = (
+            runtime_settings.environment == "staging"
+            and request.query_params.get("_evidence") == BOUNDED_LOAD_EVIDENCE_MARKER
+        )
+        if runtime_settings.log_queries and not bounded_load_evidence:
             try:
                 session.add(
                     SearchQueryEvent(
