@@ -47,6 +47,27 @@ jobs:
           PYTHONPATH: src
         run: python scripts/run_static_evals.py
 
+      - name: Run controlled reliability fault benchmark
+        working-directory: agent-os
+        env:
+          PYTHONPATH: src
+        run: >-
+          python scripts/run_reliability_benchmark.py
+          --out /tmp/agent-os-reliability-benchmark.json
+          --repeats 20
+          --seed 20260926
+
+      - name: Validate reliability benchmark JSON
+        run: python -m json.tool /tmp/agent-os-reliability-benchmark.json > /dev/null
+
+      - name: Upload revision-bound reliability evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 / Node 24
+        with:
+          name: agent-os-reliability-${{ github.sha }}
+          path: /tmp/agent-os-reliability-benchmark.json
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Verify installed CLI package resources
         shell: bash
         run: |
