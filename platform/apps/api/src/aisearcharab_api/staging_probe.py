@@ -1,22 +1,23 @@
 from __future__ import annotations
 
 import argparse
-import multiprocessing
 import http.client
 import ipaddress
 import json
 import math
+import multiprocessing
 import re
 import socket
 import ssl
 import time
-from uuid import uuid4
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import SplitResult, urlsplit
+from uuid import uuid4
 
 REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
+DATABASE_BINDING_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{3,128}$")
 MAX_RESPONSE_BYTES = 128 * 1024
 REQUIRED_SECURITY_HEADERS = {
     "x-content-type-options": "nosniff",
@@ -122,6 +123,13 @@ def _percentile(values: list[float], quantile: float) -> float:
     return ordered[lower] + (ordered[upper] - ordered[lower]) * fraction
 
 
+def _remaining(deadline: float, message: str) -> float:
+    remaining = deadline - time.monotonic()
+    if remaining <= 0:
+        raise TimeoutError(message)
+    return remaining
+
+
 def _request(
     parsed: SplitResult,
     path: str,
@@ -144,31 +152,41 @@ def _request(
         headers["X-Request-ID"] = request_id
 
     started = time.perf_counter()
+    deadline = time.monotonic() + timeout
     failures: list[str] = []
     for address in addresses:
         connection: http.client.HTTPSConnection | None = None
         raw_socket: socket.socket | None = None
+        tls_socket: ssl.SSLSocket | None = None
         try:
-            raw_socket = socket.create_connection((address, port), timeout=timeout)
+            connect_timeout = _remaining(deadline, "HTTP request exceeded wall-clock deadline before TCP connect")
+            raw_socket = socket.create_connection((address, port), timeout=connect_timeout)
+
+            tls_timeout = _remaining(deadline, "HTTP request exceeded wall-clock deadline before TLS handshake")
+            raw_socket.settimeout(tls_timeout)
             context = ssl.create_default_context()
             tls_socket = context.wrap_socket(raw_socket, server_hostname=host)
             raw_socket = None
-            connection = http.client.HTTPSConnection(host, port, timeout=timeout, context=context)
+
+            request_timeout = _remaining(deadline, "HTTP request exceeded wall-clock deadline before request send")
+            tls_socket.settimeout(request_timeout)
+            connection = http.client.HTTPSConnection(host, port, timeout=request_timeout, context=context)
             connection.sock = tls_socket
-            deadline = time.monotonic() + timeout
+            tls_socket = None
             connection.request("GET", path, headers=headers)
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                raise TimeoutError("HTTP request exceeded wall-clock deadline")
-            tls_socket.settimeout(remaining)
+
+            response_timeout = _remaining(deadline, "HTTP request exceeded wall-clock deadline")
+            if connection.sock is None:
+                raise RuntimeError("TLS socket unavailable after request")
+            connection.sock.settimeout(response_timeout)
             response = connection.getresponse()
             chunks: list[bytes] = []
             total = 0
             while total <= MAX_RESPONSE_BYTES:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise TimeoutError("HTTP response exceeded wall-clock deadline")
-                tls_socket.settimeout(remaining)
+                read_timeout = _remaining(deadline, "HTTP response exceeded wall-clock deadline")
+                if connection.sock is None:
+                    raise RuntimeError("TLS socket unavailable while reading response")
+                connection.sock.settimeout(read_timeout)
                 chunk = response.read(min(65536, MAX_RESPONSE_BYTES + 1 - total))
                 if not chunk:
                     break
@@ -180,11 +198,15 @@ def _request(
                 raise RuntimeError(f"response body exceeded {MAX_RESPONSE_BYTES} bytes")
             normalized_headers = {key.lower(): value for key, value in response.getheaders()}
             return response.status, normalized_headers, body, duration_ms
-        except (OSError, ssl.SSLError, http.client.HTTPException, TimeoutError) as exc:
+        except (OSError, ssl.SSLError, http.client.HTTPException, TimeoutError, RuntimeError) as exc:
             failures.append(f"{address}: {type(exc).__name__}")
+            if time.monotonic() >= deadline:
+                break
         finally:
             if connection is not None:
                 connection.close()
+            elif tls_socket is not None:
+                tls_socket.close()
             elif raw_socket is not None:
                 raw_socket.close()
     raise RuntimeError("all validated staging addresses failed: " + ", ".join(failures))
@@ -248,6 +270,7 @@ def run_probe(
     samples: int = 12,
     timeout: float = 8.0,
     expected_revision: str | None = None,
+    expected_database_binding: str | None = None,
 ) -> dict[str, Any]:
     if not 3 <= samples <= 100:
         raise ValueError("samples must be between 3 and 100")
@@ -255,6 +278,8 @@ def run_probe(
         raise ValueError("timeout must be between 1 and 30 seconds")
     if expected_revision is not None and not re.fullmatch(r"[0-9a-f]{40}", expected_revision.lower()):
         raise ValueError("expected revision must be a full 40-character Git SHA")
+    if expected_database_binding is not None and not DATABASE_BINDING_PATTERN.fullmatch(expected_database_binding):
+        raise ValueError("expected database binding must be a safe non-secret identifier")
 
     parsed = _validate_base_url(base_url)
     host = parsed.hostname
@@ -278,36 +303,68 @@ def run_probe(
         failures.append(f"liveness failed: HTTP {live_status}, status={live_json.get('status')!r}")
     header_failures = _check_security_headers(live_headers, expected_request_id=correlation_id)
     failures.extend(f"security header: {item}" for item in header_failures)
-    checks["liveness"] = {"http_status": live_status, "status": live_json.get("status"), "version": live_json.get("version"), "duration_ms": round(live_ms, 3), "security_headers_pass": not header_failures}
+    checks["liveness"] = {
+        "http_status": live_status,
+        "status": live_json.get("status"),
+        "version": live_json.get("version"),
+        "duration_ms": round(live_ms, 3),
+        "security_headers_pass": not header_failures,
+    }
 
-    ready_status, _ready_headers, ready_body, ready_ms = _request(parsed, "/health/ready", addresses=resolved_addresses, timeout=timeout)
+    ready_status, _ready_headers, ready_body, ready_ms = _request(
+        parsed, "/health/ready", addresses=resolved_addresses, timeout=timeout
+    )
     ready_json = _decode_json_evidence(ready_body, "readiness", failures) if ready_status == 200 else {}
     if ready_status != 200 or ready_json.get("status") != "ready":
         failures.append(f"readiness failed: HTTP {ready_status}, status={ready_json.get('status')!r}")
-    checks["readiness"] = {"http_status": ready_status, "status": ready_json.get("status"), "version": ready_json.get("version"), "duration_ms": round(ready_ms, 3)}
+    checks["readiness"] = {
+        "http_status": ready_status,
+        "status": ready_json.get("status"),
+        "version": ready_json.get("version"),
+        "duration_ms": round(ready_ms, 3),
+    }
 
     deployment_status, _deployment_headers, deployment_body, deployment_ms = _request(
         parsed, "/v1/meta/deployment", addresses=resolved_addresses, timeout=timeout
     )
-    deployment = _decode_json_evidence(deployment_body, "deployment provenance", failures) if deployment_status == 200 else {}
+    deployment = (
+        _decode_json_evidence(deployment_body, "deployment provenance", failures)
+        if deployment_status == 200
+        else {}
+    )
     deployed_revision = str(deployment.get("revision") or "").lower()
+    deployed_database_binding = str(deployment.get("database_binding") or "")
     if deployment_status != 200:
         failures.append(f"deployment provenance failed: HTTP {deployment_status}")
     if not re.fullmatch(r"[0-9a-f]{40}", deployed_revision):
         failures.append("deployment provenance did not expose a full immutable Git SHA")
+    if not DATABASE_BINDING_PATTERN.fullmatch(deployed_database_binding):
+        failures.append("deployment provenance did not expose a valid database binding identity")
     if expected_revision is not None and deployed_revision != expected_revision.lower():
         failures.append(
             f"deployed revision mismatch: expected {expected_revision.lower()}, got {deployed_revision or 'missing'}"
+        )
+    if expected_database_binding is not None and deployed_database_binding != expected_database_binding:
+        failures.append(
+            "database binding mismatch: "
+            f"expected {expected_database_binding}, got {deployed_database_binding or 'missing'}"
         )
     checks["deployment"] = {
         "http_status": deployment_status,
         "revision": deployed_revision or None,
         "expected_revision": expected_revision.lower() if expected_revision else None,
-        "match": bool(expected_revision and deployed_revision == expected_revision.lower()),
+        "revision_match": bool(expected_revision and deployed_revision == expected_revision.lower()),
+        "database_binding": deployed_database_binding or None,
+        "expected_database_binding": expected_database_binding,
+        "database_binding_match": bool(
+            expected_database_binding and deployed_database_binding == expected_database_binding
+        ),
         "duration_ms": round(deployment_ms, 3),
     }
 
-    capability_status, _cap_headers, cap_body, cap_ms = _request(parsed, "/v1/meta/capabilities", addresses=resolved_addresses, timeout=timeout)
+    capability_status, _cap_headers, cap_body, cap_ms = _request(
+        parsed, "/v1/meta/capabilities", addresses=resolved_addresses, timeout=timeout
+    )
     capabilities = _decode_json_evidence(cap_body, "capabilities", failures) if capability_status == 200 else {}
     if capability_status != 200:
         failures.append(f"capabilities failed: HTTP {capability_status}")
@@ -315,30 +372,67 @@ def run_probe(
         failures.append("generated answers must remain disabled on staging evidence runs")
     if capabilities.get("rag") is not False:
         failures.append("RAG generation must remain disabled on staging evidence runs")
-    checks["capabilities"] = {"http_status": capability_status, "api_version": capabilities.get("api_version"), "generated_answers": capabilities.get("generated_answers"), "rag": capabilities.get("rag"), "duration_ms": round(cap_ms, 3)}
+    checks["capabilities"] = {
+        "http_status": capability_status,
+        "api_version": capabilities.get("api_version"),
+        "generated_answers": capabilities.get("generated_answers"),
+        "rag": capabilities.get("rag"),
+        "duration_ms": round(cap_ms, 3),
+    }
 
-    bad_host_status, _bad_headers, _bad_body, bad_host_ms = _request(parsed, "/health/live", addresses=resolved_addresses, timeout=timeout, host_header="invalid-host.aisearcharab.invalid")
+    bad_host_status, _bad_headers, _bad_body, bad_host_ms = _request(
+        parsed,
+        "/health/live",
+        addresses=resolved_addresses,
+        timeout=timeout,
+        host_header="invalid-host.aisearcharab.invalid",
+    )
     if bad_host_status not in {400, 404, 421}:
         failures.append(f"invalid Host header was not rejected: HTTP {bad_host_status}")
-    checks["host_policy"] = {"invalid_host_http_status": bad_host_status, "duration_ms": round(bad_host_ms, 3), "pass": bad_host_status in {400, 404, 421}}
+    checks["host_policy"] = {
+        "invalid_host_http_status": bad_host_status,
+        "duration_ms": round(bad_host_ms, 3),
+        "pass": bad_host_status in {400, 404, 421},
+    }
 
     latency_samples: list[float] = []
     sample_statuses: list[int] = []
     for _ in range(samples):
-        status, _headers, _body, duration_ms = _request(parsed, "/health/live", addresses=resolved_addresses, timeout=timeout)
-        sample_statuses.append(status)
+        sample_status, _headers, _body, duration_ms = _request(
+            parsed, "/health/live", addresses=resolved_addresses, timeout=timeout
+        )
+        sample_statuses.append(sample_status)
         latency_samples.append(duration_ms)
-    if any(status != 200 for status in sample_statuses):
+    if any(sample_status != 200 for sample_status in sample_statuses):
         failures.append("one or more latency samples returned a non-200 response")
-    checks["latency"] = {"samples": samples, "p50_ms": round(_percentile(latency_samples, 0.50), 3), "p95_ms": round(_percentile(latency_samples, 0.95), 3), "p99_ms": round(_percentile(latency_samples, 0.99), 3), "max_ms": round(max(latency_samples), 3)}
+    checks["latency"] = {
+        "samples": samples,
+        "p50_ms": round(_percentile(latency_samples, 0.50), 3),
+        "p95_ms": round(_percentile(latency_samples, 0.95), 3),
+        "p99_ms": round(_percentile(latency_samples, 0.99), 3),
+        "max_ms": round(max(latency_samples), 3),
+    }
 
-    return {"schema_version": 1, "generated_at": datetime.now(UTC).isoformat(), "target": {"origin": f"https://{host}" + (f":{parsed.port}" if parsed.port else ""), "resolved_public_addresses": resolved_addresses}, "checks": checks, "failures": failures, "overall_pass": not failures}
+    return {
+        "schema_version": 1,
+        "generated_at": datetime.now(UTC).isoformat(),
+        "target": {
+            "origin": f"https://{host}" + (f":{parsed.port}" if parsed.port else ""),
+            "resolved_public_addresses": resolved_addresses,
+        },
+        "checks": checks,
+        "failures": failures,
+        "overall_pass": not failures,
+    }
 
 
 def _write_evidence(path: str | Path, evidence: dict[str, Any]) -> None:
     destination = Path(path)
     destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    destination.write_text(
+        json.dumps(evidence, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def main() -> int:
@@ -347,6 +441,7 @@ def main() -> int:
     parser.add_argument("--samples", type=int, default=12)
     parser.add_argument("--timeout", type=float, default=8.0)
     parser.add_argument("--expected-revision")
+    parser.add_argument("--expected-database-binding")
     parser.add_argument("--output", default="/tmp/aisearcharab-staging-evidence.json")
     args = parser.parse_args()
 
@@ -356,6 +451,7 @@ def main() -> int:
             samples=args.samples,
             timeout=args.timeout,
             expected_revision=args.expected_revision,
+            expected_database_binding=args.expected_database_binding,
         )
     except Exception as exc:
         evidence = {
