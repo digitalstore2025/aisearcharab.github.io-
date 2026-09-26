@@ -1,0 +1,68 @@
+name: Staging evidence probe
+
+on:
+  workflow_dispatch:
+    inputs:
+      expected_revision:
+        description: Full 40-character Git SHA expected to be running on staging
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: staging-evidence
+  cancel-in-progress: false
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      STAGING_BASE_URL: https://aisearcharab-api-staging-v2.onrender.com
+      EVIDENCE_PATH: /tmp/aisearcharab-staging-evidence.json
+      EXPECTED_REVISION: ${{ inputs.expected_revision }}
+      EXPECTED_DATABASE_BINDING: aisearcharab-staging-db-v2
+    steps:
+      - name: Checkout exact revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6.0.2
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.0.0
+        with:
+          python-version: '3.12'
+
+      - name: Run public staging probe
+        shell: bash
+        run: |
+          set +e
+          PYTHONPATH=platform/apps/api/src \
+            python -m aisearcharab_api.staging_probe \
+              --base-url "$STAGING_BASE_URL" \
+              --samples 12 \
+              --timeout 8 \
+              --expected-revision "$EXPECTED_REVISION" \
+              --expected-database-binding "$EXPECTED_DATABASE_BINDING" \
+              --output "$EVIDENCE_PATH"
+          code=$?
+          echo "PROBE_EXIT=$code" >> "$GITHUB_ENV"
+          exit 0
+
+      - name: Validate evidence JSON
+        if: always()
+        run: python -m json.tool "$EVIDENCE_PATH" > /dev/null
+
+      - name: Upload staging evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: staging-evidence-${{ inputs.expected_revision }}
+          path: /tmp/aisearcharab-staging-evidence.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Enforce staging evidence gate
+        if: always()
+        shell: bash
+        run: test "${PROBE_EXIT:-1}" = "0"

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import os
+import re
 import time
 from pathlib import Path
 
@@ -34,6 +36,8 @@ ASSISTANT_STATIC = Path(__file__).resolve().parent / "assistant_static"
 PUBLIC_SITE_ORIGIN = "https://aisearcharab.com"
 _PUBLIC_CLAIM_STATES = {"reviewed", "published"}
 EXPECTED_ALEMBIC_REVISION = "20260816_0008"
+GIT_SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+DATABASE_BINDING_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{3,128}$")
 
 
 def _public_content(item) -> PublicContentDetail:
@@ -113,6 +117,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except SQLAlchemyError as exc:
             raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="database unavailable") from exc
         return HealthResponse(status="ready", version=__version__)
+
+    @app.get(f"{runtime_settings.api_prefix}/meta/deployment", tags=["meta"])
+    def deployment_provenance() -> dict[str, str]:
+        revision = os.getenv("RENDER_GIT_COMMIT", "").strip().lower()
+        database_binding = os.getenv("DATABASE_BINDING_ID", "").strip()
+        if runtime_settings.environment in {"staging", "production"}:
+            if not GIT_SHA_PATTERN.fullmatch(revision):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="immutable deployment revision unavailable",
+                )
+            if not DATABASE_BINDING_PATTERN.fullmatch(database_binding):
+                raise HTTPException(
+                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                    detail="database binding identity unavailable",
+                )
+        return {
+            "revision": revision or "development",
+            "database_binding": database_binding or "development",
+        }
 
     @app.get(f"{runtime_settings.api_prefix}/meta/capabilities", response_model=CapabilitiesResponse, tags=["meta"])
     def capabilities() -> CapabilitiesResponse:
