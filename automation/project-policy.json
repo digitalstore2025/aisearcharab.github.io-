@@ -1,0 +1,13 @@
+{
+  "project_id": "aisearcharab",
+  "min_quality": 0.90,
+  "min_evidence": 1,
+  "max_task_cost_usd": 5.0,
+  "routes": {
+    "deterministic": ["technical_seo_checks", "duplicate_detection", "gsc_threshold_routing", "sitemap_validation"],
+    "ai_workflow": ["search_intent", "entity_extraction", "content_gap", "brief_generation", "anchor_suggestion", "geo_ai_search"],
+    "agentic": ["traffic_loss_diagnosis", "indexation_diagnosis", "cannibalization_investigation"]
+  },
+  "human_approval_actions": ["publish", "production_deploy", "delete", "301", "410", "canonical_change"],
+  "blocked_autonomous_actions": ["auto_publish", "auto_delete", "auto_301", "auto_410", "auto_canonical_change"]
+}
