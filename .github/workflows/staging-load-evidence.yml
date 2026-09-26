@@ -35,6 +35,15 @@ jobs:
       - name: Run bounded read-only staging load probe
         shell: bash
         run: |
+          cat > "$EVIDENCE_PATH" <<'JSON'
+          {
+            "schema_version": 1,
+            "target": {"origin": "https://aisearcharab-api-staging-v2.onrender.com"},
+            "workload": {"state": "not_started"},
+            "failures": ["probe process did not replace bootstrap failure evidence"],
+            "overall_pass": false
+          }
+          JSON
           set +e
           PYTHONPATH=platform/apps/api/src \
             python -m aisearcharab_api.staging_load_probe \
