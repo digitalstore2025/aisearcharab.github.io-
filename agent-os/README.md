@@ -1,6 +1,6 @@
 # Astra Agent OS v2
 
-A vendor-neutral control plane for production AI agents. V2 extends the V1 skill/prompt architecture with runtime policy enforcement, MCP preflight authorization, prompt-injection inspection, model/cost routing, observability, memory/RAG contracts, provenance, task-specific completion gates, red-team structures, bounded multi-agent orchestration, and an eval-first improvement loop.
+A vendor-neutral control plane for production AI agents. V2 extends the V1 skill/prompt architecture with runtime policy enforcement, MCP preflight authorization, prompt-injection inspection, model/cost routing, observability, memory/RAG contracts, provenance, task-specific completion gates, red-team structures, bounded multi-agent orchestration, bounded recovery controls, and an eval-first improvement loop.
 
 ## Included
 - Runtime `PolicyEngine` with allow / approval / deny outcomes and default deny.
@@ -9,6 +9,8 @@ A vendor-neutral control plane for production AI agents. V2 extends the V1 skill
 - Skill registry/router using narrow triggers.
 - Bounded agent registry with coordinator, specialists, verifiers, and independent reviewer.
 - Phase-aware team planner with explicit handoffs and bounded execution waves.
+- Deterministic runtime recovery policy for retry, verify-before-retry, argument repair, context refresh, replan, escalation, and abstention under finite budgets.
+- Reliability metrics for success, silent failures, duplicate actions, attempts, and tool calls.
 - Model/cost router with economy/standard/strong/critical tiers.
 - Dependency-free JSONL tracing.
 - Four-namespace memory reference implementation.
@@ -18,6 +20,8 @@ A vendor-neutral control plane for production AI agents. V2 extends the V1 skill
 - Red-team finding schema.
 - Static eval suites plus optional live-model adapter pattern.
 - Profiles for base, AI-search, multilingual AI/RAG, and OSINT research workflows.
+
+See [`docs/RELIABILITY_RECOVERY.md`](docs/RELIABILITY_RECOVERY.md) for the recovery invariants, research basis, fault-oriented regression coverage, and the next live fault-injection gate.
 
 ## Quick start
 ```bash
