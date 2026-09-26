@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from fastapi.testclient import TestClient
 
 from aisearcharab_api.arabic import normalize_text, protected_entities_in, tokenize
@@ -59,12 +61,11 @@ def test_query_length_is_validated(client: TestClient) -> None:
 
 
 def test_bounded_staging_load_search_suppresses_query_log_write(session_factory, settings) -> None:
-    staging_settings = settings.model_copy(
-        update={
-            "environment": "staging",
-            "log_queries": True,
-            "query_hash_key": "staging-load-evidence-test-key",
-        }
+    staging_settings = replace(
+        settings,
+        environment="staging",
+        log_queries=True,
+        query_hash_key="staging-load-evidence-test-key-2026",
     )
     app = create_app(staging_settings)
 
@@ -92,12 +93,11 @@ def test_bounded_staging_load_search_suppresses_query_log_write(session_factory,
 
 
 def test_load_evidence_marker_does_not_bypass_logging_outside_staging(session_factory, settings) -> None:
-    test_settings = settings.model_copy(
-        update={
-            "environment": "test",
-            "log_queries": True,
-            "query_hash_key": "load-evidence-boundary-test-key",
-        }
+    test_settings = replace(
+        settings,
+        environment="test",
+        log_queries=True,
+        query_hash_key="load-evidence-boundary-test-key-2026",
     )
     app = create_app(test_settings)
 
