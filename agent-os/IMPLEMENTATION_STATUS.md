@@ -1,9 +1,12 @@
-# Implementation status — v2
+# Implementation status — v2.1
 
 ## Implemented
 - Policy Gateway: allow / approval / deny + default deny.
 - MCP preflight gateway with trust labels and prompt-injection blocking.
 - Skill Registry and deterministic minimal router.
+- Specialized Agent Registry with 13 bounded project roles.
+- Phase-aware Team Planner with portfolio mode, bounded work waves, explicit handoffs, and independent review.
+- Agent tool declarations intersected with active project-profile allowlists.
 - Model/cost tier router with independent-verifier tier.
 - JSONL observability tracer.
 - Memory namespaces and verified/fresh fact gate.
@@ -16,7 +19,7 @@
 - Failure clustering for eval-driven improvement.
 - Artifact hash/provenance records.
 - Project profiles.
-- CI workflow and static eval suites.
+- CI workflow and static eval suites, including agent-team routing regression cases and installed-wheel `team-plan` verification.
 
 ## Integration boundaries intentionally left external
 - Actual cloud IAM/network/sandbox enforcement.
@@ -25,5 +28,6 @@
 - Vendor-specific model IDs and prices.
 - Production telemetry backend.
 - Human approval UI.
+- Vendor-specific concurrent agent execution adapter; v2.1 produces an explicit safe execution plan and handoff graph.
 
 These are environment-specific. The core package exposes the control points required to integrate them without weakening policy.

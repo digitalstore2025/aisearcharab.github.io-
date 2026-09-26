@@ -64,6 +64,10 @@ jobs:
             hugo --minify --gc
           fi
           python scripts/validate_build.py
+          python scripts/validate_pwa.py
+          python scripts/validate_ai_search_surfaces.py
+          test -f public/llms.txt
+          test -f public/ai-search-readiness.json
 
       # Publish only a validated Hugo build from main. Manual runs from feature
       # branches remain diagnostic and cannot upload or deploy production assets.

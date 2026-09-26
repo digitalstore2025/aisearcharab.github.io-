@@ -57,16 +57,48 @@ jobs:
           (
             cd /tmp
             /tmp/astra-agent-os-venv/bin/agent-os plan "Review auth security before production release" --profile aisearch-study > /tmp/astra-plan.json
+            /tmp/astra-agent-os-venv/bin/agent-os team-plan "Complete the AISearch platform end-to-end" --profile aisearch-study --complexity critical --risk high --trace-jsonl /tmp/astra-team-trace.jsonl > /tmp/astra-team.json
+            /tmp/astra-agent-os-venv/bin/agent-os team-plan "Audit auth token handling" --profile base --complexity medium --risk medium > /tmp/astra-security-team.json
           )
           /tmp/astra-agent-os-venv/bin/python - <<'PY'
           import json
+          from importlib.metadata import version
           from pathlib import Path
+          import agent_os
+
+          assert version('astra-agent-os') == agent_os.__version__ == '2.1.0'
+
           data = json.loads(Path('/tmp/astra-plan.json').read_text())
           assert data['profile'] == 'aisearch-study'
           assert data['mode'] == 'shadow'
           assert data['tier'] == 'strong'
           assert data['production_mutations'] is False
           assert 'repo' in data['allowed_tools']
+
+          team = json.loads(Path('/tmp/astra-team.json').read_text())
+          names = [item['agent'] for item in team['assignments']]
+          required = [
+              'execution-coordinator', 'software-architect', 'product-strategy',
+              'ai-rag', 'data-evals', 'research-osint', 'backend-platform',
+              'frontend-accessibility', 'seo-geo', 'devops-release',
+              'qa-reliability', 'security-redteam', 'independent-reviewer',
+          ]
+          assert team['portfolio_mode'] is True
+          assert names == required
+          assert max(map(len, team['waves'])) <= 4
+          assert team['waves'][-1] == ['independent-reviewer']
+          assert all(item['instructions'].strip() for item in team['assignments'])
+          assert all(set(item['allowed_tools']) <= {'repo','public_search','tests','github_pr','ci'} for item in team['assignments'])
+
+          security_team = json.loads(Path('/tmp/astra-security-team.json').read_text())
+          security_names = {item['agent'] for item in security_team['assignments']}
+          assert security_team['portfolio_mode'] is False
+          assert 'security-redteam' in security_names
+
+          trace = json.loads(Path('/tmp/astra-team-trace.jsonl').read_text())
+          assert trace['event'] == 'team.plan.created'
+          assert trace['data']['agents'] == required
+          assert 'Complete the AISearch platform end-to-end' not in Path('/tmp/astra-team-trace.jsonl').read_text()
           PY
 
       - name: Verify reproducible release archive boundary
@@ -87,6 +119,7 @@ jobs:
           with ZipFile(archive) as zf:
               names = set(zf.namelist())
           assert 'MANIFEST.json' in names
+          assert 'config/agents/registry.json' in names
           assert not any(name.startswith('dist/') for name in names)
           assert not any(name.endswith('astra_agent_os_v2.zip') for name in names)
           PY

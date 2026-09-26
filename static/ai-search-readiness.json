@@ -1,0 +1,27 @@
+{
+  "site": "AI Search Arab",
+  "canonical_origin": "https://aisearcharab.com/",
+  "language": "ar",
+  "discovery": {
+    "robots": "https://aisearcharab.com/robots.txt",
+    "sitemap": "https://aisearcharab.com/sitemap.xml",
+    "rss": "https://aisearcharab.com/index.xml",
+    "search_index": "https://aisearcharab.com/index.json",
+    "llms_txt": "https://aisearcharab.com/llms.txt"
+  },
+  "content_integrity": {
+    "methodology": "https://aisearcharab.com/methodology/",
+    "corrections": "https://aisearcharab.com/corrections/",
+    "security": "https://aisearcharab.com/.well-known/security.txt"
+  },
+  "evidence_model": [
+    "implementation",
+    "ci",
+    "merge",
+    "deployment",
+    "runtime_verification",
+    "production_readiness"
+  ],
+  "production_readiness_claim": false,
+  "note": "Passing CI, a merge, a bot review, or a deployment alone does not establish production readiness."
+}

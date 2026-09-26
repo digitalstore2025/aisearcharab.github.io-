@@ -8,31 +8,40 @@ Task Contract ──► Profile
    │
    ├──► Skill Registry / Router
    ├──► Model & Cost Router
+   ├──► Agent Registry / Team Planner
    └──► Definition of Done
                 │
                 ▼
-          Agent / Model
+       Execution Coordinator
                 │
-                ▼
-           Tool Router
-                │
-      ┌─────────┴─────────┐
-      ▼                   ▼
-Prompt-Injection      Policy Gateway
-Inspection            (default deny)
-      │                   │
-      └─────────┬─────────┘
-                ▼
-             MCP/Tools
-                │
-                ▼
-        Verification / Repair
-                │
-                ▼
-        Provenance + Artifacts
-                │
-                ▼
-        Definition of Done
+     ┌──────────┼──────────┐
+     ▼          ▼          ▼
+  Plan agents  Build waves  Release prep
+     │          │          │
+     └──────────┴────┬─────┘
+                     ▼
+              Tool Router
+                     │
+          ┌──────────┴─────────┐
+          ▼                    ▼
+ Prompt-Injection         Policy Gateway
+ Inspection               (default deny)
+          │                    │
+          └──────────┬─────────┘
+                     ▼
+                  MCP/Tools
+                     │
+                     ▼
+             QA + Security Verify
+                     │
+                     ▼
+             Independent Reviewer
+                     │
+                     ▼
+          Provenance + Artifacts
+                     │
+                     ▼
+             Definition of Done
 
 All stages ──► Observability traces ──► Failure clustering ──► New evals
 ```
@@ -42,6 +51,8 @@ All stages ──► Observability traces ──► Failure clustering ──►
 2. Untrusted retrieved content never grants privileges.
 3. Minimal context beats unconditional context loading.
 4. Model choice is proportional to task complexity and risk.
-5. High-risk work requires independent verification, not only stronger generation.
-6. Memory items are not treated as facts unless provenance/freshness permit it.
-7. Prompt and skill changes are software changes: test them before promotion.
+5. Multi-agent work is bounded: broad projects use staged waves; narrow tasks do not summon the full team.
+6. Agent tool declarations are intersected with the active project profile and never bypass runtime policy.
+7. High-risk work requires adversarial security verification plus independent completion review.
+8. Memory items are not treated as facts unless provenance/freshness permit it.
+9. Prompt, skill, and agent-routing changes are software changes: test them before promotion.
