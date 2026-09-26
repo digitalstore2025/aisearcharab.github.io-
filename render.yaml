@@ -30,6 +30,8 @@ services:
         fromDatabase:
           name: aisearcharab-staging-db-v2
           property: connectionString
+      - key: DATABASE_BINDING_ID
+        value: aisearcharab-staging-db-v2
       - key: APP_ENV
         value: staging
       - key: API_PREFIX
