@@ -17,6 +17,10 @@
 - Independent verifier interface.
 - A/B evaluation metrics and promotion/rejection rule.
 - Failure clustering for eval-driven improvement.
+- Deterministic bounded runtime recovery policy with retry / verify-before-retry / argument repair / context refresh / replan / escalation / abstention decisions.
+- Recovery budgets across attempts, tool calls and elapsed time, with fail-closed exhaustion behavior.
+- Reliability metrics for success, silent failures, duplicate actions, attempts and tool calls.
+- Fault-oriented regression tests for non-atomic side effects, transient failures, stale context, verifier failures, policy denials and budget exhaustion.
 - Artifact hash/provenance records.
 - Project profiles.
 - CI workflow and static eval suites, including agent-team routing regression cases and installed-wheel `team-plan` verification.
@@ -29,5 +33,6 @@
 - Production telemetry backend.
 - Human approval UI.
 - Vendor-specific concurrent agent execution adapter; v2.1 produces an explicit safe execution plan and handoff graph.
+- Production fault-injection adapters and real tool postcondition probes; the core recovery policy is deterministic and testable without claiming live-system validation.
 
 These are environment-specific. The core package exposes the control points required to integrate them without weakening policy.
