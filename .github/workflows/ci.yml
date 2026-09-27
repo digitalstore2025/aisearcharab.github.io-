@@ -67,6 +67,7 @@ jobs:
           rm -rf public-subpath
           hugo --baseURL "https://example.invalid/repository/" --destination public-subpath --minify --gc
           PUBLIC_DIR=public-subpath python scripts/validate_build.py
+          PUBLIC_DIR=public-subpath DEPLOYMENT_BASE_URL="https://example.invalid/repository/" python scripts/validate_ai_search_surfaces.py
 
       - name: Enforce static performance budgets
         shell: bash
