@@ -15,7 +15,7 @@ module = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(module)
 
 class DeploymentDiscoveryTest(unittest.TestCase):
-    def run_validation(self, base, href, tamper=False):
+    def run_validation(self, base: str, href: str, tamper: bool = False) -> int:
         with tempfile.TemporaryDirectory() as directory:
             output = Path(directory)
             for name in module.REQUIRED:
@@ -29,14 +29,14 @@ class DeploymentDiscoveryTest(unittest.TestCase):
             with patch.object(module, 'PUBLIC', output), patch.dict(os.environ, {'DEPLOYMENT_BASE_URL': base}), contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
                 return module.main()
 
-    def test_project_pages_base_is_accepted(self):
+    def test_project_pages_base_is_accepted(self) -> None:
         self.assertEqual(self.run_validation('https://example.invalid/repo/', 'https://example.invalid/repo/llms.txt'), 0)
 
-    def test_wrong_deployment_link_is_rejected(self):
+    def test_wrong_deployment_link_is_rejected(self) -> None:
         self.assertEqual(self.run_validation('https://example.invalid/repo/', 'https://aisearcharab.com/llms.txt'), 1)
 
-    def test_canonical_identity_cannot_be_changed_by_deployment(self):
+    def test_canonical_identity_cannot_be_changed_by_deployment(self) -> None:
         self.assertEqual(self.run_validation('https://example.invalid/repo/', 'https://example.invalid/repo/llms.txt', True), 1)
 
-    def test_insecure_base_is_rejected(self):
+    def test_insecure_base_is_rejected(self) -> None:
         self.assertEqual(self.run_validation('http://example.invalid/', 'http://example.invalid/llms.txt'), 1)
