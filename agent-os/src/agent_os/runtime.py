@@ -47,7 +47,8 @@ class RecoveryExecutor:
     The executor deliberately does not infer failure classes from exception text.
     Callers must provide a classifier that returns a structured FailureSignal.
     Raw exceptions, tool arguments, and return payloads are never emitted to the
-    trace sink.
+    trace sink. Process-control exceptions such as KeyboardInterrupt/SystemExit
+    are not swallowed by recovery.
     """
 
     def __init__(self, policy: RecoveryPolicy | None = None, tracer: TraceSink | None = None):
@@ -89,7 +90,7 @@ class RecoveryExecutor:
         self,
         spec: OperationSpec,
         operation: Callable[[], Any],
-        classify: Callable[[BaseException], FailureSignal],
+        classify: Callable[[Exception], FailureSignal],
         *,
         verify_postcondition: Callable[[], bool] | None = None,
         repair_arguments: Callable[[], None] | None = None,
@@ -123,7 +124,7 @@ class RecoveryExecutor:
             tool_calls += 1
             try:
                 value = operation()
-            except BaseException as exc:  # classifier owns the exception taxonomy
+            except Exception as exc:
                 signal = classify(exc)
                 state = RecoveryState(
                     attempts=attempts,
@@ -168,7 +169,7 @@ class RecoveryExecutor:
                     verification_calls += 1
                     try:
                         verified = bool(verify_postcondition())
-                    except BaseException:
+                    except Exception:
                         return self._stopped(
                             attempts=attempts,
                             tool_calls=tool_calls,
@@ -215,7 +216,7 @@ class RecoveryExecutor:
                 if callback is not None:
                     try:
                         callback()
-                    except BaseException:
+                    except Exception:
                         return self._stopped(
                             attempts=attempts,
                             tool_calls=tool_calls,
