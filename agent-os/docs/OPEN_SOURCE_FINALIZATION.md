@@ -27,6 +27,19 @@ The live gate uses real TCP/HTTP transport faults for timeout-after-dispatch and
 
 OpenTelemetry is not allowed to bypass the existing trace allowlist. JSONL and OpenTelemetry sinks consume the same `sanitize_trace_data` function.
 
+## Human approval enforcement
+
+Approval-gated actions are now enforced at the MCP/tool gateway rather than represented only as an `approval_required` status.
+
+- Policy remains deny-by-default.
+- A caller-provided boolean is never sufficient to authorize a sensitive action.
+- `ApprovalGrant` is bound to the exact action, tool/resource, environment and canonical SHA-256 digest of the tool-call arguments.
+- Grants are short-lived and rejected when expired, not-yet-valid, malformed, over the configured TTL, or replayed against changed arguments.
+- Authenticity is delegated to an external `ApprovalAuthority` implemented at the deployment boundary, such as an authenticated operator UI, signed approval service, or GitHub Environment gate.
+- Prompt-injection blocking executes before approval evaluation; human approval cannot override the untrusted-content boundary.
+
+The core package deliberately does not implement an operator identity provider, approval UI, or credential store. Those are deployment/governance controls and remain external evidence requirements.
+
 ## Tools considered but intentionally not added
 
 ### Tenacity
@@ -40,13 +53,21 @@ Chaos Toolkit is a mature Python chaos-engineering framework and remains suitabl
 ## Final runtime chain
 
 ```text
-Tool operation
-  -> RecoveryExecutor
-      -> structured FailureSignal
-      -> RecoveryPolicy
-          -> retry | verify-before-retry | repair | refresh | replan | escalate | abstain
-      -> postcondition verifier before any ambiguous replay
-      -> finite attempts/tool/time budgets
+Tool request
+  -> MCPGateway
+      -> prompt-injection boundary
+      -> deny-by-default PolicyEngine
+      -> ApprovalEnforcer for approval-gated actions
+          -> external ApprovalAuthority
+          -> exact call/environment binding
+          -> short-lived TTL validation
+  -> Tool operation
+      -> RecoveryExecutor
+          -> structured FailureSignal
+          -> RecoveryPolicy
+              -> retry | verify-before-retry | repair | refresh | replan | escalate | abstain
+          -> postcondition verifier before any ambiguous replay
+          -> finite attempts/tool/time budgets
   -> payload-minimized trace sanitizer
       -> JSONL
       -> optional OpenTelemetry
@@ -54,7 +75,7 @@ Tool operation
 
 ## Evidence layers
 
-1. Unit tests validate policy and executor invariants.
+1. Unit tests validate policy, approval-binding and executor invariants.
 2. Static fault benchmark compares no-recovery, retry-only, bounded recovery, and bounded recovery + verifier.
 3. Live loopback gate runs real transport faults through the immutable Toxiproxy image.
 4. OpenTelemetry integration test proves sanitized attributes reach a real SDK exporter.
@@ -84,6 +105,9 @@ Toxiproxy adds latency greater than the caller timeout. Agent OS retries only wi
 - No blind retry after uncertain external side effect.
 - A postcondition probe is an observation and never counts as permission to repeat an irreversible operation unless replay safety is explicitly declared.
 - Retry/time/tool budgets are hard boundaries.
+- Approval-gated actions fail closed when no authenticated approval authority is configured.
+- Approval is bound to one exact tool call and cannot authorize changed arguments or a different action/environment.
+- Approval never bypasses prompt-injection blocking.
 - OpenTelemetry is optional and cannot change execution decisions.
 - Toxiproxy is CI/test-only and is not a production dependency.
 
@@ -92,6 +116,11 @@ Toxiproxy adds latency greater than the caller timeout. Agent OS retries only wi
 - deterministic recovery policy;
 - executable recovery runtime;
 - independent postcondition verification path;
+- deny-by-default policy evaluation;
+- MCP/tool preflight gateway;
+- exact-call approval binding and TTL enforcement;
+- external approval-authority interface;
+- prompt-injection-before-approval ordering;
 - synthetic repeated fault benchmark;
 - live network fault gate;
 - JSONL observability;
@@ -102,4 +131,4 @@ Toxiproxy adds latency greater than the caller timeout. Agent OS retries only wi
 
 ## External governance boundary
 
-Repository branch protection/rulesets and production deployment credentials are GitHub/environment administration controls, not application code. They must remain separate evidence gates. The repository must not claim `PRODUCTION_READY` solely because this in-repository finalization passes.
+An authenticated human-approval authority/UI, approval revocation or one-time-use persistence, repository branch protection/rulesets, production telemetry retention, and production deployment credentials are environment/administration controls, not application code. They must remain separate evidence gates. The repository must not claim `PRODUCTION_READY` solely because this in-repository finalization passes.
