@@ -13,6 +13,8 @@ class OpenTelemetryTracer:
 
     OpenTelemetry is deliberately an optional dependency. The core Agent OS
     remains dependency-free; install the `otel` extra when this sink is used.
+    Telemetry failures are isolated from control-plane execution: tracing may be
+    lost, but recovery/tool execution must not fail because an exporter is down.
     """
 
     def __init__(self, tracer: Any | None = None, *, instrumentation_name: str = "astra-agent-os"):
@@ -34,16 +36,21 @@ class OpenTelemetryTracer:
     def emit(self, event: str, **data: Any) -> TraceEvent:
         safe = sanitize_trace_data(data)
         timestamp = time.time()
-        with self._tracer.start_as_current_span(event) as span:
-            span.set_attribute("agent_os.trace_id", self.trace_id)
-            span.set_attribute("agent_os.event", event)
-            for key, value in safe.items():
-                if value is None:
-                    continue
-                try:
-                    span.set_attribute(f"agent_os.{key}", self._attribute_value(value))
-                except (TypeError, ValueError):
-                    span.set_attribute(f"agent_os.{key}", f"<{type(value).__name__}:redacted>")
+        try:
+            with self._tracer.start_as_current_span(event) as span:
+                span.set_attribute("agent_os.trace_id", self.trace_id)
+                span.set_attribute("agent_os.event", event)
+                for key, value in safe.items():
+                    if value is None:
+                        continue
+                    try:
+                        span.set_attribute(f"agent_os.{key}", self._attribute_value(value))
+                    except (TypeError, ValueError):
+                        span.set_attribute(f"agent_os.{key}", f"<{type(value).__name__}:redacted>")
+        except Exception:
+            # Observability is deliberately fail-isolated. Do not leak exporter
+            # failures or allow them to abort recovery execution.
+            pass
         return TraceEvent(self.trace_id, event, timestamp, safe)
 
 
