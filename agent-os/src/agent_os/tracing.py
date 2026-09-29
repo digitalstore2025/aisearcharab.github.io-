@@ -11,10 +11,12 @@ from typing import Any
 from .types import TraceEvent
 
 _SAFE_KEYS = frozenset({
-    "action", "agents", "allowed_tools", "case_id", "complexity", "decision",
-    "duration_s", "model", "mode", "portfolio_mode", "profile", "production_mutations",
-    "risk", "rule_id", "skills", "status", "task_chars", "task_sha256", "tier",
-    "tool", "tool_calls", "variant", "waves",
+    "action", "agents", "allowed_tools", "attempts", "automatic", "benchmark_version",
+    "case_id", "complexity", "decision", "duration_s", "failure_class", "model", "mode",
+    "portfolio_mode", "profile", "production_mutations", "recovered_by", "remaining_attempts",
+    "remaining_tool_calls", "requires_verification", "risk", "rule_id", "scenario", "skills",
+    "source_sha", "status", "task_chars", "task_sha256", "tier", "tool", "tool_calls",
+    "toxiproxy_version", "transport", "variant", "verification_calls", "waves",
 })
 _CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
 _SECRET_HINT = re.compile(
@@ -36,7 +38,8 @@ def _safe_value(value: Any) -> Any:
     return f"<{type(value).__name__}:redacted>"
 
 
-def _sanitize(data: dict[str, Any]) -> dict[str, Any]:
+def sanitize_trace_data(data: dict[str, Any]) -> dict[str, Any]:
+    """Return the allowlisted, payload-minimized form used by every trace sink."""
     safe: dict[str, Any] = {}
     redacted: list[str] = []
     for key, value in data.items():
@@ -49,6 +52,10 @@ def _sanitize(data: dict[str, Any]) -> dict[str, Any]:
     return safe
 
 
+# Backwards-compatible private alias for existing internal callers.
+_sanitize = sanitize_trace_data
+
+
 class JsonlTracer:
     """Append-only payload-minimized trace sink; production can bridge to OpenTelemetry."""
 
@@ -58,7 +65,7 @@ class JsonlTracer:
         self.trace_id = uuid.uuid4().hex
 
     def emit(self, event: str, **data: Any) -> TraceEvent:
-        item = TraceEvent(self.trace_id, event, time.time(), _sanitize(data))
+        item = TraceEvent(self.trace_id, event, time.time(), sanitize_trace_data(data))
         with self.path.open("a", encoding="utf-8") as f:
             f.write(json.dumps({"trace_id": item.trace_id, "event": item.event, "ts": item.ts, "data": item.data}, ensure_ascii=False) + "\n")
         return item
