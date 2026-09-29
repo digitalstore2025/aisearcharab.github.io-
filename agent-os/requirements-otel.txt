@@ -1,0 +1,10 @@
+# OpenTelemetry 1.45.0 released 2026-09-25. Wheels are pinned with SHA-256
+# so the optional integration check is reproducible and does not float transitives.
+opentelemetry-api==1.45.0 \
+    --hash=sha256:80e068aba7cd56c8b58512d6a36f8d25cb1dfaa0c0a4cc1c938ccf9f362d9cb3
+opentelemetry-sdk==1.45.0 \
+    --hash=sha256:5dc634c946546f61b757c5b1781f9fd1a10e96ffaf7357c797e508fe9c57e75e
+opentelemetry-semantic-conventions==0.66b0 \
+    --hash=sha256:175b19dd98c4473f4f43a2b1df59186fd7b4a48cd3f77cbe03438b6d6fda230a
+typing-extensions==4.15.0 \
+    --hash=sha256:f0fa19c6845758ab08074a0cfa8b7aecb71c999ca73d62883bc25cc018c4e548
