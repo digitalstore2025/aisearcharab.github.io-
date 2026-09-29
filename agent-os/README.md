@@ -10,9 +10,11 @@ A vendor-neutral control plane for production AI agents. V2 extends the V1 skill
 - Bounded agent registry with coordinator, specialists, verifiers, and independent reviewer.
 - Phase-aware team planner with explicit handoffs and bounded execution waves.
 - Deterministic runtime recovery policy for retry, verify-before-retry, argument repair, context refresh, replan, escalation, and abstention under finite budgets.
+- `RecoveryExecutor` that applies the recovery policy to real tool-call functions and checks postconditions before ambiguous replay.
 - Reliability metrics for success, silent failures, duplicate actions, attempts, and tool calls.
+- Reproducible synthetic fault benchmark plus a live loopback Toxiproxy network-failure gate in CI.
+- Dependency-free JSONL tracing plus an optional OpenTelemetry bridge using the same payload-minimization rules.
 - Model/cost router with economy/standard/strong/critical tiers.
-- Dependency-free JSONL tracing.
 - Four-namespace memory reference implementation.
 - Hybrid RAG scoring, dedupe, and citation-precision helper.
 - Research provenance graph primitives.
@@ -21,16 +23,19 @@ A vendor-neutral control plane for production AI agents. V2 extends the V1 skill
 - Static eval suites plus optional live-model adapter pattern.
 - Profiles for base, AI-search, multilingual AI/RAG, and OSINT research workflows.
 
-See [`docs/RELIABILITY_RECOVERY.md`](docs/RELIABILITY_RECOVERY.md) for the recovery invariants, research basis, fault-oriented regression coverage, and the next live fault-injection gate.
+See [`docs/RELIABILITY_RECOVERY.md`](docs/RELIABILITY_RECOVERY.md) for recovery semantics and [`docs/OPEN_SOURCE_FINALIZATION.md`](docs/OPEN_SOURCE_FINALIZATION.md) for the final open-source architecture, selected tools, security boundaries, and evidence layers.
 
 ## Quick start
 ```bash
 cd agent-os
 PYTHONPATH=src python -m unittest discover -s tests -v
 PYTHONPATH=src python scripts/run_static_evals.py
+PYTHONPATH=src python scripts/run_reliability_benchmark.py --out /tmp/reliability.json
 PYTHONPATH=src python -m agent_os.cli plan "Review auth and dependencies before production release" --complexity high --risk high
 PYTHONPATH=src python -m agent_os.cli team-plan "Complete the AISearch platform end-to-end" --profile aisearch-study --complexity critical --risk high
 ```
+
+The live Toxiproxy gate is CI-oriented and requires the pinned local Toxiproxy daemon. OpenTelemetry remains optional; CI installs the exact verification dependency set from `requirements-otel.txt` with hashes.
 
 `team-plan` activates portfolio mode only for broad end-to-end work. Narrow tasks select only matching specialists, plus QA and an independent reviewer; high-risk work additionally mandates the security verifier.
 
