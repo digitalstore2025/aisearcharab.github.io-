@@ -1,6 +1,7 @@
 import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
@@ -44,6 +45,26 @@ class TestRecoveryExecutor(unittest.TestCase):
         self.assertEqual(result.attempts, 2)
         self.assertEqual(result.tool_calls, 2)
         self.assertEqual(result.actions, ("retry",))
+
+    def test_classifier_cannot_elevate_non_idempotent_operation_to_retry(self):
+        calls = 0
+
+        def operation():
+            nonlocal calls
+            calls += 1
+            raise TimeoutError("transient")
+
+        result = self.executor().execute(
+            OperationSpec("non-idempotent-write", idempotent=False),
+            operation,
+            lambda exc: FailureSignal(FailureClass.TIMEOUT, idempotent=True),
+        )
+        self.assertFalse(result.success)
+        self.assertTrue(result.safe_stop)
+        self.assertEqual(calls, 1)
+        self.assertEqual(result.tool_calls, 1)
+        self.assertEqual(result.actions, ("escalate",))
+        self.assertEqual(result.recovered_by, "escalate")
 
     def test_uncertain_side_effect_is_verified_before_any_replay(self):
         mutations = 0
@@ -189,6 +210,23 @@ class TestRecoveryExecutor(unittest.TestCase):
         self.assertTrue(result.safe_stop)
         self.assertEqual(result.attempts, 1)
         self.assertEqual(result.actions, ("escalate",))
+
+    def test_elapsed_budget_is_checked_after_successful_operation(self):
+        executor = RecoveryExecutor(
+            RecoveryPolicy(RecoveryBudget(max_attempts=3, max_tool_calls=8, max_elapsed_seconds=0.1))
+        )
+        with patch("agent_os.runtime.monotonic", side_effect=[0.0, 0.0, 0.2]):
+            result = executor.execute(
+                OperationSpec("slow-read", idempotent=True),
+                lambda: "late-success",
+                lambda exc: FailureSignal(FailureClass.TIMEOUT, idempotent=True),
+            )
+        self.assertFalse(result.success)
+        self.assertTrue(result.safe_stop)
+        self.assertEqual(result.attempts, 1)
+        self.assertEqual(result.tool_calls, 1)
+        self.assertEqual(result.actions, ("escalate",))
+        self.assertEqual(result.recovered_by, "elapsed_budget_exhausted_after_call")
 
     def test_missing_required_recovery_callback_stops_safely(self):
         result = self.executor().execute(
