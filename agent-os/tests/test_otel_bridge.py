@@ -1,4 +1,3 @@
-import importlib.util
 import sys
 import unittest
 from pathlib import Path
@@ -7,6 +6,13 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from agent_os.otel_bridge import CompositeTracer, OpenTelemetryTracer
+
+try:
+    import opentelemetry.sdk  # noqa: F401
+except ImportError:
+    HAS_OTEL_SDK = False
+else:
+    HAS_OTEL_SDK = True
 
 
 class _FakeTracer:
@@ -32,7 +38,7 @@ class TestCompositeTracer(unittest.TestCase):
             CompositeTracer()
 
 
-@unittest.skipUnless(importlib.util.find_spec("opentelemetry.sdk"), "OpenTelemetry SDK extra not installed")
+@unittest.skipUnless(HAS_OTEL_SDK, "OpenTelemetry SDK extra not installed")
 class TestOpenTelemetryIntegration(unittest.TestCase):
     def test_emits_sanitized_span_attributes(self):
         from opentelemetry.sdk.trace import TracerProvider
