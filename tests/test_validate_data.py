@@ -170,6 +170,26 @@ class DataValidationTest(unittest.TestCase):
         expected = {"active", "inactive", "unknown"}
         self.assertEqual(MODULE.ENTITY_STATUSES, expected)
 
+    def test_schema_types(self) -> None:
+        """Test the supported Schema.org types used by registered sources."""
+        expected = {"CreativeWork", "NewsArticle", "VideoObject"}
+        self.assertEqual(MODULE.SCHEMA_TYPES, expected)
+
+    def test_declared_schema_rejects_unknown_fields(self) -> None:
+        """Keep manual validation aligned with additionalProperties=false schemas."""
+        record = {
+            "id": "entity-test",
+            "name": "Test entity",
+            "entity_type": "person",
+            "status": "active",
+            "aliases": ["Test"],
+            "undeclared": True,
+        }
+        errors = MODULE.declared_schema_checks(
+            Path("data/entities/entity-test.json"), record, "entity"
+        )
+        self.assertTrue(any("not declared" in error for error in errors))
+
 
 if __name__ == "__main__":
     unittest.main()

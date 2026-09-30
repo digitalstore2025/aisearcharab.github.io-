@@ -8,7 +8,7 @@ content_type: "investigation"
 question: "كيف يجب أن تُبنى المادة الاستقصائية داخل المنصة؟"
 hypothesis: "يمكن جعل مسار الادعاء إلى المصدر واضحاً وقابلاً للمراجعة."
 confidence: "high"
-authors: ["فريق AI Search Arab"]
+authors: ["Abdelrahman Jamal Abuasaker"]
 reviewers: ["تحرير المنهجية"]
 sources: ["example-source"]
 claims: ["sample-claim"]
