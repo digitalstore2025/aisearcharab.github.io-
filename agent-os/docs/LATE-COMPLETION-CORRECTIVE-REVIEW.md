@@ -20,7 +20,7 @@ For mutating non-idempotent calls this can contradict externally committed state
 
 ## Regression gate
 
-Required tests:
+Required assertions:
 
 1. late successful read preserves success/value and marks budget overrun;
 2. late successful non-idempotent write performs exactly one mutation and is never reclassified or replayed;
@@ -31,7 +31,7 @@ Required tests:
 
 ## Local focused validation
 
-A reconstructed Python harness using the repository runtime/recovery interfaces executed the five critical semantic scenarios above. Result: 5/5 passed before branch publication.
+A reconstructed Python harness executed five focused tests covering all six assertions above; the telemetry assertion is part of the late non-idempotent write test. Result: 5/5 tests passed before branch publication.
 
 Repository CI remains the authoritative exact-head validation because the execution environment used for the focused check has no direct network access to clone GitHub.
 
