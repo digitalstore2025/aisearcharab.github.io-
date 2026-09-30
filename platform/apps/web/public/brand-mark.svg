@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-labelledby="title desc">
+  <title id="title">AI Search Arab</title>
+  <desc id="desc">علامة هندسية باللونين الكحلي والفيروزي تحمل الحرفين AI</desc>
+  <rect width="64" height="64" rx="14" fill="#0B1F33"/>
+  <path d="M14 46 25.5 17h7L44 46h-7.4l-2.2-6H23.1l-2.2 6H14Zm11.4-12.3h6.7l-3.3-9.4-3.4 9.4Z" fill="#F6F8FA"/>
+  <rect x="45" y="17" width="6" height="29" rx="2" fill="#2C7A7B"/>
+  <circle cx="48" cy="12" r="3" fill="#D6A756"/>
+</svg>

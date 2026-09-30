@@ -1,0 +1,7 @@
+packages:
+  - "."
+
+# pnpm 11+ build-script allowlist. Keep this list minimal and reviewed.
+allowBuilds:
+  esbuild: true
+  unrs-resolver: true

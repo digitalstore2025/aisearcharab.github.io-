@@ -6,6 +6,23 @@ from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator
 
 
+def _validate_local_url_path(value: str) -> str:
+    lowered = value.casefold()
+    if (
+        not value.startswith("/")
+        or value.startswith("//")
+        or "\\" in value
+        or "?" in value
+        or "#" in value
+        or "://" in lowered
+        or "%2f" in lowered
+        or "%5c" in lowered
+        or any(ord(character) < 32 or ord(character) == 127 for character in value)
+    ):
+        raise ValueError("url_path must be a canonical local absolute path")
+    return value
+
+
 class HealthResponse(BaseModel):
     status: str
     service: str = "aisearcharab-api"
@@ -75,6 +92,11 @@ class ContentDetail(BaseModel):
     sources: list[SourceSummary] = Field(default_factory=list)
     claims: list[ClaimSummary] = Field(default_factory=list)
 
+    @field_validator("url_path")
+    @classmethod
+    def validate_url_path(cls, value: str) -> str:
+        return _validate_local_url_path(value)
+
 
 class PublicContentDetail(BaseModel):
     model_config = ConfigDict(from_attributes=True)
@@ -91,6 +113,11 @@ class PublicContentDetail(BaseModel):
     sources: list[SourceSummary] = Field(default_factory=list)
     claims: list[PublicClaimSummary] = Field(default_factory=list)
 
+    @field_validator("url_path")
+    @classmethod
+    def validate_url_path(cls, value: str) -> str:
+        return _validate_local_url_path(value)
+
 
 class SearchResult(BaseModel):
     slug: str
@@ -103,6 +130,11 @@ class SearchResult(BaseModel):
     score: float
     matched_fields: list[str]
     source_authority: float
+
+    @field_validator("url")
+    @classmethod
+    def validate_url(cls, value: str) -> str:
+        return _validate_local_url_path(value)
 
 
 class SearchResponse(BaseModel):
@@ -183,6 +215,11 @@ class ContentAdminSummary(BaseModel):
     source_count: int = 0
     claim_count: int = 0
 
+    @field_validator("url_path")
+    @classmethod
+    def validate_url_path(cls, value: str) -> str:
+        return _validate_local_url_path(value)
+
 
 class ContentCreate(BaseModel):
     slug: str = Field(min_length=2, max_length=180, pattern=r"^[a-z0-9][a-z0-9-]*$")
@@ -197,9 +234,7 @@ class ContentCreate(BaseModel):
     @field_validator("url_path")
     @classmethod
     def validate_url_path(cls, value: str) -> str:
-        if not value.startswith("/") or value.startswith("//") or "://" in value:
-            raise ValueError("url_path must be a local absolute path")
-        return value
+        return _validate_local_url_path(value)
 
 
 class ContentUpdate(BaseModel):
@@ -214,9 +249,7 @@ class ContentUpdate(BaseModel):
     @field_validator("url_path")
     @classmethod
     def validate_optional_url_path(cls, value: str | None) -> str | None:
-        if value is not None and (not value.startswith("/") or value.startswith("//") or "://" in value):
-            raise ValueError("url_path must be a local absolute path")
-        return value
+        return _validate_local_url_path(value) if value is not None else None
 
 
 class ContentTransitionRequest(BaseModel):
