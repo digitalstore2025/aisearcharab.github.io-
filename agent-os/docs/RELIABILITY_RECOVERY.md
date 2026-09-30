@@ -28,16 +28,34 @@ These papers support the direction, not a claim that Agent OS reproduces their c
 | contradictory evidence / verifier failure | `replan` while budget remains | change trajectory rather than repeating it |
 | policy denied | `escalate` or `abstain` | policy denial is never converted into automatic retry |
 | unknown failure | one bounded `replan`, then escalation/abstention | prevents infinite opaque recovery loops |
-| exhausted attempt/tool/time budget | `escalate` or `abstain` | finite budgets are a hard control boundary |
+| exhausted attempt/tool/time budget before a new dispatch | `escalate` or `abstain` | finite budgets prevent another tool invocation |
+
+## Completion outcome semantics
+
+Elapsed recovery budgets constrain whether Agent OS may dispatch another operation. They do not retroactively rewrite the externally observable result of an operation that has already returned successfully.
+
+`ExecutionResult` therefore separates task/control status from external-state knowledge:
+
+- `external_outcome="succeeded"`: the operation returned successfully or an independent postcondition verifier proved that the side effect exists;
+- `external_outcome="not_applied"`: independent verification proved absence, or the elapsed budget expired before any tool dispatch occurred;
+- `external_outcome="unknown"`: execution stopped without enough evidence to prove whether an external side effect occurred.
+
+A synchronous operation that returns successfully after `max_elapsed_seconds` remains `success=True`, preserves its returned value, records `external_outcome="succeeded"`, and sets `budget_exceeded=True`. Telemetry records `status="success_over_budget"`. The runtime does not append `retry`, `escalate`, or `abstain` merely because that already completed call was late.
+
+This distinction is critical for non-idempotent writes. Recasting a completed mutation as a failure can cause an upstream caller to repeat the request and create a duplicate side effect. Timeouts or lost responses after dispatch remain different: if the side effect may have occurred, the outcome is unknown until postcondition verification establishes either success or absence.
+
+The executor cannot safely preempt an arbitrary synchronous callable. Production integrations must therefore apply transport/tool timeouts that are no greater than the remaining recovery budget. The post-call `budget_exceeded` signal is observability/SLO evidence, not a substitute for transport-level deadline enforcement.
 
 ## Safety invariants
 
 1. **No blind retry after an uncertain side effect.** Verify the postcondition first.
 2. **No automatic retry after a policy denial.** Policy cannot be weakened by recovery logic.
-3. **Budgets are finite.** `max_attempts`, `max_tool_calls`, and `max_elapsed_seconds` must be positive and are enforced fail-closed.
-4. **Verification is explicit.** Recovery decisions record whether downstream verification is required.
-5. **Trace fields are payload-minimized.** The policy exposes action/reason/budget metadata, not prompts, credentials, arbitrary tool payloads, or model rationale.
-6. **Escalation is a valid terminal state.** A reliable agent may stop rather than fabricate success.
+3. **Budgets are finite.** `max_attempts`, `max_tool_calls`, and `max_elapsed_seconds` must be positive; exhaustion blocks new recovery dispatch.
+4. **Known success is not reclassified as failure.** A completed successful call may be over budget, but its external outcome remains successful.
+5. **Verification is explicit.** Recovery decisions record whether downstream verification is required.
+6. **Trace fields are payload-minimized.** The policy exposes action/reason/budget metadata, not prompts, credentials, arbitrary tool payloads, or model rationale.
+7. **Escalation is a valid terminal state.** A reliable agent may stop rather than fabricate success.
+8. **Unknown external state is explicit.** Ambiguous non-idempotent operations remain unknown until verification proves success or absence.
 
 ## Reliability metrics
 
@@ -49,7 +67,7 @@ The primitive intentionally records more than task success:
 - mean attempts;
 - mean tool calls.
 
-Production evaluation should extend this with repeated-run consistency, fault intensity, latency/cost distributions, human intervention, and end-state correctness. Text similarity alone is insufficient for side-effecting workflows.
+Production evaluation should extend this with repeated-run consistency, fault intensity, latency/cost distributions, human intervention, end-state correctness, late-success rate, and unknown-external-state rate. Text similarity alone is insufficient for side-effecting workflows.
 
 ## Fault-injection regression suite
 
@@ -70,7 +88,18 @@ Production evaluation should extend this with repeated-run consistency, fault in
 - payload-minimized trace fields;
 - aggregate reliability metrics.
 
-The current suite validates policy semantics only. It does not simulate vendor networks or claim empirical equivalence with published agent benchmarks.
+`tests/test_runtime.py` additionally proves runtime execution invariants including:
+
+- a classifier cannot elevate a non-idempotent operation into blind retry;
+- ambiguous side effects are verified before replay;
+- a non-replayable verified absence stops without mutation;
+- an elapsed budget before dispatch prevents the operation from being called;
+- a late successful read remains successful and is marked over budget;
+- a late successful non-idempotent write is not reclassified, replayed, or escalated;
+- telemetry distinguishes `success_over_budget` from a stopped execution;
+- an ambiguous non-idempotent timeout without a verifier remains `external_outcome="unknown"` and is not replayed.
+
+The deterministic suite validates control semantics. Live provider and transport behavior remains a separate evidence layer.
 
 ## Recommended next evaluation gate
 
@@ -84,7 +113,8 @@ Before wiring this policy into a production tool executor, add a controlled faul
 - contradictory source set;
 - delayed external-state visibility;
 - policy denial;
-- irreversible-side-effect ambiguity.
+- irreversible-side-effect ambiguity;
+- successful synchronous completion immediately after the elapsed recovery budget.
 
 For each scenario, compare at least:
 
