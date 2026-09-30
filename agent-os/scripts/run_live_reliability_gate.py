@@ -15,9 +15,9 @@ from urllib.request import Request, urlopen
 
 from agent_os.network_faults import ToxiproxyClient
 from agent_os.reliability import FailureClass, FailureSignal, RecoveryBudget, RecoveryPolicy
-from agent_os.runtime import OperationSpec, RecoveryExecutor
+from agent_os.runtime import ExternalOutcome, OperationSpec, RecoveryExecutor
 
-GATE_VERSION = "1.0.0"
+GATE_VERSION = "1.1.0"
 EXPECTED_TOXIPROXY_VERSION = "2.12.0"
 TOXIPROXY_IMAGE_DIGEST = "sha256:9378ed52a28bc50edc1350f936f518f31fa95f0d15917d6eb40b8e376d1a214e"
 
@@ -96,6 +96,8 @@ class ScenarioEvidence:
     verification_calls: int
     actions: tuple[str, ...]
     recovered_by: str | None
+    external_outcome: str
+    budget_exceeded: bool
     duration_s: float
     mutation_count: int | None = None
 
@@ -146,6 +148,8 @@ def _evidence(result, *, duration_s: float, passed: bool, mutation_count: int | 
         verification_calls=result.verification_calls,
         actions=result.actions,
         recovered_by=result.recovered_by,
+        external_outcome=result.external_outcome.value,
+        budget_exceeded=result.budget_exceeded,
         duration_s=round(duration_s, 6),
         mutation_count=mutation_count,
     )
@@ -199,6 +203,8 @@ def run_gate(*, source_sha: str, toxiproxy_api: str) -> dict:
         passed = (
             result.success
             and result.recovered_by == "postcondition_verified"
+            and result.external_outcome is ExternalOutcome.SUCCEEDED
+            and not result.budget_exceeded
             and result.tool_calls == 1
             and result.verification_calls == 1
             and mutation_count == 1
@@ -226,10 +232,57 @@ def run_gate(*, source_sha: str, toxiproxy_api: str) -> dict:
             lambda exc: FailureSignal(FailureClass.RATE_LIMIT, idempotent=True),
         )
         duration = time.monotonic() - t0
-        passed = result.success and result.attempts == 2 and result.actions == ("retry",) and state.rate_limit_calls == 2
+        passed = (
+            result.success
+            and result.external_outcome is ExternalOutcome.SUCCEEDED
+            and not result.budget_exceeded
+            and result.attempts == 2
+            and result.actions == ("retry",)
+            and state.rate_limit_calls == 2
+        )
         evidence["rate_limit_retry"] = _evidence(result, duration_s=duration, passed=passed)
 
-        # 3. Persistent latency: prove retries are finite and terminate safely.
+        # 3. Known late success: the mutation commits and returns successfully,
+        # but downstream latency makes completion exceed the recovery budget.
+        # Preserve success and the value/outcome; record the overrun separately.
+        toxi.add_toxic(
+            proxy_name,
+            name="late-success-latency",
+            toxic_type="latency",
+            stream="downstream",
+            attributes={"latency": 150, "jitter": 0},
+        )
+        late_key = "late-success-after-budget"
+        late_executor = RecoveryExecutor(RecoveryPolicy(RecoveryBudget(3, 6, 0.05)))
+        t0 = time.monotonic()
+        result = late_executor.execute(
+            OperationSpec("live-late-non-idempotent-mutation", idempotent=False),
+            lambda: _network_call(
+                f"{proxy_base}/mutate",
+                method="POST",
+                headers={"Idempotency-Key": late_key},
+                timeout=1.0,
+            ),
+            lambda exc: FailureSignal(FailureClass.TIMEOUT, idempotent=True),
+        )
+        duration = time.monotonic() - t0
+        mutation_count = state.mutations.get(late_key, 0)
+        passed = (
+            result.success
+            and not result.safe_stop
+            and result.external_outcome is ExternalOutcome.SUCCEEDED
+            and result.budget_exceeded
+            and result.actions == ()
+            and result.tool_calls == 1
+            and mutation_count == 1
+            and duration >= 0.05
+        )
+        evidence["late_success_after_budget"] = _evidence(
+            result, duration_s=duration, passed=passed, mutation_count=mutation_count
+        )
+        toxi.reset()
+
+        # 4. Persistent latency: prove retries are finite and terminate safely.
         toxi.add_toxic(
             proxy_name,
             name="persistent-latency",
@@ -248,6 +301,8 @@ def run_gate(*, source_sha: str, toxiproxy_api: str) -> dict:
         passed = (
             not result.success
             and result.safe_stop
+            and result.external_outcome is ExternalOutcome.UNKNOWN
+            and not result.budget_exceeded
             and result.attempts == 2
             and result.tool_calls == 2
             and result.actions == ("retry", "escalate")

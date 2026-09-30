@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from enum import StrEnum
 from time import monotonic
 from typing import Any, Callable, Protocol
 
@@ -29,6 +30,14 @@ class OperationSpec:
             raise ValueError("operation name must not be empty")
 
 
+class ExternalOutcome(StrEnum):
+    """Known state of the externally observable operation after execution."""
+
+    SUCCEEDED = "succeeded"
+    NOT_APPLIED = "not_applied"
+    UNKNOWN = "unknown"
+
+
 @dataclass(frozen=True, slots=True)
 class ExecutionResult:
     success: bool
@@ -39,6 +48,8 @@ class ExecutionResult:
     actions: tuple[str, ...]
     recovered_by: str | None = None
     value: Any = None
+    external_outcome: ExternalOutcome = ExternalOutcome.UNKNOWN
+    budget_exceeded: bool = False
 
 
 class RecoveryExecutor:
@@ -50,10 +61,12 @@ class RecoveryExecutor:
     trace sink. Process-control exceptions such as KeyboardInterrupt/SystemExit
     are not swallowed by recovery.
 
-    Elapsed-time enforcement is fail-closed before and after each operation call.
-    A synchronous callable already in progress cannot be preempted safely here;
-    transport/tool timeouts should therefore be configured no higher than the
-    remaining recovery budget.
+    Elapsed-time enforcement prevents new dispatch after the recovery budget is
+    exhausted. A synchronous callable already in progress cannot be preempted
+    safely here; transport/tool timeouts should therefore be configured no higher
+    than the remaining recovery budget. If an in-flight callable nevertheless
+    returns successfully after the budget, its known external success is preserved
+    and reported separately with ``budget_exceeded=True``.
     """
 
     def __init__(self, policy: RecoveryPolicy | None = None, tracer: TraceSink | None = None):
@@ -72,6 +85,7 @@ class RecoveryExecutor:
         verification_calls: int,
         actions: list[str],
         recovered_by: str | None = None,
+        external_outcome: ExternalOutcome = ExternalOutcome.UNKNOWN,
     ) -> ExecutionResult:
         self._emit(
             "recovery.execution.stopped",
@@ -80,6 +94,7 @@ class RecoveryExecutor:
             tool_calls=tool_calls,
             verification_calls=verification_calls,
             recovered_by=recovered_by,
+            external_outcome=external_outcome.value,
         )
         return ExecutionResult(
             success=False,
@@ -89,6 +104,7 @@ class RecoveryExecutor:
             verification_calls=verification_calls,
             actions=tuple(actions),
             recovered_by=recovered_by,
+            external_outcome=external_outcome,
         )
 
     def execute(
@@ -123,6 +139,9 @@ class RecoveryExecutor:
                     verification_calls=verification_calls,
                     actions=actions,
                     recovered_by="budget_exhausted",
+                    external_outcome=(
+                        ExternalOutcome.NOT_APPLIED if tool_calls == 0 else ExternalOutcome.UNKNOWN
+                    ),
                 )
 
             attempts += 1
@@ -205,6 +224,7 @@ class RecoveryExecutor:
                             verification_calls=verification_calls,
                             actions=tuple(actions),
                             recovered_by="postcondition_verified",
+                            external_outcome=ExternalOutcome.SUCCEEDED,
                         )
                     if spec.idempotent or spec.retry_after_verified_absence:
                         continue
@@ -214,6 +234,7 @@ class RecoveryExecutor:
                         verification_calls=verification_calls,
                         actions=actions,
                         recovered_by="unsafe_replay_after_verified_absence",
+                        external_outcome=ExternalOutcome.NOT_APPLIED,
                     )
 
                 callback: Callable[[], None] | None = None
@@ -261,24 +282,17 @@ class RecoveryExecutor:
                 )
 
             elapsed_after_call = monotonic() - start
-            if elapsed_after_call >= self.policy.budget.max_elapsed_seconds:
-                actions.append(RecoveryAction.ESCALATE.value if human_gate_available else RecoveryAction.ABSTAIN.value)
-                return self._stopped(
-                    attempts=attempts,
-                    tool_calls=tool_calls,
-                    verification_calls=verification_calls,
-                    actions=actions,
-                    recovered_by="elapsed_budget_exhausted_after_call",
-                )
-
+            budget_exceeded = elapsed_after_call >= self.policy.budget.max_elapsed_seconds
             self._emit(
                 "recovery.execution.completed",
                 tool=spec.name,
-                status="success",
+                status="success_over_budget" if budget_exceeded else "success",
                 attempts=attempts,
                 tool_calls=tool_calls,
                 verification_calls=verification_calls,
                 duration_s=elapsed_after_call,
+                budget_exceeded=budget_exceeded,
+                external_outcome=ExternalOutcome.SUCCEEDED.value,
             )
             return ExecutionResult(
                 success=True,
@@ -288,4 +302,6 @@ class RecoveryExecutor:
                 verification_calls=verification_calls,
                 actions=tuple(actions),
                 value=value,
+                external_outcome=ExternalOutcome.SUCCEEDED,
+                budget_exceeded=budget_exceeded,
             )

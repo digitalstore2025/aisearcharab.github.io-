@@ -41,6 +41,24 @@ jobs:
           PYTHONPATH: src
         run: python -m unittest discover -s tests -v
 
+      - name: Verify late completion contract
+        working-directory: agent-os
+        env:
+          PYTHONPATH: src
+        run: python scripts/verify_late_completion_contract.py > /tmp/agent-os-late-completion-contract.json
+
+      - name: Validate late completion contract JSON
+        run: >-
+          python -c "import json, pathlib; p=json.loads(pathlib.Path('/tmp/agent-os-late-completion-contract.json').read_text()); assert p['passed'] is True; assert p['success'] is True; assert p['budget_exceeded'] is True; assert p['external_outcome'] == 'succeeded'; assert p['mutation_count'] == 1; assert p['actions'] == []; assert p['value_preserved'] is True"
+
+      - name: Upload late completion contract evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1 / Node 24
+        with:
+          name: agent-os-late-completion-${{ github.sha }}
+          path: /tmp/agent-os-late-completion-contract.json
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Run static control-plane evals
         working-directory: agent-os
         env:
