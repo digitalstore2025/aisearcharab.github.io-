@@ -24,6 +24,11 @@ class _FakeTracer:
         return type("Event", (), {"event": event})()
 
 
+class _BrokenOtelTracer:
+    def start_as_current_span(self, event):
+        raise RuntimeError("exporter unavailable")
+
+
 class TestCompositeTracer(unittest.TestCase):
     def test_fans_out_to_all_sinks(self):
         a = _FakeTracer()
@@ -36,6 +41,18 @@ class TestCompositeTracer(unittest.TestCase):
     def test_requires_at_least_one_sink(self):
         with self.assertRaises(ValueError):
             CompositeTracer()
+
+    def test_otel_failure_is_isolated_from_control_plane(self):
+        sink = OpenTelemetryTracer(_BrokenOtelTracer())
+        event = sink.emit(
+            "recovery.decision",
+            tool="safe-tool",
+            status="recovering",
+            credential="SHOULD-NOT-APPEAR",
+        )
+        self.assertEqual(event.event, "recovery.decision")
+        self.assertNotIn("credential", event.data)
+        self.assertEqual(event.data["redacted_fields"], ["credential"])
 
 
 @unittest.skipUnless(HAS_OTEL_SDK, "OpenTelemetry SDK extra not installed")

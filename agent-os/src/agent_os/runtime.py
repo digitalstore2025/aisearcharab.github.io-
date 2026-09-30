@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from time import monotonic
 from typing import Any, Callable, Protocol
 
@@ -49,6 +49,11 @@ class RecoveryExecutor:
     Raw exceptions, tool arguments, and return payloads are never emitted to the
     trace sink. Process-control exceptions such as KeyboardInterrupt/SystemExit
     are not swallowed by recovery.
+
+    Elapsed-time enforcement is fail-closed before and after each operation call.
+    A synchronous callable already in progress cannot be preempted safely here;
+    transport/tool timeouts should therefore be configured no higher than the
+    remaining recovery budget.
     """
 
     def __init__(self, policy: RecoveryPolicy | None = None, tracer: TraceSink | None = None):
@@ -126,13 +131,19 @@ class RecoveryExecutor:
                 value = operation()
             except Exception as exc:
                 signal = classify(exc)
+                # A classifier may downgrade replay safety, but it must never be
+                # able to elevate a non-idempotent operation into a blind retry.
+                effective_signal = replace(
+                    signal,
+                    idempotent=bool(signal.idempotent and spec.idempotent),
+                )
                 state = RecoveryState(
                     attempts=attempts,
                     tool_calls=tool_calls,
                     elapsed_seconds=monotonic() - start,
                 )
                 decision = self.policy.decide(
-                    signal,
+                    effective_signal,
                     state,
                     human_gate_available=human_gate_available,
                 )
@@ -249,6 +260,17 @@ class RecoveryExecutor:
                     recovered_by="unhandled_recovery_action",
                 )
 
+            elapsed_after_call = monotonic() - start
+            if elapsed_after_call >= self.policy.budget.max_elapsed_seconds:
+                actions.append(RecoveryAction.ESCALATE.value if human_gate_available else RecoveryAction.ABSTAIN.value)
+                return self._stopped(
+                    attempts=attempts,
+                    tool_calls=tool_calls,
+                    verification_calls=verification_calls,
+                    actions=actions,
+                    recovered_by="elapsed_budget_exhausted_after_call",
+                )
+
             self._emit(
                 "recovery.execution.completed",
                 tool=spec.name,
@@ -256,7 +278,7 @@ class RecoveryExecutor:
                 attempts=attempts,
                 tool_calls=tool_calls,
                 verification_calls=verification_calls,
-                duration_s=monotonic() - start,
+                duration_s=elapsed_after_call,
             )
             return ExecutionResult(
                 success=True,

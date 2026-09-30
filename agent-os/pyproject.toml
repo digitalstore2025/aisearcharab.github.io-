@@ -11,7 +11,12 @@ dependencies = []
 
 [project.optional-dependencies]
 openai = ["openai>=1.0"]
-otel = ["opentelemetry-api==1.45.0", "opentelemetry-sdk==1.45.0"]
+otel = [
+    "opentelemetry-api==1.45.0",
+    "opentelemetry-sdk==1.45.0",
+    "opentelemetry-semantic-conventions==0.66b0",
+    "typing-extensions==4.15.0",
+]
 
 [project.scripts]
 agent-os = "agent_os.cli:main"
