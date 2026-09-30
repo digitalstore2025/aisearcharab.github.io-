@@ -7,7 +7,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from agent_os.reliability import FailureClass, FailureSignal, RecoveryBudget, RecoveryPolicy
-from agent_os.runtime import OperationSpec, RecoveryExecutor
+from agent_os.runtime import ExternalOutcome, OperationSpec, RecoveryExecutor
 
 
 class _Tracer:
@@ -45,6 +45,8 @@ class TestRecoveryExecutor(unittest.TestCase):
         self.assertEqual(result.attempts, 2)
         self.assertEqual(result.tool_calls, 2)
         self.assertEqual(result.actions, ("retry",))
+        self.assertEqual(result.external_outcome, ExternalOutcome.SUCCEEDED)
+        self.assertFalse(result.budget_exceeded)
 
     def test_classifier_cannot_elevate_non_idempotent_operation_to_retry(self):
         calls = 0
@@ -65,6 +67,7 @@ class TestRecoveryExecutor(unittest.TestCase):
         self.assertEqual(result.tool_calls, 1)
         self.assertEqual(result.actions, ("escalate",))
         self.assertEqual(result.recovered_by, "escalate")
+        self.assertEqual(result.external_outcome, ExternalOutcome.UNKNOWN)
 
     def test_uncertain_side_effect_is_verified_before_any_replay(self):
         mutations = 0
@@ -85,6 +88,28 @@ class TestRecoveryExecutor(unittest.TestCase):
         self.assertEqual(result.tool_calls, 1)
         self.assertEqual(result.verification_calls, 1)
         self.assertEqual(mutations, 1)
+        self.assertEqual(result.external_outcome, ExternalOutcome.SUCCEEDED)
+
+    def test_uncertain_non_idempotent_timeout_without_verifier_stays_unknown(self):
+        calls = 0
+
+        def operation():
+            nonlocal calls
+            calls += 1
+            raise TimeoutError("response lost after commit")
+
+        result = self.executor().execute(
+            OperationSpec("publish-item", idempotent=False),
+            operation,
+            lambda exc: FailureSignal(FailureClass.TIMEOUT, side_effect_uncertain=True),
+        )
+        self.assertFalse(result.success)
+        self.assertTrue(result.safe_stop)
+        self.assertEqual(calls, 1)
+        self.assertEqual(result.tool_calls, 1)
+        self.assertEqual(result.actions, ("verify_before_retry",))
+        self.assertEqual(result.recovered_by, "verification_unavailable")
+        self.assertEqual(result.external_outcome, ExternalOutcome.UNKNOWN)
 
     def test_verified_absence_can_allow_explicit_safe_replay(self):
         calls = 0
@@ -105,6 +130,7 @@ class TestRecoveryExecutor(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(result.attempts, 2)
         self.assertEqual(result.verification_calls, 1)
+        self.assertEqual(result.external_outcome, ExternalOutcome.SUCCEEDED)
 
     def test_non_replayable_operation_stops_after_verified_absence(self):
         result = self.executor().execute(
@@ -117,6 +143,7 @@ class TestRecoveryExecutor(unittest.TestCase):
         self.assertTrue(result.safe_stop)
         self.assertEqual(result.tool_calls, 1)
         self.assertEqual(result.recovered_by, "unsafe_replay_after_verified_absence")
+        self.assertEqual(result.external_outcome, ExternalOutcome.NOT_APPLIED)
 
     def test_stale_context_refreshes_then_retries(self):
         refreshed = False
@@ -139,6 +166,7 @@ class TestRecoveryExecutor(unittest.TestCase):
         self.assertTrue(result.success)
         self.assertEqual(result.value, "fresh")
         self.assertEqual(result.actions, ("refresh_context",))
+        self.assertEqual(result.external_outcome, ExternalOutcome.SUCCEEDED)
 
     def test_malformed_arguments_are_repaired_before_retry(self):
         repaired = False
@@ -160,6 +188,7 @@ class TestRecoveryExecutor(unittest.TestCase):
         )
         self.assertTrue(result.success)
         self.assertEqual(result.actions, ("repair_arguments",))
+        self.assertEqual(result.external_outcome, ExternalOutcome.SUCCEEDED)
 
     def test_contradictory_evidence_replans_then_retries(self):
         replanned = False
@@ -181,6 +210,7 @@ class TestRecoveryExecutor(unittest.TestCase):
         )
         self.assertTrue(result.success)
         self.assertEqual(result.actions, ("replan",))
+        self.assertEqual(result.external_outcome, ExternalOutcome.SUCCEEDED)
 
     def test_policy_denial_never_retries(self):
         calls = 0
@@ -199,6 +229,7 @@ class TestRecoveryExecutor(unittest.TestCase):
         self.assertTrue(result.safe_stop)
         self.assertEqual(calls, 1)
         self.assertEqual(result.actions, ("escalate",))
+        self.assertEqual(result.external_outcome, ExternalOutcome.UNKNOWN)
 
     def test_attempt_budget_is_hard_boundary(self):
         result = self.executor(attempts=1).execute(
@@ -211,7 +242,7 @@ class TestRecoveryExecutor(unittest.TestCase):
         self.assertEqual(result.attempts, 1)
         self.assertEqual(result.actions, ("escalate",))
 
-    def test_elapsed_budget_is_checked_after_successful_operation(self):
+    def test_elapsed_budget_marks_late_success_without_reclassifying_failure(self):
         executor = RecoveryExecutor(
             RecoveryPolicy(RecoveryBudget(max_attempts=3, max_tool_calls=8, max_elapsed_seconds=0.1))
         )
@@ -221,12 +252,74 @@ class TestRecoveryExecutor(unittest.TestCase):
                 lambda: "late-success",
                 lambda exc: FailureSignal(FailureClass.TIMEOUT, idempotent=True),
             )
-        self.assertFalse(result.success)
-        self.assertTrue(result.safe_stop)
+        self.assertTrue(result.success)
+        self.assertFalse(result.safe_stop)
+        self.assertEqual(result.value, "late-success")
+        self.assertTrue(result.budget_exceeded)
+        self.assertEqual(result.external_outcome, ExternalOutcome.SUCCEEDED)
         self.assertEqual(result.attempts, 1)
         self.assertEqual(result.tool_calls, 1)
+        self.assertEqual(result.actions, ())
+        self.assertIsNone(result.recovered_by)
+
+    def test_late_non_idempotent_write_preserves_committed_outcome(self):
+        tracer = _Tracer()
+        mutations = []
+        executor = RecoveryExecutor(
+            RecoveryPolicy(RecoveryBudget(max_attempts=3, max_tool_calls=8, max_elapsed_seconds=0.1)),
+            tracer=tracer,
+        )
+
+        def operation():
+            mutations.append("record-123")
+            return "record-123"
+
+        with patch("agent_os.runtime.monotonic", side_effect=[0.0, 0.0, 0.2]):
+            result = executor.execute(
+                OperationSpec("create-record", idempotent=False),
+                operation,
+                lambda exc: FailureSignal(FailureClass.TIMEOUT, idempotent=True),
+            )
+
+        self.assertEqual(mutations, ["record-123"])
+        self.assertTrue(result.success)
+        self.assertEqual(result.value, "record-123")
+        self.assertTrue(result.budget_exceeded)
+        self.assertEqual(result.external_outcome, ExternalOutcome.SUCCEEDED)
+        self.assertEqual(result.actions, ())
+        self.assertNotIn("retry", result.actions)
+        self.assertNotIn("escalate", result.actions)
+        self.assertEqual(tracer.events[-1][0], "recovery.execution.completed")
+        self.assertEqual(tracer.events[-1][1]["status"], "success_over_budget")
+        self.assertTrue(tracer.events[-1][1]["budget_exceeded"])
+        self.assertEqual(tracer.events[-1][1]["external_outcome"], "succeeded")
+        self.assertFalse(any(event == "recovery.execution.stopped" for event, _ in tracer.events))
+
+    def test_elapsed_budget_exhausted_before_dispatch_prevents_operation(self):
+        calls = 0
+        executor = RecoveryExecutor(
+            RecoveryPolicy(RecoveryBudget(max_attempts=3, max_tool_calls=8, max_elapsed_seconds=0.1))
+        )
+
+        def operation():
+            nonlocal calls
+            calls += 1
+            return "unexpected"
+
+        with patch("agent_os.runtime.monotonic", side_effect=[0.0, 0.2]):
+            result = executor.execute(
+                OperationSpec("never-dispatch", idempotent=False),
+                operation,
+                lambda exc: FailureSignal(FailureClass.TIMEOUT),
+            )
+
+        self.assertEqual(calls, 0)
+        self.assertFalse(result.success)
+        self.assertTrue(result.safe_stop)
+        self.assertEqual(result.tool_calls, 0)
         self.assertEqual(result.actions, ("escalate",))
-        self.assertEqual(result.recovered_by, "elapsed_budget_exhausted_after_call")
+        self.assertEqual(result.recovered_by, "budget_exhausted")
+        self.assertEqual(result.external_outcome, ExternalOutcome.NOT_APPLIED)
 
     def test_missing_required_recovery_callback_stops_safely(self):
         result = self.executor().execute(
