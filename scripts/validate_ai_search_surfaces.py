@@ -104,7 +104,15 @@ def main() -> int:
         parser = LinkCollector()
         parser.feed(homepage.read_text(encoding="utf-8"))
         describedby = [link for link in parser.links if "describedby" in link.get("rel", "").lower().split()]
-        expected_href = EXPECTED_DISCOVERY["llms_txt"]
+        # Deployment discovery follows Hugo's baseURL, while the static identity
+        # documents retain their approved canonical origin.
+        deployment_base = os.environ.get("DEPLOYMENT_BASE_URL", EXPECTED_ORIGIN)
+        parsed_base = urlparse(deployment_base)
+        if (parsed_base.scheme != "https" or not parsed_base.hostname
+                or parsed_base.username or parsed_base.password
+                or parsed_base.query or parsed_base.fragment):
+            fail("DEPLOYMENT_BASE_URL must be an absolute HTTPS base without credentials, query or fragment", errors)
+        expected_href = deployment_base.rstrip("/") + "/llms.txt"
         if not any(link.get("href") == expected_href and link.get("type", "").lower() == "text/markdown" for link in describedby):
             fail(f"homepage must advertise {expected_href} via rel=describedby type=text/markdown", errors)
 

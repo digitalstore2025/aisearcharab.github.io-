@@ -56,9 +56,11 @@ jobs:
         env:
           PAGES_BASE_URL: ${{ steps.pages.outputs.base_url }}
         run: |
+          set -euo pipefail
           if [ "${GITHUB_REF}" = "refs/heads/main" ]; then
             test -n "${PAGES_BASE_URL}"
             NORMALIZED_BASE_URL="${PAGES_BASE_URL%/}/"
+            export DEPLOYMENT_BASE_URL="${NORMALIZED_BASE_URL}"
             hugo --baseURL "${NORMALIZED_BASE_URL}" --minify --gc
           else
             hugo --minify --gc
