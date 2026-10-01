@@ -1,0 +1,26 @@
+name: Automation Policy Gate
+
+on:
+  pull_request:
+    paths:
+      - "automation/**"
+      - ".github/workflows/automation-policy.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-policy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+      - name: Validate automation policy
+        run: python automation/validate_policy.py automation/project-policy.json
+      - name: Run SEO router sample
+        run: python automation/seo_router.py --policy automation/project-policy.json --task automation/sample-seo-task.json
+      - name: Run SEO router tests
+        run: python automation/test_seo_router.py

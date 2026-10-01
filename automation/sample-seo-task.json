@@ -1,0 +1,24 @@
+{
+  "task_id": "sample-intent-001",
+  "task_type": "search_intent",
+  "url": "https://aisearch.study/example",
+  "requested_action": "analysis",
+  "semantic_needed": true,
+  "estimated_cost_usd": 0.02,
+  "evidence": [
+    {
+      "type": "gsc_export",
+      "ref": "sample-gsc-fixture"
+    }
+  ],
+  "metrics": {
+    "clicks": 12,
+    "impressions": 1000,
+    "position": 12.4,
+    "indexed": true
+  },
+  "page_signals": {
+    "title_length": 24,
+    "duplicate_title": false
+  }
+}
