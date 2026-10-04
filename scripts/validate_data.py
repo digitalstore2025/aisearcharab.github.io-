@@ -7,6 +7,11 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 ROOT = Path(__file__).resolve().parents[1]
+SCHEMAS = {
+    "source": ROOT / "schemas" / "source.schema.json",
+    "claim": ROOT / "schemas" / "claim.schema.json",
+    "entity": ROOT / "schemas" / "entity.schema.json",
+}
 ID_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 CONFIDENCE_VALUES = {"high", "medium", "low", "unverified"}
 RELIABILITY_VALUES = {"primary", "secondary", "tertiary", "unverified"}
@@ -14,6 +19,7 @@ CLAIM_TYPES = {"verified-fact", "estimate", "inference", "third-party-claim"}
 REVIEW_STATUSES = {"draft", "reviewed", "published", "rejected"}
 ENTITY_TYPES = {"person", "organization", "company", "government", "location", "project", "other"}
 ENTITY_STATUSES = {"active", "inactive", "unknown"}
+SCHEMA_TYPES = {"CreativeWork", "NewsArticle", "VideoObject"}
 SOURCE_TYPES = {
     "official-document",
     "dataset",
@@ -90,12 +96,33 @@ def common_checks(path: Path, data: dict, required: set[str]) -> list[str]:
     return errors
 
 
+def declared_schema_checks(path: Path, data: dict, record_type: str) -> list[str]:
+    """Enforce the declared schema's top-level contract without adding a dependency."""
+    schema_path = SCHEMAS[record_type]
+    schema, errors = load_json(schema_path)
+    if errors:
+        return errors
+    properties = schema.get("properties")
+    required = schema.get("required")
+    if not isinstance(properties, dict) or not isinstance(required, list):
+        return [f"{schema_path}: schema must define object properties and required fields"]
+    if schema.get("additionalProperties") is False:
+        unknown = sorted(set(data) - set(properties))
+        if unknown:
+            errors.append(f"{path}: fields not declared in {schema_path.name}: {unknown}")
+    missing = sorted(set(required) - set(data))
+    if missing:
+        errors.append(f"{path}: fields required by {schema_path.name} are missing: {missing}")
+    return errors
+
+
 def validate_source(path: Path, source_ids: set[str]) -> list[str]:
     """Validate source record."""
     data, errors = load_json(path)
     if errors:
         return errors
-    
+
+    errors += declared_schema_checks(path, data, "source")
     errors += common_checks(path, data, SOURCE_REQUIRED)
     
     # Validate URL
@@ -117,6 +144,10 @@ def validate_source(path: Path, source_ids: set[str]) -> list[str]:
     source_type = data.get("source_type")
     if source_type not in SOURCE_TYPES:
         errors.append(f"{path}: source_type must be one of {sorted(SOURCE_TYPES)}, got '{source_type}'")
+
+    schema_type = data.get("schema_type")
+    if schema_type is not None and schema_type not in SCHEMA_TYPES:
+        errors.append(f"{path}: schema_type must be one of {sorted(SCHEMA_TYPES)}, got '{schema_type}'")
     
     # Validate accessed_at datetime
     accessed_at = data.get("accessed_at")
@@ -149,7 +180,8 @@ def validate_claim(path: Path, source_ids: set[str]) -> list[str]:
     data, errors = load_json(path)
     if errors:
         return errors
-    
+
+    errors += declared_schema_checks(path, data, "claim")
     errors += common_checks(path, data, CLAIM_REQUIRED)
     
     # Validate claim_type
@@ -198,7 +230,8 @@ def validate_entity(path: Path, source_ids: set[str]) -> list[str]:
     data, errors = load_json(path)
     if errors:
         return errors
-    
+
+    errors += declared_schema_checks(path, data, "entity")
     errors += common_checks(path, data, ENTITY_REQUIRED)
     
     # Validate entity_type
@@ -222,6 +255,38 @@ def validate_entity(path: Path, source_ids: set[str]) -> list[str]:
         empty_aliases = [i for i, alias in enumerate(aliases) if not isinstance(alias, str) or len(alias) == 0]
         if empty_aliases:
             errors.append(f"{path}: aliases cannot contain empty strings at indices {empty_aliases}")
+
+    minimum_lengths = {
+        "name_ar": 2,
+        "description": 5,
+        "description_ar": 5,
+        "description_en": 5,
+    }
+    for field, minimum_length in minimum_lengths.items():
+        value = data.get(field)
+        if value is not None and (not isinstance(value, str) or len(value) < minimum_length):
+            errors.append(
+                f"{path}: {field} must contain at least {minimum_length} characters when present"
+            )
+
+    same_as = data.get("same_as")
+    if same_as is not None:
+        if not isinstance(same_as, list):
+            errors.append(f"{path}: same_as must be a list")
+        else:
+            urls: list[str] = []
+            for index, profile in enumerate(same_as):
+                if not isinstance(profile, dict) or set(profile) != {"label", "url"}:
+                    errors.append(f"{path}: same_as[{index}] must contain only label and url")
+                    continue
+                if not isinstance(profile["label"], str) or len(profile["label"]) < 2:
+                    errors.append(f"{path}: same_as[{index}].label must be a non-empty string")
+                if not validate_uri(profile["url"]):
+                    errors.append(f"{path}: same_as[{index}].url must be a valid HTTP(S) URI")
+                else:
+                    urls.append(profile["url"])
+            if len(urls) != len(set(urls)):
+                errors.append(f"{path}: same_as URLs must be unique")
     
     # Validate source_ids reference if present
     source_references = data.get("source_ids", [])

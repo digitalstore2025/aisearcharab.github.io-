@@ -15,6 +15,11 @@
       "minLength": 2,
       "description": "الاسم الرسمي أو الأساسي للكيان"
     },
+    "name_ar": {
+      "type": "string",
+      "minLength": 2,
+      "description": "الاسم العربي الأساسي عندما يختلف عن حقل name"
+    },
     "entity_type": {
       "enum": ["person", "organization", "company", "government", "location", "project", "other"],
       "description": "نوع الكيان"
@@ -36,6 +41,30 @@
       "type": ["string", "null"],
       "minLength": 5,
       "description": "وصف موجز للكيان ودوره أو أهميته"
+    },
+    "description_ar": {
+      "type": ["string", "null"],
+      "minLength": 5,
+      "description": "وصف عربي موجز قابل للعرض"
+    },
+    "description_en": {
+      "type": ["string", "null"],
+      "minLength": 5,
+      "description": "وصف إنجليزي موجز قابل للعرض"
+    },
+    "same_as": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["label", "url"],
+        "properties": {
+          "label": {"type": "string", "minLength": 2},
+          "url": {"type": "string", "format": "uri"}
+        }
+      },
+      "uniqueItems": true,
+      "description": "ملفات أو صفحات خارجية تمثل الكيان نفسه"
     },
     "source_ids": {
       "type": ["array", "null"],
