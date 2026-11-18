@@ -76,6 +76,8 @@ def _gateway_origin_key(value: str) -> tuple[str, str, int] | None:
         port = parsed.port
     except ValueError:
         return None
+    if port is not None and not 1 <= port <= 65_535:
+        return None
     if parsed.netloc.endswith(":"):
         return None
     hostname = parsed.hostname
