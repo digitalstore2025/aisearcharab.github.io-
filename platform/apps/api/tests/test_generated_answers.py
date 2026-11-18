@@ -562,6 +562,11 @@ def test_default_openai_endpoint_is_explicit_when_gateway_is_unset(
         transport_options.update(kwargs)
         return object()
 
+    response_limit_values: list[int] = []
+    monkeypatch.setattr(
+        "aisearcharab_api.generated_answers.ResponseSizeLimitTransport",
+        lambda limit: response_limit_values.append(limit) or ResponseSizeLimitTransport(limit),
+    )
     monkeypatch.setattr("aisearcharab_api.generated_answers.DefaultHttpx2Client", fake_http_client_factory)
     monkeypatch.setattr("aisearcharab_api.generated_answers.OpenAI", fake_factory)
     result = generate_grounded_answer(
