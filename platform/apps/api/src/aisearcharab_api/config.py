@@ -49,6 +49,11 @@ def _valid_host(value: str) -> bool:
     return all(part and part.replace("-", "").isalnum() for part in candidate.split("."))
 
 
+def _valid_gateway_host(value: str) -> bool:
+    """Accept exact DNS hostnames only; wildcard gateway destinations are unsafe."""
+    return _valid_host(value) and "*" not in value and value == value.strip()
+
+
 def _valid_proxy_cidr(value: str) -> bool:
     try:
         network = ipaddress.ip_network(value, strict=False)
@@ -116,6 +121,7 @@ class Settings:
     generated_answers_enabled: bool = False
     openai_api_key: str | None = None
     openai_base_url: str | None = None
+    openai_allowed_hosts: tuple[str, ...] = ()
     openai_model: str = "gpt-5.6-terra"
     openai_timeout_seconds: int = 20
     openai_max_retries: int = 2
@@ -202,6 +208,8 @@ class Settings:
             )
         if self.log_queries and (self.query_hash_key is None or len(self.query_hash_key.encode("utf-8")) < 32):
             raise ConfigurationError("QUERY_HASH_KEY must contain at least 32 bytes when query logging is enabled")
+        if any(not _valid_gateway_host(host) for host in self.openai_allowed_hosts):
+            raise ConfigurationError("OPENAI_ALLOWED_HOSTS must contain exact hostnames without wildcards")
         if self.openai_base_url is not None:
             parsed_base_url = urlparse(self.openai_base_url)
             try:
@@ -226,6 +234,14 @@ class Settings:
                     "OPENAI_BASE_URL must be an absolute /v1 URL without credentials, query, or fragment; "
                     "staging and production require HTTPS"
                 )
+            if secure_runtime:
+                gateway_host = parsed_base_url.hostname.rstrip(".").casefold()
+                allowed_gateway_hosts = {host.rstrip(".").casefold() for host in self.openai_allowed_hosts}
+                if gateway_host not in allowed_gateway_hosts:
+                    raise ConfigurationError(
+                        "OPENAI_BASE_URL host must exactly match an entry in OPENAI_ALLOWED_HOSTS "
+                        "in staging and production"
+                    )
         if not 5 <= self.openai_timeout_seconds <= 120:
             raise ConfigurationError("OPENAI_TIMEOUT_SECONDS must be between 5 and 120")
         if not 0 <= self.openai_max_retries <= 5:
@@ -300,8 +316,8 @@ def get_settings() -> Settings:
         generated_answers_enabled=_bool(os.getenv("GENERATED_ANSWERS_ENABLED", "false")),
         openai_api_key=os.getenv("OPENAI_API_KEY") or None,
         openai_base_url=os.getenv("OPENAI_BASE_URL", "").strip() or None,
-        openai_model=os.getenv("OPENAI_MODEL", "gpt-5.6-terra").strip(),
-        openai_timeout_seconds=_int("OPENAI_TIMEOUT_SECONDS", os.getenv("OPENAI_TIMEOUT_SECONDS", "20")),
+        openai_allowed_hosts=_csv(os.getenv("OPENAI_ALLOWED_HOSTS", "")),
+        openai_model=os.getenv("OPENAI_MODEL", "gpt-5.6-terra").strip(),        openai_timeout_seconds=_int("OPENAI_TIMEOUT_SECONDS", os.getenv("OPENAI_TIMEOUT_SECONDS", "20")),
         openai_max_retries=_int("OPENAI_MAX_RETRIES", os.getenv("OPENAI_MAX_RETRIES", "2")),
         openai_max_output_tokens=_int("OPENAI_MAX_OUTPUT_TOKENS", os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "1200")),
         generated_answer_max_sources=_int(
