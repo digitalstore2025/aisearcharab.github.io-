@@ -402,7 +402,8 @@ def get_settings() -> Settings:
         openai_gateway_allowed_origins=_csv(os.getenv("OPENAI_GATEWAY_ALLOWED_ORIGINS", "")),
         openai_gateway_api_key=os.getenv("OPENAI_GATEWAY_API_KEY") or None,
         generated_answers_provider=os.getenv("GENERATED_ANSWERS_PROVIDER", "disabled").strip().lower(),
-        openai_model=os.getenv("OPENAI_MODEL", "gpt-5.6-terra").strip(),        openai_timeout_seconds=_int("OPENAI_TIMEOUT_SECONDS", os.getenv("OPENAI_TIMEOUT_SECONDS", "20")),
+        openai_model=os.getenv("OPENAI_MODEL", "gpt-5.6-terra").strip(),
+        openai_timeout_seconds=_int("OPENAI_TIMEOUT_SECONDS", os.getenv("OPENAI_TIMEOUT_SECONDS", "20")),
         openai_max_retries=_int("OPENAI_MAX_RETRIES", os.getenv("OPENAI_MAX_RETRIES", "2")),
         openai_max_output_tokens=_int("OPENAI_MAX_OUTPUT_TOKENS", os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "1200")),
         generated_answer_max_sources=_int(
