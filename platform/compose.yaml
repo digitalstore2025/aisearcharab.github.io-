@@ -31,6 +31,7 @@ x-api-runtime-environment: &api-runtime-environment
   GENERATED_ANSWERS_ENABLED: ${GENERATED_ANSWERS_ENABLED:-false}
   OPENAI_API_KEY: ${OPENAI_API_KEY:-}
   OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+  OPENAI_ALLOWED_HOSTS: ${OPENAI_ALLOWED_HOSTS:-}
   OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.6-terra}
 
 services:
