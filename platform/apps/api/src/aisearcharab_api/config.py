@@ -175,6 +175,7 @@ class Settings:
     openai_gateway_allowed_origins: tuple[str, ...] = ()
     openai_gateway_api_key: str | None = field(default=None, repr=False)
     generated_answers_provider: str = "disabled"
+    openai_max_response_bytes: int = 1_048_576
 
     @property
     def generation_api_key(self) -> str | None:
@@ -311,6 +312,8 @@ class Settings:
                     "OPENAI_BASE_URL scheme, host, and port must exactly match an entry in "
                     "OPENAI_GATEWAY_ALLOWED_ORIGINS"
                 )
+        if not 16_384 <= self.openai_max_response_bytes <= 16_777_216:
+            raise ConfigurationError("OPENAI_MAX_RESPONSE_BYTES must be between 16384 and 16777216")
         if not 5 <= self.openai_timeout_seconds <= 120:
             raise ConfigurationError("OPENAI_TIMEOUT_SECONDS must be between 5 and 120")
         if not 0 <= self.openai_max_retries <= 5:
@@ -402,6 +405,7 @@ def get_settings() -> Settings:
         openai_gateway_allowed_origins=_csv(os.getenv("OPENAI_GATEWAY_ALLOWED_ORIGINS", "")),
         openai_gateway_api_key=os.getenv("OPENAI_GATEWAY_API_KEY") or None,
         generated_answers_provider=os.getenv("GENERATED_ANSWERS_PROVIDER", "disabled").strip().lower(),
+        openai_max_response_bytes=_int("OPENAI_MAX_RESPONSE_BYTES", os.getenv("OPENAI_MAX_RESPONSE_BYTES", "1048576")),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-5.6-terra").strip(),
         openai_timeout_seconds=_int("OPENAI_TIMEOUT_SECONDS", os.getenv("OPENAI_TIMEOUT_SECONDS", "20")),
         openai_max_retries=_int("OPENAI_MAX_RETRIES", os.getenv("OPENAI_MAX_RETRIES", "2")),
