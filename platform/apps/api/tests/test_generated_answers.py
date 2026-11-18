@@ -567,3 +567,12 @@ def test_gateway_provider_cannot_fall_back_to_public_openai_without_base_url() -
                 max_output_tokens=1200,
                 base_url=base_url,
             )
+
+
+def test_provider_configs_reject_empty_credentials_and_gateway_destinations() -> None:
+    with pytest.raises(ValueError, match="non-empty API key"):
+        OpenAIProviderConfig(api_key="   ")
+    with pytest.raises(ValueError, match="non-empty API key"):
+        GatewayProviderConfig(api_key="", base_url="https://gateway.example/v1")
+    with pytest.raises(ValueError, match="non-empty explicit base_url"):
+        GatewayProviderConfig(api_key="gateway-token-not-a-production-secret", base_url=" ")
