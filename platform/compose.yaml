@@ -26,6 +26,13 @@ x-api-environment: &api-environment
   MFA_ENROLLMENT_TTL_MINUTES: ${MFA_ENROLLMENT_TTL_MINUTES:-10}
   MFA_ISSUER: ${MFA_ISSUER:-AISearcharab.com}
 
+x-api-runtime-environment: &api-runtime-environment
+  <<: *api-environment
+  GENERATED_ANSWERS_ENABLED: ${GENERATED_ANSWERS_ENABLED:-false}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
+  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.6-terra}
+
 services:
   postgres:
     image: postgres:17.5-alpine@sha256:6567bca8d7bc8c82c5922425a0baee57be8402df92bae5eacad5f01ae9544daa
@@ -58,7 +65,7 @@ services:
   api:
     build:
       context: ./apps/api
-    environment: *api-environment
+    environment: *api-runtime-environment
     depends_on:
       migrate:
         condition: service_completed_successfully
