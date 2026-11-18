@@ -436,6 +436,13 @@ def test_configured_gateway_base_url_is_passed_to_openai_sdk(monkeypatch: pytest
         captured.update(kwargs)
         return fake
 
+    transport_options: dict[str, object] = {}
+
+    def fake_http_client_factory(**kwargs: object) -> object:
+        transport_options.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("aisearcharab_api.generated_answers.DefaultHttpx2Client", fake_http_client_factory)
     monkeypatch.setattr("aisearcharab_api.generated_answers.OpenAI", fake_factory)
     result = generate_grounded_answer(
         "GPT-5",
@@ -450,12 +457,14 @@ def test_configured_gateway_base_url_is_passed_to_openai_sdk(monkeypatch: pytest
     )
 
     assert result.generated is True
-    assert captured == {
+    assert {key: value for key, value in captured.items() if key != "http_client"} == {
         "api_key": "gateway-token-not-a-production-secret",
         "timeout": 20,
         "max_retries": 2,
         "base_url": "https://llm-gateway.internal.example/v1",
     }
+    assert "http_client" in captured
+    assert transport_options == {"follow_redirects": False}
 
 
 def test_grounded_endpoint_uses_configured_gateway_base_url(
