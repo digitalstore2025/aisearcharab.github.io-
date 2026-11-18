@@ -113,3 +113,35 @@ def test_gateway_settings_are_appended_after_existing_positional_fields() -> Non
     names = [field.name for field in fields(Settings)]
     assert names.index("openai_base_url") > names.index("generated_answer_window_seconds")
     assert names.index("openai_gateway_allowed_origins") > names.index("generated_answer_window_seconds")
+
+
+def test_gateway_credentials_cannot_fall_back_to_the_public_openai_endpoint(settings: Settings) -> None:
+    gateway_url = "https://gateway.internal.example:8443/v1"
+    with pytest.raises(ConfigurationError, match="OPENAI_GATEWAY_API_KEY"):
+        replace(
+            settings,
+            generated_answers_enabled=True,
+            openai_base_url=gateway_url,
+            openai_gateway_allowed_origins=("https://gateway.internal.example:8443",),
+            openai_api_key="public-openai-key-not-a-gateway-token",
+        ).validate()
+
+    with pytest.raises(ConfigurationError, match="OPENAI_BASE_URL"):
+        replace(settings, openai_gateway_api_key="gateway-token-not-a-production-secret").validate()
+
+    gateway_settings = replace(
+        settings,
+        generated_answers_enabled=True,
+        openai_base_url=gateway_url,
+        openai_gateway_allowed_origins=("https://gateway.internal.example:8443",),
+        openai_gateway_api_key="gateway-token-not-a-production-secret",
+    )
+    gateway_settings.validate()
+    assert gateway_settings.generation_api_key == "gateway-token-not-a-production-secret"
+
+
+def test_default_openai_credentials_are_selected_only_without_gateway_url(settings: Settings) -> None:
+    default_settings = replace(settings, openai_api_key="openai-key-not-a-gateway-token")
+    assert default_settings.generation_api_key == "openai-key-not-a-gateway-token"
+    with pytest.raises(ConfigurationError, match="OPENAI_GATEWAY_API_KEY"):
+        replace(default_settings, openai_base_url="https://gateway.internal.example/v1").validate()
