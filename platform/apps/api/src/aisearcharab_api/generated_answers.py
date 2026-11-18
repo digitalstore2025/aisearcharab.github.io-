@@ -471,15 +471,15 @@ def generate_grounded_answer(
         else:
             raise TypeError("provider_config must be an OpenAIProviderConfig or GatewayProviderConfig")
 
-    client_options: dict[str, object] = {
-        "api_key": api_key,
-        "timeout": timeout_seconds,
-        "max_retries": max_retries,
-        "base_url": base_url,
-        # Never forward the shared bearer token or evidence through redirects.
-        "http_client": DefaultHttpx2Client(follow_redirects=False),
-    }
-    openai_client = OpenAI(**client_options)
+        client_options: dict[str, object] = {
+            "api_key": api_key,
+            "timeout": timeout_seconds,
+            "max_retries": max_retries,
+            "base_url": base_url,
+            # Never forward the shared bearer token or evidence through redirects.
+            "http_client": DefaultHttpx2Client(follow_redirects=False),
+        }
+        openai_client = OpenAI(**client_options)
     try:
         response = openai_client.responses.create(
             model=model,
