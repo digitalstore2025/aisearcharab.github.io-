@@ -15,6 +15,8 @@ from aisearcharab_api.config import ConfigurationError, Settings
 from aisearcharab_api.generated_answers import (
     EvidenceClaim,
     EvidenceItem,
+    GatewayProviderConfig,
+    OpenAIProviderConfig,
     ModelAnswerDraft,
     UpstreamInvalidResponseError,
     _MAX_MODEL_INPUT_CHARS,
@@ -469,7 +471,10 @@ def test_configured_gateway_base_url_is_passed_to_openai_sdk(monkeypatch: pytest
         "base_url": "https://llm-gateway.internal.example/v1",
     }
     assert "http_client" in captured
-    assert transport_options == {"follow_redirects": False}
+    assert transport_options["follow_redirects"] is False
+    assert transport_options["headers"] == {"Accept-Encoding": "identity"}
+    assert transport_options["trust_env"] is False
+    assert "transport" in transport_options
 
 
 def test_grounded_endpoint_uses_configured_gateway_base_url(
