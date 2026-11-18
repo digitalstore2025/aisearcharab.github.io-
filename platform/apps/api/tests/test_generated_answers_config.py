@@ -60,3 +60,27 @@ def test_secure_runtime_requires_https_for_openai_gateway(settings: Settings) ->
     )
     with pytest.raises(ConfigurationError, match="staging and production require HTTPS"):
         staging.validate()
+
+
+def test_secure_runtime_requires_an_exact_gateway_host_allowlist(settings: Settings) -> None:
+    staging = replace(
+        settings,
+        environment="staging",
+        database_url="postgresql+psycopg://user:password@db.example/aisearcharab",
+        allowed_origins=("https://aisearcharab.com",),
+        allowed_hosts=("aisearcharab.com",),
+        enforce_separation_of_duties=True,
+        require_mfa_for_privileged=True,
+        mfa_encryption_key="test-mfa-encryption-key-32-bytes-long",
+        login_throttle_key="test-login-throttle-key-32-bytes-long",
+        openai_base_url="https://gateway.internal.example/v1",
+    )
+    with pytest.raises(ConfigurationError, match="OPENAI_ALLOWED_HOSTS"):
+        staging.validate()
+
+    replace(staging, openai_allowed_hosts=("gateway.internal.example",)).validate()
+
+
+def test_gateway_host_allowlist_rejects_wildcards(settings: Settings) -> None:
+    with pytest.raises(ConfigurationError, match="OPENAI_ALLOWED_HOSTS"):
+        replace(settings, openai_allowed_hosts=("*.example.com",)).validate()
