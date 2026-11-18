@@ -17,6 +17,7 @@ def test_generated_answers_are_blocked_in_production_until_operational_controls_
         mfa_encryption_key="test-mfa-encryption-key-32-bytes-long",
         login_throttle_key="test-login-throttle-key-32-bytes-long",
         generated_answers_enabled=True,
+        generated_answers_provider="openai",
         openai_api_key="test-openai-key-not-a-production-secret",
     )
     with pytest.raises(ConfigurationError, match="distributed rate limiting and observability"):
@@ -114,17 +115,20 @@ def test_gateway_settings_are_appended_after_existing_positional_fields() -> Non
     assert names.index("openai_base_url") > names.index("generated_answer_window_seconds")
     assert names.index("openai_gateway_allowed_origins") > names.index("generated_answer_window_seconds")
     assert names.index("openai_gateway_api_key") > names.index("generated_answer_window_seconds")
+    assert names.index("generated_answers_provider") > names.index("generated_answer_window_seconds")
 
 
 def test_gateway_credentials_cannot_fall_back_to_the_public_openai_endpoint(settings: Settings) -> None:
     gateway_url = "https://gateway.internal.example:8443/v1"
+    gateway_origin = ("https://gateway.internal.example:8443",)
+
     with pytest.raises(ConfigurationError, match="OPENAI_GATEWAY_API_KEY"):
         replace(
             settings,
             generated_answers_enabled=True,
+            generated_answers_provider="gateway",
             openai_base_url=gateway_url,
-            openai_gateway_allowed_origins=("https://gateway.internal.example:8443",),
-            openai_api_key="public-openai-key-not-a-gateway-token",
+            openai_gateway_allowed_origins=gateway_origin,
         ).validate()
 
     with pytest.raises(ConfigurationError, match="OPENAI_BASE_URL"):
@@ -133,16 +137,24 @@ def test_gateway_credentials_cannot_fall_back_to_the_public_openai_endpoint(sett
     gateway_settings = replace(
         settings,
         generated_answers_enabled=True,
+        generated_answers_provider="gateway",
         openai_base_url=gateway_url,
-        openai_gateway_allowed_origins=("https://gateway.internal.example:8443",),
+        openai_gateway_allowed_origins=gateway_origin,
         openai_gateway_api_key="gateway-token-not-a-production-secret",
     )
     gateway_settings.validate()
     assert gateway_settings.generation_api_key == "gateway-token-not-a-production-secret"
 
+    with pytest.raises(ConfigurationError, match="OPENAI_API_KEY"):
+        replace(gateway_settings, openai_api_key="public-openai-key-not-a-gateway-token").validate()
 
-def test_default_openai_credentials_are_selected_only_without_gateway_url(settings: Settings) -> None:
-    default_settings = replace(settings, openai_api_key="openai-key-not-a-gateway-token")
+
+def test_default_openai_credentials_are_selected_only_with_explicit_openai_provider(settings: Settings) -> None:
+    default_settings = replace(
+        settings,
+        generated_answers_provider="openai",
+        openai_api_key="openai-key-not-a-gateway-token",
+    )
     assert default_settings.generation_api_key == "openai-key-not-a-gateway-token"
-    with pytest.raises(ConfigurationError, match="OPENAI_GATEWAY_API_KEY"):
+    with pytest.raises(ConfigurationError, match="OPENAI_BASE_URL"):
         replace(default_settings, openai_base_url="https://gateway.internal.example/v1").validate()
