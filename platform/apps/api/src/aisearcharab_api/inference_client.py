@@ -3,9 +3,6 @@ from __future__ import annotations
 from collections.abc import Iterator
 
 import httpx2
-from openai import DefaultHttpx2Client, OpenAI
-
-from aisearcharab_api.config import ConfigurationError, Settings
 
 
 class ResponseTooLargeError(httpx2.TransportError):
@@ -80,32 +77,3 @@ class ResponseSizeLimitTransport(httpx2.BaseTransport):
     def close(self) -> None:
         self._transport.close()
 
-
-def build_inference_client(settings: Settings) -> OpenAI:
-    """Create a provider-bound client; raw credentials never enter answer-generation code."""
-    if settings.generated_answers_provider == "gateway":
-        if not settings.openai_base_url or not settings.openai_gateway_api_key:
-            raise ConfigurationError("gateway provider requires OPENAI_BASE_URL and OPENAI_GATEWAY_API_KEY")
-        api_key = settings.openai_gateway_api_key
-        base_url = settings.openai_base_url
-    elif settings.generated_answers_provider == "openai":
-        if not settings.openai_api_key or settings.openai_base_url is not None:
-            raise ConfigurationError("OpenAI provider requires OPENAI_API_KEY and no custom base URL")
-        api_key = settings.openai_api_key
-        base_url = "https://api.openai.com/v1"
-    else:
-        raise ConfigurationError("generated-answer provider must be explicitly selected")
-
-    http_client = DefaultHttpx2Client(
-        transport=ResponseSizeLimitTransport(settings.openai_max_response_bytes),
-        follow_redirects=False,
-        headers={"Accept-Encoding": "identity"},
-        trust_env=False,
-    )
-    return OpenAI(
-        api_key=api_key,
-        base_url=base_url,
-        timeout=settings.openai_timeout_seconds,
-        max_retries=settings.openai_max_retries,
-        http_client=http_client,
-    )
