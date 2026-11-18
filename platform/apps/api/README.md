@@ -75,8 +75,10 @@ POST /v1/answers/grounded
 
 ```bash
 GENERATED_ANSWERS_ENABLED=true
-OPENAI_API_KEY=<secret-manager-value>
-OPENAI_MODEL=gpt-5.6-terra
+OPENAI_GATEWAY_API_KEY=<gateway-secret-manager-value>
+OPENAI_BASE_URL=https://freellmapi.internal:3443/v1
+OPENAI_GATEWAY_ALLOWED_ORIGINS=https://freellmapi.internal:3443
+OPENAI_MODEL=<verified-responses-compatible-model>
 GENERATED_ANSWER_MAX_REQUESTS=20
 GENERATED_ANSWER_WINDOW_SECONDS=3600
 ```
