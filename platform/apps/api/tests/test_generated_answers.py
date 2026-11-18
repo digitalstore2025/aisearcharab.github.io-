@@ -17,6 +17,8 @@ from aisearcharab_api.generated_answers import (
     EvidenceItem,
     GatewayProviderConfig,
     OpenAIProviderConfig,
+    GatewayProviderConfig,
+    OpenAIProviderConfig,
     ModelAnswerDraft,
     UpstreamInvalidResponseError,
     _MAX_MODEL_INPUT_CHARS,
@@ -28,6 +30,7 @@ from aisearcharab_api.generated_answers import (
     generate_grounded_answer,
     retrieve_evidence,
 )
+from aisearcharab_api.inference_client import ResponseSizeLimitTransport
 from aisearcharab_api.models import Claim, ContentItem
 from aisearcharab_api.repository import list_indexed_content
 from conftest import csrf_from_client
@@ -474,7 +477,8 @@ def test_configured_gateway_base_url_is_passed_to_openai_sdk(monkeypatch: pytest
     assert transport_options["follow_redirects"] is False
     assert transport_options["headers"] == {"Accept-Encoding": "identity"}
     assert transport_options["trust_env"] is False
-    assert "transport" in transport_options
+    assert isinstance(transport_options["transport"], ResponseSizeLimitTransport)
+    assert transport_options["transport"]._max_response_bytes == 1_048_576
 
 
 def test_grounded_endpoint_uses_configured_gateway_base_url(
@@ -551,24 +555,6 @@ def test_default_openai_endpoint_is_explicit_when_gateway_is_unset(
     assert captured["base_url"] == "https://api.openai.com/v1"
     assert transport_options == {"follow_redirects": False}
 
-
-def test_gateway_provider_cannot_fall_back_to_public_openai_without_base_url() -> None:
-    base_url_values = (None, "", "   ")
-    for index, base_url in enumerate(base_url_values):
-        with pytest.raises(ValueError, match="non-empty explicit base_url"):
-            generate_grounded_answer(
-                "GPT-5",
-                _evidence(),
-                request_id=f"req-gateway-missing-url-{index}",
-                provider_config=GatewayProviderConfig(
-                    api_key="gateway-token-not-a-production-secret",
-                    base_url=base_url,
-                ),
-                model="gpt-5.6-terra",
-                timeout_seconds=20,
-                max_retries=2,
-                max_output_tokens=1200,
-            )
 
 
 def test_provider_configs_reject_empty_credentials_and_gateway_destinations() -> None:
