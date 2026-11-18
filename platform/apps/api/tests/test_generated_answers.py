@@ -506,3 +506,36 @@ def test_grounded_endpoint_uses_configured_gateway_base_url(
     assert response.status_code == 200, response.text
     assert captured["base_url"] == gateway_url
     assert captured["api_key"] == "gateway-token-not-a-production-secret"
+
+
+def test_default_openai_endpoint_is_explicit_when_gateway_is_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    transport_options: dict[str, object] = {}
+    fake = FakeOpenAI(_model_json())
+
+    def fake_factory(**kwargs: object) -> FakeOpenAI:
+        captured.update(kwargs)
+        return fake
+
+    def fake_http_client_factory(**kwargs: object) -> object:
+        transport_options.update(kwargs)
+        return object()
+
+    monkeypatch.setattr("aisearcharab_api.generated_answers.DefaultHttpx2Client", fake_http_client_factory)
+    monkeypatch.setattr("aisearcharab_api.generated_answers.OpenAI", fake_factory)
+    result = generate_grounded_answer(
+        "GPT-5",
+        _evidence(),
+        request_id="req-default-openai-endpoint",
+        api_key="test-openai-key-not-a-production-secret",
+        model="gpt-5.6-terra",
+        timeout_seconds=20,
+        max_retries=2,
+        max_output_tokens=1200,
+    )
+
+    assert result.generated is True
+    assert captured["base_url"] == "https://api.openai.com/v1"
+    assert transport_options == {"follow_redirects": False}
