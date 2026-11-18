@@ -173,6 +173,12 @@ class Settings:
     # Appended to preserve the positional order of all pre-existing Settings fields.
     openai_base_url: str | None = None
     openai_gateway_allowed_origins: tuple[str, ...] = ()
+    openai_gateway_api_key: str | None = None
+
+    @property
+    def generation_api_key(self) -> str | None:
+        """Select credentials strictly by endpoint; never reuse a gateway token for OpenAI."""
+        return self.openai_gateway_api_key if self.openai_base_url is not None else self.openai_api_key
 
     @property
     def is_production(self) -> bool:
@@ -316,8 +322,12 @@ class Settings:
             raise ConfigurationError("GENERATED_ANSWER_WINDOW_SECONDS must be between 60 and 86400")
         if not 2 <= len(self.openai_model.strip()) <= 100:
             raise ConfigurationError("OPENAI_MODEL must contain between 2 and 100 characters")
-        if self.generated_answers_enabled and not self.openai_api_key:
-            raise ConfigurationError("OPENAI_API_KEY is required when generated answers are enabled")
+        if self.openai_gateway_api_key and self.openai_base_url is None:
+            raise ConfigurationError("OPENAI_GATEWAY_API_KEY requires OPENAI_BASE_URL")
+        if self.generated_answers_enabled and self.openai_base_url is not None and not self.openai_gateway_api_key:
+            raise ConfigurationError("OPENAI_GATEWAY_API_KEY is required when a gateway URL is configured")
+        if self.generated_answers_enabled and self.openai_base_url is None and not self.openai_api_key:
+            raise ConfigurationError("OPENAI_API_KEY is required when generated answers use the default OpenAI endpoint")
         if secure_runtime:
             if not self.require_mfa_for_privileged:
                 raise ConfigurationError("REQUIRE_MFA_FOR_PRIVILEGED must be enabled in staging and production")
@@ -375,6 +385,7 @@ def get_settings() -> Settings:
         openai_api_key=os.getenv("OPENAI_API_KEY") or None,
         openai_base_url=os.getenv("OPENAI_BASE_URL", "").strip() or None,
         openai_gateway_allowed_origins=_csv(os.getenv("OPENAI_GATEWAY_ALLOWED_ORIGINS", "")),
+        openai_gateway_api_key=os.getenv("OPENAI_GATEWAY_API_KEY") or None,
         openai_model=os.getenv("OPENAI_MODEL", "gpt-5.6-terra").strip(),        openai_timeout_seconds=_int("OPENAI_TIMEOUT_SECONDS", os.getenv("OPENAI_TIMEOUT_SECONDS", "20")),
         openai_max_retries=_int("OPENAI_MAX_RETRIES", os.getenv("OPENAI_MAX_RETRIES", "2")),
         openai_max_output_tokens=_int("OPENAI_MAX_OUTPUT_TOKENS", os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "1200")),
