@@ -35,6 +35,7 @@ The API accepts these environment variables:
 - `OPENAI_GATEWAY_API_KEY`: separate FreeLLMAPI bearer token. Required when `OPENAI_BASE_URL` is configured and generated answers are enabled. It is rejected if the gateway URL is absent and is never sent to the public OpenAI endpoint.
 - `OPENAI_BASE_URL`: optional absolute API root ending in `/v1`. Omit it to use the OpenAI SDK default endpoint.
 - `OPENAI_GATEWAY_ALLOWED_ORIGINS`: exact comma-separated scheme/host/port allowlist; required for non-loopback gateways in development and for all configured gateways in staging/production. Wildcards, paths, and unapproved ports are rejected. Plain HTTP is permitted only for loopback hosts in local development.
+- `OPENAI_MAX_RESPONSE_BYTES`: maximum uncompressed provider response body; defaults to 1 MiB and is enforced while streaming, before the SDK buffers the body.
 - `OPENAI_MODEL`: model alias accepted by the gateway catalog.
 - `GENERATED_ANSWERS_PROVIDER`: explicit provider selector: `disabled` (default), `openai`, or `gateway`. Enabling generation requires selecting a provider.
 - `GENERATED_ANSWERS_ENABLED`: remains false by default.
