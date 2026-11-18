@@ -113,6 +113,7 @@ def test_gateway_settings_are_appended_after_existing_positional_fields() -> Non
     names = [field.name for field in fields(Settings)]
     assert names.index("openai_base_url") > names.index("generated_answer_window_seconds")
     assert names.index("openai_gateway_allowed_origins") > names.index("generated_answer_window_seconds")
+    assert names.index("openai_gateway_api_key") > names.index("generated_answer_window_seconds")
 
 
 def test_gateway_credentials_cannot_fall_back_to_the_public_openai_endpoint(settings: Settings) -> None:
