@@ -54,6 +54,15 @@ def _valid_gateway_host(value: str) -> bool:
     return _valid_host(value) and "*" not in value and value == value.strip()
 
 
+def _gateway_host_is_loopback(value: str) -> bool:
+    if value.casefold().rstrip(".") == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(value).is_loopback
+    except ValueError:
+        return False
+
+
 def _valid_proxy_cidr(value: str) -> bool:
     try:
         network = ipaddress.ip_network(value, strict=False)
@@ -219,6 +228,8 @@ class Settings:
             if gateway_port is not None and not 1 <= gateway_port <= 65_535:
                 raise ConfigurationError("OPENAI_BASE_URL port must be between 1 and 65535")
             allowed_schemes = {"https"} if secure_runtime else {"http", "https"}
+            if parsed_base_url.scheme == "http" and not _gateway_host_is_loopback(parsed_base_url.hostname or ""):
+                raise ConfigurationError("HTTP OPENAI_BASE_URL is allowed only for loopback hosts; use HTTPS otherwise")
             if (
                 parsed_base_url.scheme not in allowed_schemes
                 or not parsed_base_url.hostname
