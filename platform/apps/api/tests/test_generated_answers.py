@@ -451,6 +451,11 @@ def test_configured_gateway_base_url_is_passed_to_openai_sdk(monkeypatch: pytest
         transport_options.update(kwargs)
         return object()
 
+    response_limit_values: list[int] = []
+    monkeypatch.setattr(
+        "aisearcharab_api.generated_answers.ResponseSizeLimitTransport",
+        lambda limit: response_limit_values.append(limit) or ResponseSizeLimitTransport(limit),
+    )
     monkeypatch.setattr("aisearcharab_api.generated_answers.DefaultHttpx2Client", fake_http_client_factory)
     monkeypatch.setattr("aisearcharab_api.generated_answers.OpenAI", fake_factory)
     result = generate_grounded_answer(
@@ -480,6 +485,7 @@ def test_configured_gateway_base_url_is_passed_to_openai_sdk(monkeypatch: pytest
     assert transport_options["trust_env"] is False
     assert isinstance(transport_options["transport"], ResponseSizeLimitTransport)
     assert transport_options["transport"]._max_response_bytes == 1_048_576
+    assert response_limit_values == [1_048_576]
 
 
 def test_grounded_endpoint_uses_configured_gateway_base_url(
@@ -502,6 +508,18 @@ def test_grounded_endpoint_uses_configured_gateway_base_url(
         captured.update(kwargs)
         return fake
 
+    transport_options: dict[str, object] = {}
+    response_limit_values: list[int] = []
+
+    def fake_http_client_factory(**kwargs: object) -> object:
+        transport_options.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(
+        "aisearcharab_api.generated_answers.ResponseSizeLimitTransport",
+        lambda limit: response_limit_values.append(limit) or ResponseSizeLimitTransport(limit),
+    )
+    monkeypatch.setattr("aisearcharab_api.generated_answers.DefaultHttpx2Client", fake_http_client_factory)
     monkeypatch.setattr("aisearcharab_api.generated_answers.OpenAI", fake_factory)
     monkeypatch.setattr(
         "aisearcharab_api.routes_generated_answers.retrieve_evidence",
@@ -522,6 +540,11 @@ def test_grounded_endpoint_uses_configured_gateway_base_url(
     assert response.status_code == 200, response.text
     assert captured["base_url"] == gateway_url
     assert captured["api_key"] == "gateway-token-not-a-production-secret"
+    assert transport_options["follow_redirects"] is False
+    assert transport_options["headers"] == {"Accept-Encoding": "identity"}
+    assert transport_options["trust_env"] is False
+    assert isinstance(transport_options["transport"], ResponseSizeLimitTransport)
+    assert response_limit_values == [1_048_576]
 
 
 def test_default_openai_endpoint_is_explicit_when_gateway_is_unset(
@@ -554,7 +577,11 @@ def test_default_openai_endpoint_is_explicit_when_gateway_is_unset(
 
     assert result.generated is True
     assert captured["base_url"] == "https://api.openai.com/v1"
-    assert transport_options == {"follow_redirects": False}
+    assert transport_options["follow_redirects"] is False
+    assert transport_options["headers"] == {"Accept-Encoding": "identity"}
+    assert transport_options["trust_env"] is False
+    assert isinstance(transport_options["transport"], ResponseSizeLimitTransport)
+    assert response_limit_values == [1_048_576]
 
 
 
