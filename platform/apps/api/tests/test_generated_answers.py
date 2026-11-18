@@ -426,3 +426,33 @@ def test_source_metadata_is_bounded_and_never_sent_to_model() -> None:
 
     payload = json.loads(_input_payload("GPT-5", _evidence()))
     assert "source_urls" not in payload["evidence"][0]
+
+
+def test_configured_gateway_base_url_is_passed_to_openai_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+    fake = FakeOpenAI(_model_json())
+
+    def fake_factory(**kwargs: object) -> FakeOpenAI:
+        captured.update(kwargs)
+        return fake
+
+    monkeypatch.setattr("aisearcharab_api.generated_answers.OpenAI", fake_factory)
+    result = generate_grounded_answer(
+        "GPT-5",
+        _evidence(),
+        request_id="req-private-gateway",
+        api_key="gateway-token-not-a-production-secret",
+        model="gpt-5.6-terra",
+        timeout_seconds=20,
+        max_retries=2,
+        max_output_tokens=1200,
+        base_url="https://llm-gateway.internal.example/v1",
+    )
+
+    assert result.generated is True
+    assert captured == {
+        "api_key": "gateway-token-not-a-production-secret",
+        "timeout": 20,
+        "max_retries": 2,
+        "base_url": "https://llm-gateway.internal.example/v1",
+    }
