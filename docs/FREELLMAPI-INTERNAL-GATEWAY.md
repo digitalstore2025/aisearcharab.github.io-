@@ -33,7 +33,7 @@ The API accepts these environment variables:
 
 - `OPENAI_API_KEY`: OpenAI API key or the FreeLLMAPI unified bearer token. Secret only; backend runtime only.
 - `OPENAI_BASE_URL`: optional absolute API root ending in `/v1`. Omit it to use the OpenAI SDK default endpoint.
-- `OPENAI_ALLOWED_HOSTS`: exact comma-separated host allowlist; required when a gateway URL is configured in staging/production. Wildcards are rejected. Plain HTTP is permitted only for loopback hosts in local development.
+- `OPENAI_GATEWAY_ALLOWED_ORIGINS`: exact comma-separated scheme/host/port allowlist; required for non-loopback gateways in development and for all configured gateways in staging/production. Wildcards, paths, and unapproved ports are rejected. Plain HTTP is permitted only for loopback hosts in local development.
 - `OPENAI_MODEL`: model alias accepted by the gateway catalog.
 - `GENERATED_ANSWERS_ENABLED`: remains false by default.
 
@@ -42,7 +42,12 @@ Example for local development only:
 ```dotenv
 GENERATED_ANSWERS_ENABLED=true
 OPENAI_API_KEY=<secret-manager-value>
+# Only when the API process runs directly on the host:
 OPENAI_BASE_URL=http://127.0.0.1:3001/v1
+# When the API runs in Compose, 127.0.0.1 refers to the API container itself.
+# Use the gateway service DNS name and a trusted TLS certificate instead:
+OPENAI_BASE_URL=https://freellmapi:3443/v1
+OPENAI_GATEWAY_ALLOWED_ORIGINS=https://freellmapi:3443
 OPENAI_MODEL=<verified-responses-compatible-model>
 ```
 
@@ -56,8 +61,8 @@ FreeLLMAPI is a single-user gateway, not a multi-tenant service. Its unified tok
 
 Required deployment controls:
 
-1. Place FreeLLMAPI on a private network. Permit inbound traffic only from the FastAPI service.
-2. In staging/production, set `OPENAI_ALLOWED_HOSTS` to the exact private DNS hostname used by `OPENAI_BASE_URL`; wildcard entries are rejected. Enforce outbound network policy so the API can reach only the approved gateway and cannot send the shared bearer token or evidence to arbitrary public hosts. The application allowlist is not a substitute for firewall/egress enforcement.
+1. Place FreeLLMAPI on a private network. Permit inbound traffic only from the FastAPI service. If both run in Compose, use the gateway service DNS name, not `127.0.0.1`, and configure TLS whose certificate SAN matches that DNS name.
+2. In staging/production, set `OPENAI_GATEWAY_ALLOWED_ORIGINS` to the exact HTTPS origin (scheme, DNS hostname, and port) used by `OPENAI_BASE_URL`; wildcard entries and port mismatches are rejected. Enforce outbound network policy so the API can reach only the approved gateway and cannot send the shared bearer token or evidence to arbitrary public hosts. The application origin allowlist is not a substitute for firewall/egress enforcement.
 3. The OpenAI SDK transport is configured with redirects disabled, preventing a trusted gateway from redirecting credential-bearing requests to another origin.
 4. Plain HTTP is accepted only for loopback addresses (`localhost`, `127.0.0.1`, `::1`) during local development; all non-loopback destinations require HTTPS.
 5. Do not publish the gateway port to the public Internet.
