@@ -89,7 +89,7 @@ def test_secure_runtime_requires_an_exact_gateway_origin_allowlist(settings: Set
 
 
 def test_gateway_origin_allowlist_rejects_wildcards_and_paths(settings: Settings) -> None:
-    for origin in ("https://*.example.com", "https://gateway.example/v1", "https://gateway.example:invalid", "https://gateway.example:"):
+    for origin in ("https://*.example.com", "https://gateway.example/v1", "https://gateway.example:invalid", "https://gateway.example:", "https://gateway.example:0", "https://gateway.example:65536"):
         with pytest.raises(ConfigurationError, match="OPENAI_GATEWAY_ALLOWED_ORIGINS"):
             replace(settings, openai_gateway_allowed_origins=(origin,)).validate()
 
@@ -143,7 +143,8 @@ def test_gateway_credentials_cannot_fall_back_to_the_public_openai_endpoint(sett
         openai_gateway_api_key="gateway-token-not-a-production-secret",
     )
     gateway_settings.validate()
-    assert gateway_settings.generation_api_key == "gateway-token-not-a-production-secret"
+    assert gateway_settings.generated_answers_provider == "gateway"
+    assert gateway_settings.openai_gateway_api_key == "gateway-token-not-a-production-secret"
 
     with pytest.raises(ConfigurationError, match="OPENAI_API_KEY"):
         replace(gateway_settings, openai_api_key="public-openai-key-not-a-gateway-token").validate()
@@ -151,13 +152,14 @@ def test_gateway_credentials_cannot_fall_back_to_the_public_openai_endpoint(sett
 
 def test_default_openai_credentials_are_selected_only_with_explicit_openai_provider(settings: Settings) -> None:
     disabled_settings = replace(settings, openai_api_key="must-not-be-used-implicitly")
-    assert disabled_settings.generation_api_key is None
+    assert disabled_settings.generated_answers_provider == "disabled"
     default_settings = replace(
         settings,
         generated_answers_provider="openai",
         openai_api_key="openai-key-not-a-gateway-token",
     )
-    assert default_settings.generation_api_key == "openai-key-not-a-gateway-token"
+    assert default_settings.generated_answers_provider == "openai"
+    assert default_settings.openai_api_key == "openai-key-not-a-gateway-token"
     with pytest.raises(ConfigurationError, match="OPENAI_BASE_URL"):
         replace(
             default_settings,
