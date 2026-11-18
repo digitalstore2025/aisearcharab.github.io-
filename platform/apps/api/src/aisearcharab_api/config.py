@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from urllib.parse import unquote, urlparse
 
@@ -135,12 +135,12 @@ def _database_url_uses_placeholder_credential(value: str) -> bool:
 @dataclass(frozen=True, slots=True)
 class Settings:
     environment: str
-    database_url: str
+    database_url: str = field(repr=False)
     allowed_origins: tuple[str, ...]
     api_prefix: str
     max_search_limit: int
     log_queries: bool
-    query_hash_key: str | None = None
+    query_hash_key: str | None = field(default=None, repr=False)
     allowed_hosts: tuple[str, ...] = ("localhost", "127.0.0.1", "testserver")
     max_request_body_bytes: int = 524_288
     search_candidate_limit: int = 300
@@ -149,7 +149,7 @@ class Settings:
     step_up_ttl_minutes: int = 10
     login_max_failures: int = 5
     login_lock_minutes: int = 15
-    login_throttle_key: str | None = None
+    login_throttle_key: str | None = field(default=None, repr=False)
     login_throttle_max_failures: int = 8
     login_throttle_window_seconds: int = 300
     login_throttle_block_seconds: int = 300
@@ -157,11 +157,11 @@ class Settings:
     password_min_length: int = 14
     enforce_separation_of_duties: bool = False
     require_mfa_for_privileged: bool = False
-    mfa_encryption_key: str | None = None
+    mfa_encryption_key: str | None = field(default=None, repr=False)
     mfa_enrollment_ttl_minutes: int = 10
     mfa_issuer: str = "AISearcharab.com"
     generated_answers_enabled: bool = False
-    openai_api_key: str | None = None
+    openai_api_key: str | None = field(default=None, repr=False)
     openai_model: str = "gpt-5.6-terra"
     openai_timeout_seconds: int = 20
     openai_max_retries: int = 2
@@ -173,7 +173,7 @@ class Settings:
     # Appended to preserve the positional order of all pre-existing Settings fields.
     openai_base_url: str | None = None
     openai_gateway_allowed_origins: tuple[str, ...] = ()
-    openai_gateway_api_key: str | None = None
+    openai_gateway_api_key: str | None = field(default=None, repr=False)
     generated_answers_provider: str = "disabled"
 
     @property
