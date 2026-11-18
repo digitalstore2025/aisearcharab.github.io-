@@ -434,8 +434,8 @@ def generate_grounded_answer(
         raise NoEvidenceError("no indexed evidence with approved claims matched the query")
     if provider not in {"openai", "gateway"}:
         raise ValueError("provider must be explicitly set to openai or gateway")
-    if provider == "gateway" and base_url is None:
-        raise ValueError("gateway provider requires an explicit base_url")
+    if provider == "gateway" and (base_url is None or not base_url.strip()):
+        raise ValueError("gateway provider requires a non-empty explicit base_url")
     if provider == "openai" and base_url is not None:
         raise ValueError("base_url must be unset when using the openai provider")
 
