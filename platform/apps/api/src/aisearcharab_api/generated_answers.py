@@ -418,12 +418,23 @@ def generate_grounded_answer(
     timeout_seconds: int,
     max_retries: int,
     max_output_tokens: int,
+    base_url: str | None = None,
     client: OpenAI | None = None,
 ) -> GroundedAnswerResponse:
     if not evidence:
         raise NoEvidenceError("no indexed evidence with approved claims matched the query")
 
-    openai_client = client or OpenAI(api_key=api_key, timeout=timeout_seconds, max_retries=max_retries)
+    if client is not None:
+        openai_client = client
+    else:
+        client_options: dict[str, object] = {
+            "api_key": api_key,
+            "timeout": timeout_seconds,
+            "max_retries": max_retries,
+        }
+        if base_url is not None:
+            client_options["base_url"] = base_url
+        openai_client = OpenAI(**client_options)
     try:
         response = openai_client.responses.create(
             model=model,
