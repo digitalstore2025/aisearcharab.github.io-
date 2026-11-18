@@ -115,6 +115,7 @@ class Settings:
     mfa_issuer: str = "AISearcharab.com"
     generated_answers_enabled: bool = False
     openai_api_key: str | None = None
+    openai_base_url: str | None = None
     openai_model: str = "gpt-5.6-terra"
     openai_timeout_seconds: int = 20
     openai_max_retries: int = 2
@@ -201,6 +202,28 @@ class Settings:
             )
         if self.log_queries and (self.query_hash_key is None or len(self.query_hash_key.encode("utf-8")) < 32):
             raise ConfigurationError("QUERY_HASH_KEY must contain at least 32 bytes when query logging is enabled")
+        if self.openai_base_url is not None:
+            parsed_base_url = urlparse(self.openai_base_url)
+            try:
+                parsed_base_url.port
+            except ValueError as exc:
+                raise ConfigurationError("OPENAI_BASE_URL must contain a valid port") from exc
+            allowed_schemes = {"https"} if secure_runtime else {"http", "https"}
+            if (
+                parsed_base_url.scheme not in allowed_schemes
+                or not parsed_base_url.hostname
+                or parsed_base_url.username
+                or parsed_base_url.password
+                or parsed_base_url.path.rstrip("/") != "/v1"
+                or parsed_base_url.params
+                or parsed_base_url.query
+                or parsed_base_url.fragment
+                or any(ord(character) < 32 or character.isspace() for character in self.openai_base_url)
+            ):
+                raise ConfigurationError(
+                    "OPENAI_BASE_URL must be an absolute /v1 URL without credentials, query, or fragment; "
+                    "staging and production require HTTPS"
+                )
         if not 5 <= self.openai_timeout_seconds <= 120:
             raise ConfigurationError("OPENAI_TIMEOUT_SECONDS must be between 5 and 120")
         if not 0 <= self.openai_max_retries <= 5:
@@ -274,6 +297,7 @@ def get_settings() -> Settings:
         mfa_issuer=os.getenv("MFA_ISSUER", "AISearcharab.com").strip(),
         generated_answers_enabled=_bool(os.getenv("GENERATED_ANSWERS_ENABLED", "false")),
         openai_api_key=os.getenv("OPENAI_API_KEY") or None,
+        openai_base_url=os.getenv("OPENAI_BASE_URL", "").strip() or None,
         openai_model=os.getenv("OPENAI_MODEL", "gpt-5.6-terra").strip(),
         openai_timeout_seconds=_int("OPENAI_TIMEOUT_SECONDS", os.getenv("OPENAI_TIMEOUT_SECONDS", "20")),
         openai_max_retries=_int("OPENAI_MAX_RETRIES", os.getenv("OPENAI_MAX_RETRIES", "2")),
