@@ -476,6 +476,7 @@ def test_grounded_endpoint_uses_configured_gateway_base_url(
     client.app.state.settings = replace(
         client.app.state.settings,
         generated_answers_enabled=True,
+        openai_api_key="public-openai-key-must-not-be-used-for-gateway",
         openai_gateway_api_key="gateway-token-not-a-production-secret",
         openai_base_url=gateway_url,
     )
@@ -506,6 +507,7 @@ def test_grounded_endpoint_uses_configured_gateway_base_url(
     assert response.status_code == 200, response.text
     assert captured["base_url"] == gateway_url
     assert captured["api_key"] == "gateway-token-not-a-production-secret"
+    assert captured["api_key"] != client.app.state.settings.openai_api_key
 
 
 def test_default_openai_endpoint_is_explicit_when_gateway_is_unset(
