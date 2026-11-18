@@ -120,12 +120,15 @@ def test_generated_answers_are_disabled_and_require_authentication_and_csrf(
 
 
 def test_feature_flag_fails_closed_without_api_key(settings: Settings) -> None:
-    with pytest.raises(ConfigurationError, match="OPENAI_API_KEY"):
+    with pytest.raises(ConfigurationError, match="GENERATED_ANSWERS_PROVIDER"):
         replace(settings, generated_answers_enabled=True).validate()
+    with pytest.raises(ConfigurationError, match="OPENAI_API_KEY"):
+        replace(settings, generated_answers_enabled=True, generated_answers_provider="openai").validate()
 
     replace(
         settings,
         generated_answers_enabled=True,
+        generated_answers_provider="openai",
         openai_api_key="test-key-not-a-production-secret",
     ).validate()
 
@@ -476,6 +479,7 @@ def test_grounded_endpoint_uses_configured_gateway_base_url(
     client.app.state.settings = replace(
         client.app.state.settings,
         generated_answers_enabled=True,
+        generated_answers_provider="gateway",
         openai_api_key="public-openai-key-must-not-be-used-for-gateway",
         openai_gateway_api_key="gateway-token-not-a-production-secret",
         openai_base_url=gateway_url,
