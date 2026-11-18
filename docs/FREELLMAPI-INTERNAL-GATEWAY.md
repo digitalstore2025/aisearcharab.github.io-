@@ -36,12 +36,14 @@ The API accepts these environment variables:
 - `OPENAI_BASE_URL`: optional absolute API root ending in `/v1`. Omit it to use the OpenAI SDK default endpoint.
 - `OPENAI_GATEWAY_ALLOWED_ORIGINS`: exact comma-separated scheme/host/port allowlist; required for non-loopback gateways in development and for all configured gateways in staging/production. Wildcards, paths, and unapproved ports are rejected. Plain HTTP is permitted only for loopback hosts in local development.
 - `OPENAI_MODEL`: model alias accepted by the gateway catalog.
+- `GENERATED_ANSWERS_PROVIDER`: explicit provider selector: `disabled` (default), `openai`, or `gateway`. Enabling generation requires selecting a provider.
 - `GENERATED_ANSWERS_ENABLED`: remains false by default.
 
 Example for a local API process running directly on the host:
 
 ```dotenv
 GENERATED_ANSWERS_ENABLED=true
+GENERATED_ANSWERS_PROVIDER=gateway
 OPENAI_GATEWAY_API_KEY=<gateway-secret-manager-value>
 OPENAI_BASE_URL=http://127.0.0.1:3001/v1
 OPENAI_MODEL=<verified-responses-compatible-model>
