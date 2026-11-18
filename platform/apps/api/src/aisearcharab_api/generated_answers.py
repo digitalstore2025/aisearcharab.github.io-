@@ -461,6 +461,7 @@ def generate_grounded_answer(
     if not evidence:
         raise NoEvidenceError("no indexed evidence with approved claims matched the query")
 
+    owns_client = client is None
     if client is not None:
         openai_client = client
     else:
@@ -507,6 +508,9 @@ def generate_grounded_answer(
         raise UpstreamUnavailableError("OpenAI is temporarily unavailable") from exc
     except APIError as exc:
         raise UpstreamUnavailableError("OpenAI request failed") from exc
+    finally:
+        if owns_client:
+            openai_client.close()
 
     if getattr(response, "status", None) != "completed":
         raise UpstreamInvalidResponseError("OpenAI response did not complete")
