@@ -228,8 +228,6 @@ class Settings:
             if gateway_port is not None and not 1 <= gateway_port <= 65_535:
                 raise ConfigurationError("OPENAI_BASE_URL port must be between 1 and 65535")
             allowed_schemes = {"https"} if secure_runtime else {"http", "https"}
-            if parsed_base_url.scheme == "http" and not _gateway_host_is_loopback(parsed_base_url.hostname or ""):
-                raise ConfigurationError("HTTP OPENAI_BASE_URL is allowed only for loopback hosts; use HTTPS otherwise")
             if (
                 parsed_base_url.scheme not in allowed_schemes
                 or not parsed_base_url.hostname
@@ -245,6 +243,8 @@ class Settings:
                     "OPENAI_BASE_URL must be an absolute /v1 URL without credentials, query, or fragment; "
                     "staging and production require HTTPS"
                 )
+            if parsed_base_url.scheme == "http" and not _gateway_host_is_loopback(parsed_base_url.hostname or ""):
+                raise ConfigurationError("HTTP OPENAI_BASE_URL is allowed only for loopback hosts; use HTTPS otherwise")
             if secure_runtime:
                 gateway_host = parsed_base_url.hostname.rstrip(".").casefold()
                 allowed_gateway_hosts = {host.rstrip(".").casefold() for host in self.openai_allowed_hosts}
