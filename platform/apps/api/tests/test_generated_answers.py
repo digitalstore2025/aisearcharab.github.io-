@@ -456,3 +456,44 @@ def test_configured_gateway_base_url_is_passed_to_openai_sdk(monkeypatch: pytest
         "max_retries": 2,
         "base_url": "https://llm-gateway.internal.example/v1",
     }
+
+
+def test_grounded_endpoint_uses_configured_gateway_base_url(
+    client: TestClient,
+    owner_credentials: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gateway_url = "https://llm-gateway.internal.example/v1"
+    client.app.state.settings = replace(
+        client.app.state.settings,
+        generated_answers_enabled=True,
+        openai_api_key="gateway-token-not-a-production-secret",
+        openai_base_url=gateway_url,
+    )
+    captured: dict[str, object] = {}
+    fake = FakeOpenAI(_model_json())
+
+    def fake_factory(**kwargs: object) -> FakeOpenAI:
+        captured.update(kwargs)
+        return fake
+
+    monkeypatch.setattr("aisearcharab_api.generated_answers.OpenAI", fake_factory)
+    monkeypatch.setattr(
+        "aisearcharab_api.routes_generated_answers.retrieve_evidence",
+        lambda *args, **kwargs: _evidence(),
+    )
+    monkeypatch.setattr(
+        "aisearcharab_api.routes_generated_answers.revalidate_selected_evidence",
+        lambda *args, **kwargs: True,
+    )
+
+    assert client.post("/v1/auth/login", json=owner_credentials).status_code == 200
+    response = client.post(
+        "/v1/answers/grounded",
+        headers={"X-CSRF-Token": csrf_from_client(client)},
+        json={"query": "GPT-5"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert captured["base_url"] == gateway_url
+    assert captured["api_key"] == "gateway-token-not-a-production-secret"
