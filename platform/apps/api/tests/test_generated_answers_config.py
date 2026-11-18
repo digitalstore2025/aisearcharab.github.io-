@@ -36,6 +36,7 @@ def test_openai_base_url_accepts_an_explicit_v1_gateway_in_development(settings:
         "https://gateway.example/v1#fragment",
         "https://gateway.example:invalid/v1",
         "https://gateway.example:65536/v1",
+        "http://gateway.internal.example/v1",
     ],
 )
 def test_openai_base_url_rejects_ambiguous_or_credential_bearing_urls(
@@ -84,3 +85,10 @@ def test_secure_runtime_requires_an_exact_gateway_host_allowlist(settings: Setti
 def test_gateway_host_allowlist_rejects_wildcards(settings: Settings) -> None:
     with pytest.raises(ConfigurationError, match="OPENAI_ALLOWED_HOSTS"):
         replace(settings, openai_allowed_hosts=("*.example.com",)).validate()
+
+
+def test_development_http_gateway_is_limited_to_loopback(settings: Settings) -> None:
+    replace(settings, openai_base_url="http://localhost:3001/v1").validate()
+    replace(settings, openai_base_url="http://[::1]:3001/v1").validate()
+    with pytest.raises(ConfigurationError, match="loopback"):
+        replace(settings, openai_base_url="http://gateway.internal.example:3001/v1").validate()
