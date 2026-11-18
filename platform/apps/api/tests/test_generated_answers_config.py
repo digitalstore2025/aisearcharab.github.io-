@@ -188,3 +188,12 @@ def test_settings_repr_redacts_database_and_provider_secrets(settings: Settings)
         "gateway-secret-not-for-logs",
     ):
         assert secret not in rendered
+
+
+def test_provider_response_size_limit_is_bounded(settings: Settings) -> None:
+    for value in (0, 16_383, 16_777_217):
+        with pytest.raises(ConfigurationError, match="OPENAI_MAX_RESPONSE_BYTES"):
+            replace(settings, openai_max_response_bytes=value).validate()
+
+    replace(settings, openai_max_response_bytes=16_384).validate()
+    replace(settings, openai_max_response_bytes=16_777_216).validate()
