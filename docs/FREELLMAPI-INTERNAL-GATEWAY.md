@@ -31,7 +31,8 @@ The model remains a claim selector. It must not author factual prose, citations,
 
 The API accepts these environment variables:
 
-- `OPENAI_API_KEY`: OpenAI API key or the FreeLLMAPI unified bearer token. Secret only; backend runtime only.
+- `OPENAI_API_KEY`: credential for the default OpenAI endpoint only. Secret; backend runtime only.
+- `OPENAI_GATEWAY_API_KEY`: separate FreeLLMAPI bearer token. Required when `OPENAI_BASE_URL` is configured and generated answers are enabled. It is rejected if the gateway URL is absent and is never sent to the public OpenAI endpoint.
 - `OPENAI_BASE_URL`: optional absolute API root ending in `/v1`. Omit it to use the OpenAI SDK default endpoint.
 - `OPENAI_GATEWAY_ALLOWED_ORIGINS`: exact comma-separated scheme/host/port allowlist; required for non-loopback gateways in development and for all configured gateways in staging/production. Wildcards, paths, and unapproved ports are rejected. Plain HTTP is permitted only for loopback hosts in local development.
 - `OPENAI_MODEL`: model alias accepted by the gateway catalog.
@@ -41,7 +42,7 @@ Example for a local API process running directly on the host:
 
 ```dotenv
 GENERATED_ANSWERS_ENABLED=true
-OPENAI_API_KEY=<secret-manager-value>
+OPENAI_GATEWAY_API_KEY=<gateway-secret-manager-value>
 OPENAI_BASE_URL=http://127.0.0.1:3001/v1
 OPENAI_MODEL=<verified-responses-compatible-model>
 ```
@@ -55,7 +56,7 @@ OPENAI_GATEWAY_ALLOWED_ORIGINS=https://freellmapi:3443
 
 Staging and production configuration must use HTTPS. URL credentials, query strings, fragments, non-`/v1` paths, and malformed ports are rejected during settings validation. Never place a token in the URL.
 
-The Docker Compose API runtime receives the gateway variables. The migration container deliberately does not receive the inference credential.
+The Docker Compose API runtime receives the gateway variables. The migration container deliberately does not receive either inference credential. `OPENAI_API_KEY` and `OPENAI_GATEWAY_API_KEY` are mutually scoped by the selected endpoint; the gateway token is never used as a fallback for the public OpenAI URL.
 
 ## Security boundary
 
