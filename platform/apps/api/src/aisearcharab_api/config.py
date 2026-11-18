@@ -79,6 +79,8 @@ def _gateway_origin_key(value: str) -> tuple[str, str, int] | None:
     if parsed.netloc.endswith(":"):
         return None
     hostname = parsed.hostname
+    if port is not None and not 1 <= port <= 65_535:
+        return None
     if (
         parsed.scheme not in {"http", "https"}
         or not hostname
@@ -93,7 +95,7 @@ def _gateway_origin_key(value: str) -> tuple[str, str, int] | None:
     ):
         return None
     scheme = parsed.scheme.lower()
-    return (scheme, hostname.rstrip(".").casefold(), port or (443 if scheme == "https" else 80))
+    return (scheme, hostname.rstrip(".").casefold(), port if port is not None else (443 if scheme == "https" else 80))
 
 
 def _valid_proxy_cidr(value: str) -> bool:
@@ -176,15 +178,6 @@ class Settings:
     openai_gateway_api_key: str | None = field(default=None, repr=False)
     generated_answers_provider: str = "disabled"
     openai_max_response_bytes: int = 1_048_576
-
-    @property
-    def generation_api_key(self) -> str | None:
-        """Select credentials strictly by endpoint; never reuse a gateway token for OpenAI."""
-        if self.generated_answers_provider == "gateway":
-            return self.openai_gateway_api_key
-        if self.generated_answers_provider == "openai":
-            return self.openai_api_key
-        return None
 
     @property
     def is_production(self) -> bool:
