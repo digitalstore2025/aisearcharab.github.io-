@@ -59,6 +59,7 @@ def _generate(
         request_id="req-integrity",
         api_key="unused-test-key",
         model="gpt-5.6-terra",
+        provider="openai",
         timeout_seconds=20,
         max_retries=2,
         max_output_tokens=1200,
