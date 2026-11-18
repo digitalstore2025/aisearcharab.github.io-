@@ -23,6 +23,34 @@ from .repository import list_indexed_content
 from .search import rank_items
 
 
+@dataclass(frozen=True, slots=True)
+class OpenAIProviderConfig:
+    """Credential bound to the public OpenAI endpoint."""
+
+    api_key: str
+
+    def __post_init__(self) -> None:
+        if not self.api_key.strip():
+            raise ValueError("OpenAI provider requires a non-empty API key")
+
+
+@dataclass(frozen=True, slots=True)
+class GatewayProviderConfig:
+    """Credential and destination are an indivisible private-gateway configuration."""
+
+    api_key: str
+    base_url: str
+
+    def __post_init__(self) -> None:
+        if not self.api_key.strip():
+            raise ValueError("gateway provider requires a non-empty API key")
+        if not self.base_url or not self.base_url.strip():
+            raise ValueError("gateway provider requires a non-empty explicit base_url")
+
+
+InferenceProviderConfig = OpenAIProviderConfig | GatewayProviderConfig
+
+
 class GroundedAnswerRequest(BaseModel):
     query: str = Field(min_length=2, max_length=500)
     max_sources: int | None = Field(default=None, ge=1, le=8)
@@ -421,38 +449,37 @@ def generate_grounded_answer(
     evidence: list[EvidenceItem],
     *,
     request_id: str,
-    api_key: str,
+    provider_config: InferenceProviderConfig,
     model: str,
-    provider: str,
     timeout_seconds: int,
     max_retries: int,
     max_output_tokens: int,
-    base_url: str | None = None,
     client: OpenAI | None = None,
 ) -> GroundedAnswerResponse:
     if not evidence:
         raise NoEvidenceError("no indexed evidence with approved claims matched the query")
-    if provider not in {"openai", "gateway"}:
-        raise ValueError("provider must be explicitly set to openai or gateway")
-    if provider == "gateway" and (base_url is None or not base_url.strip()):
-        raise ValueError("gateway provider requires a non-empty explicit base_url")
-    if provider == "openai" and base_url is not None:
-        raise ValueError("base_url must be unset when using the openai provider")
 
     if client is not None:
         openai_client = client
     else:
-        client_options: dict[str, object] = {
-            "api_key": api_key,
-            "timeout": timeout_seconds,
-            "max_retries": max_retries,
-            # Pass an explicit default so an empty Compose OPENAI_BASE_URL cannot
-            # override the SDK endpoint through its environment-variable fallback.
-            "base_url": base_url or "https://api.openai.com/v1",
-            # Never forward the shared bearer token or evidence through redirects.
-            "http_client": DefaultHttpx2Client(follow_redirects=False),
-        }
-        openai_client = OpenAI(**client_options)
+        if isinstance(provider_config, GatewayProviderConfig):
+            api_key = provider_config.api_key
+            base_url = provider_config.base_url
+        elif isinstance(provider_config, OpenAIProviderConfig):
+            api_key = provider_config.api_key
+            base_url = "https://api.openai.com/v1"
+        else:
+            raise TypeError("provider_config must be an OpenAIProviderConfig or GatewayProviderConfig")
+
+    client_options: dict[str, object] = {
+        "api_key": api_key,
+        "timeout": timeout_seconds,
+        "max_retries": max_retries,
+        "base_url": base_url,
+        # Never forward the shared bearer token or evidence through redirects.
+        "http_client": DefaultHttpx2Client(follow_redirects=False),
+    }
+    openai_client = OpenAI(**client_options)
     try:
         response = openai_client.responses.create(
             model=model,
