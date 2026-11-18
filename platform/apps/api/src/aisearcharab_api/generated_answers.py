@@ -423,6 +423,7 @@ def generate_grounded_answer(
     request_id: str,
     api_key: str,
     model: str,
+    provider: str,
     timeout_seconds: int,
     max_retries: int,
     max_output_tokens: int,
@@ -431,6 +432,12 @@ def generate_grounded_answer(
 ) -> GroundedAnswerResponse:
     if not evidence:
         raise NoEvidenceError("no indexed evidence with approved claims matched the query")
+    if provider not in {"openai", "gateway"}:
+        raise ValueError("provider must be explicitly set to openai or gateway")
+    if provider == "gateway" and base_url is None:
+        raise ValueError("gateway provider requires an explicit base_url")
+    if provider == "openai" and base_url is not None:
+        raise ValueError("base_url must be unset when using the openai provider")
 
     if client is not None:
         openai_client = client
