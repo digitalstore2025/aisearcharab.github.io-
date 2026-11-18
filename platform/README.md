@@ -52,21 +52,20 @@ OPENAI_API_KEY=<OpenAI secret-manager value>
 OPENAI_MODEL=<approved model identifier>
 GENERATED_ANSWER_MAX_REQUESTS=20
 GENERATED_ANSWER_WINDOW_SECONDS=3600
-\`\`\`
+```
 
-لاستخدام بوابة FreeLLMAPI الخاصة بدلاً من OpenAI، اختر المزود \`gateway\` واستخدم سرّاً منفصلاً؛ لا تضع رمز البوابة في \`OPENAI_API_KEY\`:
+لاستخدام بوابة FreeLLMAPI الخاصة بدلاً من OpenAI، اختر المزود `gateway` واستخدم سرّاً منفصلاً؛ لا تضع رمز البوابة في `OPENAI_API_KEY`:
 
-\`\`\`text
+```text
 GENERATED_ANSWERS_ENABLED=true
 GENERATED_ANSWERS_PROVIDER=gateway
 OPENAI_BASE_URL=https://freellmapi:3443/v1
 OPENAI_GATEWAY_ALLOWED_ORIGINS=https://freellmapi:3443
 OPENAI_GATEWAY_API_KEY=<gateway secret-manager value>
 OPENAI_MODEL=<approved model identifier>
-\`\`\`
-
-القيمة الافتراضية لـ\`GENERATED_ANSWERS_PROVIDER\` هي \`disabled\`. لا يُسمح بتشغيل التوليد دون اختيار صريح للمزود. عنوان البوابة يتطلب HTTPS وقائمة أصل دقيقة في Staging/Production؛ HTTP محصور بعناوين loopback في التطوير المحلي.
 ```
+
+القيمة الافتراضية لـ`GENERATED_ANSWERS_PROVIDER` هي `disabled`. لا يُسمح بتشغيل التوليد دون اختيار صريح للمزود. عنوان البوابة يتطلب HTTPS وقائمة أصل دقيقة في Staging/Production؛ HTTP محصور بعناوين loopback في التطوير المحلي.
 
 المسار المدفوع `POST /v1/answers/grounded` يتطلب جلسة مصادقاً عليها وصلاحية `content:read` وCSRF صحيحاً. لا توجد anonymous generation endpoint. تفعيل Generated Answers في `production` ما يزال مرفوضاً برمجياً إلى أن تكتمل بوابات التشغيل المستقلة.
 
