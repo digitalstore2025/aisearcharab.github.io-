@@ -153,6 +153,7 @@ def grounded_answer(
             timeout_seconds=settings.openai_timeout_seconds,
             max_retries=settings.openai_max_retries,
             max_output_tokens=settings.openai_max_output_tokens,
+            max_response_bytes=settings.openai_max_response_bytes,
         )
         return latest_result
 
