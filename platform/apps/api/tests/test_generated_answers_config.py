@@ -159,4 +159,8 @@ def test_default_openai_credentials_are_selected_only_with_explicit_openai_provi
     )
     assert default_settings.generation_api_key == "openai-key-not-a-gateway-token"
     with pytest.raises(ConfigurationError, match="OPENAI_BASE_URL"):
-        replace(default_settings, openai_base_url="https://gateway.internal.example/v1").validate()
+        replace(
+            default_settings,
+            openai_base_url="https://gateway.internal.example/v1",
+            openai_gateway_allowed_origins=("https://gateway.internal.example",),
+        ).validate()
