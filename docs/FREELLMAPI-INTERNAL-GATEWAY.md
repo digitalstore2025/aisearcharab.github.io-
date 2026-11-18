@@ -33,6 +33,7 @@ The API accepts these environment variables:
 
 - `OPENAI_API_KEY`: OpenAI API key or the FreeLLMAPI unified bearer token. Secret only; backend runtime only.
 - `OPENAI_BASE_URL`: optional absolute API root ending in `/v1`. Omit it to use the OpenAI SDK default endpoint.
+- `OPENAI_ALLOWED_HOSTS`: exact comma-separated host allowlist; required when a gateway URL is configured in staging/production. Wildcards are rejected.
 - `OPENAI_MODEL`: model alias accepted by the gateway catalog.
 - `GENERATED_ANSWERS_ENABLED`: remains false by default.
 
@@ -56,6 +57,7 @@ FreeLLMAPI is a single-user gateway, not a multi-tenant service. Its unified tok
 Required deployment controls:
 
 1. Place FreeLLMAPI on a private network. Permit inbound traffic only from the FastAPI service.
+2. In staging/production, set `OPENAI_ALLOWED_HOSTS` to the exact private DNS hostname used by `OPENAI_BASE_URL`; wildcard entries are rejected. Enforce outbound network policy so the API can reach only the approved gateway and cannot send the shared bearer token or evidence to arbitrary public hosts. The application allowlist is not a substitute for firewall/egress enforcement.
 2. Do not publish the gateway port to the public Internet.
 3. Keep its dashboard and administrative endpoints private.
 4. Disable MCP unless a separate, reviewed use case requires it. MCP shares the gateway credential and exposes capabilities beyond simple inference.
