@@ -598,3 +598,11 @@ def test_provider_configs_reject_empty_credentials_and_gateway_destinations() ->
         GatewayProviderConfig(api_key="", base_url="https://gateway.example/v1")
     with pytest.raises(ValueError, match="non-empty explicit base_url"):
         GatewayProviderConfig(api_key="gateway-token-not-a-production-secret", base_url=" ")
+
+    openai_config = OpenAIProviderConfig(api_key="openai-secret-not-for-repr")
+    gateway_config = GatewayProviderConfig(
+        api_key="gateway-secret-not-for-repr",
+        base_url="https://gateway.example/v1",
+    )
+    assert "openai-secret-not-for-repr" not in repr(openai_config)
+    assert "gateway-secret-not-for-repr" not in repr(gateway_config)
