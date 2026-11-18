@@ -162,6 +162,7 @@ def test_missing_provider_usage_fails_closed(usage: object | None, message: str)
             request_id="req-usage-integrity",
             api_key="unused-test-key",
             model="gpt-5.6-terra",
+            provider="openai",
             timeout_seconds=20,
             max_retries=2,
             max_output_tokens=1200,
