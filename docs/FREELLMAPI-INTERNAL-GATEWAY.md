@@ -37,18 +37,20 @@ The API accepts these environment variables:
 - `OPENAI_MODEL`: model alias accepted by the gateway catalog.
 - `GENERATED_ANSWERS_ENABLED`: remains false by default.
 
-Example for local development only:
+Example for a local API process running directly on the host:
 
 ```dotenv
 GENERATED_ANSWERS_ENABLED=true
 OPENAI_API_KEY=<secret-manager-value>
-# Only when the API process runs directly on the host:
 OPENAI_BASE_URL=http://127.0.0.1:3001/v1
-# When the API runs in Compose, 127.0.0.1 refers to the API container itself.
-# Use the gateway service DNS name and a trusted TLS certificate instead:
+OPENAI_MODEL=<verified-responses-compatible-model>
+```
+
+For an API running inside Docker Compose, `127.0.0.1` refers to the API container itself. Put the gateway on the same Compose network and use its service DNS name with TLS and a matching certificate SAN:
+
+```dotenv
 OPENAI_BASE_URL=https://freellmapi:3443/v1
 OPENAI_GATEWAY_ALLOWED_ORIGINS=https://freellmapi:3443
-OPENAI_MODEL=<verified-responses-compatible-model>
 ```
 
 Staging and production configuration must use HTTPS. URL credentials, query strings, fragments, non-`/v1` paths, and malformed ports are rejected during settings validation. Never place a token in the URL.
