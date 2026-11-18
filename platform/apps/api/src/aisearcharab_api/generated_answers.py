@@ -21,6 +21,7 @@ from .arabic import normalize_text, tokenize
 from .models import ContentItem
 from .repository import list_indexed_content
 from .search import rank_items
+from .inference_client import ResponseSizeLimitTransport
 
 
 @dataclass(frozen=True, slots=True)
@@ -454,6 +455,7 @@ def generate_grounded_answer(
     timeout_seconds: int,
     max_retries: int,
     max_output_tokens: int,
+    max_response_bytes: int = 1_048_576,
     client: OpenAI | None = None,
 ) -> GroundedAnswerResponse:
     if not evidence:
@@ -477,7 +479,12 @@ def generate_grounded_answer(
             "max_retries": max_retries,
             "base_url": base_url,
             # Never forward the shared bearer token or evidence through redirects.
-            "http_client": DefaultHttpx2Client(follow_redirects=False),
+            "http_client": DefaultHttpx2Client(
+                transport=ResponseSizeLimitTransport(max_response_bytes),
+                follow_redirects=False,
+                headers={"Accept-Encoding": "identity"},
+                trust_env=False,
+            ),
         }
         openai_client = OpenAI(**client_options)
     try:
