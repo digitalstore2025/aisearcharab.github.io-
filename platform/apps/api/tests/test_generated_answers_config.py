@@ -150,6 +150,8 @@ def test_gateway_credentials_cannot_fall_back_to_the_public_openai_endpoint(sett
 
 
 def test_default_openai_credentials_are_selected_only_with_explicit_openai_provider(settings: Settings) -> None:
+    disabled_settings = replace(settings, openai_api_key="must-not-be-used-implicitly")
+    assert disabled_settings.generation_api_key is None
     default_settings = replace(
         settings,
         generated_answers_provider="openai",
