@@ -476,7 +476,7 @@ def test_grounded_endpoint_uses_configured_gateway_base_url(
     client.app.state.settings = replace(
         client.app.state.settings,
         generated_answers_enabled=True,
-        openai_api_key="gateway-token-not-a-production-secret",
+        openai_gateway_api_key="gateway-token-not-a-production-secret",
         openai_base_url=gateway_url,
     )
     captured: dict[str, object] = {}
