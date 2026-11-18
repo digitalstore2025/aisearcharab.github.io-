@@ -500,6 +500,7 @@ def test_grounded_endpoint_uses_configured_gateway_base_url(
         generated_answers_provider="gateway",
         openai_gateway_api_key="gateway-token-not-a-production-secret",
         openai_base_url=gateway_url,
+        openai_gateway_allowed_origins=("https://llm-gateway.internal.example",),
     )
     captured: dict[str, object] = {}
     fake = FakeOpenAI(_model_json())
