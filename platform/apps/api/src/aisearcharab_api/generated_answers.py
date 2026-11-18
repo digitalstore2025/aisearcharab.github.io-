@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
 from openai import (
@@ -28,7 +28,7 @@ from .inference_client import ResponseSizeLimitTransport
 class OpenAIProviderConfig:
     """Credential bound to the public OpenAI endpoint."""
 
-    api_key: str
+    api_key: str = field(repr=False)
 
     def __post_init__(self) -> None:
         if not self.api_key.strip():
@@ -39,7 +39,7 @@ class OpenAIProviderConfig:
 class GatewayProviderConfig:
     """Credential and destination are an indivisible private-gateway configuration."""
 
-    api_key: str
+    api_key: str = field(repr=False)
     base_url: str
 
     def __post_init__(self) -> None:
