@@ -12,7 +12,9 @@ from sqlalchemy.orm import Session
 from .auth import Principal, require_mutation
 from .database import get_db
 from .generated_answers import (
+    GatewayProviderConfig,
     GroundedAnswerRequest,
+    OpenAIProviderConfig,
     GroundedAnswerResponse,
     UpstreamInvalidResponseError,
     UpstreamUnavailableError,
@@ -132,14 +134,22 @@ def grounded_answer(
 
     def generate_step(evidence):
         nonlocal latest_result
+        if settings.generated_answers_provider == "gateway":
+            provider_config = GatewayProviderConfig(
+                api_key=settings.openai_gateway_api_key or "",
+                base_url=settings.openai_base_url or "",
+            )
+        elif settings.generated_answers_provider == "openai":
+            provider_config = OpenAIProviderConfig(api_key=settings.openai_api_key or "")
+        else:
+            raise RuntimeError("generated answers provider is not explicitly configured")
+
         latest_result = generate_grounded_answer(
             payload.query,
             evidence,
             request_id=request_id,
-            api_key=settings.generation_api_key or "",
+            provider_config=provider_config,
             model=settings.openai_model,
-            provider=settings.generated_answers_provider,
-            base_url=settings.openai_base_url,
             timeout_seconds=settings.openai_timeout_seconds,
             max_retries=settings.openai_max_retries,
             max_output_tokens=settings.openai_max_output_tokens,
