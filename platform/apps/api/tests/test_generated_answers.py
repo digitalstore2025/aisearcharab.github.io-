@@ -333,6 +333,7 @@ def test_model_authored_factual_prose_is_rejected_by_local_schema() -> None:
             request_id="req-extra-prose",
             api_key="unused-test-key",
             model="gpt-5.6-terra",
+            provider="openai",
             timeout_seconds=20,
             max_retries=2,
             max_output_tokens=1200,
@@ -453,6 +454,7 @@ def test_configured_gateway_base_url_is_passed_to_openai_sdk(monkeypatch: pytest
         request_id="req-private-gateway",
         api_key="gateway-token-not-a-production-secret",
         model="gpt-5.6-terra",
+        provider="gateway",
         timeout_seconds=20,
         max_retries=2,
         max_output_tokens=1200,
@@ -535,6 +537,7 @@ def test_default_openai_endpoint_is_explicit_when_gateway_is_unset(
         request_id="req-default-openai-endpoint",
         api_key="test-openai-key-not-a-production-secret",
         model="gpt-5.6-terra",
+        provider="openai",
         timeout_seconds=20,
         max_retries=2,
         max_output_tokens=1200,
@@ -543,3 +546,18 @@ def test_default_openai_endpoint_is_explicit_when_gateway_is_unset(
     assert result.generated is True
     assert captured["base_url"] == "https://api.openai.com/v1"
     assert transport_options == {"follow_redirects": False}
+
+
+def test_gateway_provider_cannot_fall_back_to_public_openai_without_base_url() -> None:
+    with pytest.raises(ValueError, match="explicit base_url"):
+        generate_grounded_answer(
+            "GPT-5",
+            _evidence(),
+            request_id="req-gateway-missing-url",
+            api_key="gateway-token-not-a-production-secret",
+            model="gpt-5.6-terra",
+            provider="gateway",
+            timeout_seconds=20,
+            max_retries=2,
+            max_output_tokens=1200,
+        )
