@@ -205,9 +205,11 @@ class Settings:
         if self.openai_base_url is not None:
             parsed_base_url = urlparse(self.openai_base_url)
             try:
-                parsed_base_url.port
+                gateway_port = parsed_base_url.port
             except ValueError as exc:
                 raise ConfigurationError("OPENAI_BASE_URL must contain a valid port") from exc
+            if gateway_port is not None and not 1 <= gateway_port <= 65_535:
+                raise ConfigurationError("OPENAI_BASE_URL port must be between 1 and 65535")
             allowed_schemes = {"https"} if secure_runtime else {"http", "https"}
             if (
                 parsed_base_url.scheme not in allowed_schemes
