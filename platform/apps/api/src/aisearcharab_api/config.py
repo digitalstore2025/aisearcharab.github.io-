@@ -50,8 +50,14 @@ def _valid_host(value: str) -> bool:
 
 
 def _valid_gateway_host(value: str) -> bool:
-    """Accept exact DNS hostnames only; wildcard gateway destinations are unsafe."""
-    return _valid_host(value) and "*" not in value and value == value.strip()
+    """Accept exact DNS hostnames or IP literals; wildcard gateway destinations are unsafe."""
+    if value != value.strip() or "*" in value:
+        return False
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        return _valid_host(value)
 
 
 def _gateway_host_is_loopback(value: str) -> bool:
@@ -69,6 +75,8 @@ def _gateway_origin_key(value: str) -> tuple[str, str, int] | None:
     try:
         port = parsed.port
     except ValueError:
+        return None
+    if parsed.netloc.endswith(":"):
         return None
     hostname = parsed.hostname
     if (
@@ -264,6 +272,7 @@ class Settings:
             if (
                 parsed_base_url.scheme not in allowed_schemes
                 or not parsed_base_url.hostname
+                or parsed_base_url.netloc.endswith(":")
                 or parsed_base_url.username
                 or parsed_base_url.password
                 or parsed_base_url.path != "/v1"
