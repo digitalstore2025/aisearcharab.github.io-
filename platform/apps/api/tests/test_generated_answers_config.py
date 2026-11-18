@@ -36,6 +36,7 @@ def test_openai_base_url_accepts_an_explicit_v1_gateway_in_development(settings:
         "https://gateway.example/v1#fragment",
         "https://gateway.example:invalid/v1",
         "https://gateway.example:65536/v1",
+        "https://gateway.example:/v1",
         "https://gateway.example/v1/",
         "https://gateway.example/v1///",
         "http://gateway.internal.example/v1",
@@ -87,7 +88,7 @@ def test_secure_runtime_requires_an_exact_gateway_origin_allowlist(settings: Set
 
 
 def test_gateway_origin_allowlist_rejects_wildcards_and_paths(settings: Settings) -> None:
-    for origin in ("https://*.example.com", "https://gateway.example/v1", "https://gateway.example:invalid"):
+    for origin in ("https://*.example.com", "https://gateway.example/v1", "https://gateway.example:invalid", "https://gateway.example:"):
         with pytest.raises(ConfigurationError, match="OPENAI_GATEWAY_ALLOWED_ORIGINS"):
             replace(settings, openai_gateway_allowed_origins=(origin,)).validate()
 
