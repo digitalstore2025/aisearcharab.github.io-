@@ -552,15 +552,18 @@ def test_default_openai_endpoint_is_explicit_when_gateway_is_unset(
 
 
 def test_gateway_provider_cannot_fall_back_to_public_openai_without_base_url() -> None:
-    with pytest.raises(ValueError, match="explicit base_url"):
-        generate_grounded_answer(
-            "GPT-5",
-            _evidence(),
-            request_id="req-gateway-missing-url",
-            api_key="gateway-token-not-a-production-secret",
-            model="gpt-5.6-terra",
-            provider="gateway",
-            timeout_seconds=20,
-            max_retries=2,
-            max_output_tokens=1200,
-        )
+    base_url_values = (None, "", "   ")
+    for index, base_url in enumerate(base_url_values):
+        with pytest.raises(ValueError, match="non-empty explicit base_url"):
+            generate_grounded_answer(
+                "GPT-5",
+                _evidence(),
+                request_id=f"req-gateway-missing-url-{index}",
+                api_key="gateway-token-not-a-production-secret",
+                model="gpt-5.6-terra",
+                provider="gateway",
+                timeout_seconds=20,
+                max_retries=2,
+                max_output_tokens=1200,
+                base_url=base_url,
+            )
