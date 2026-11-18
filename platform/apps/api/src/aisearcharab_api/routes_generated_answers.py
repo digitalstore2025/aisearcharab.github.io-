@@ -138,6 +138,7 @@ def grounded_answer(
             request_id=request_id,
             api_key=settings.generation_api_key or "",
             model=settings.openai_model,
+            provider=settings.generated_answers_provider,
             base_url=settings.openai_base_url,
             timeout_seconds=settings.openai_timeout_seconds,
             max_retries=settings.openai_max_retries,
