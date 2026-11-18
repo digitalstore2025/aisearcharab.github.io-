@@ -15,7 +15,9 @@ from aisearcharab_api.config import ConfigurationError, Settings
 from aisearcharab_api.generated_answers import (
     EvidenceClaim,
     EvidenceItem,
+    GatewayProviderConfig,
     ModelAnswerDraft,
+    OpenAIProviderConfig,
     UpstreamInvalidResponseError,
     _MAX_MODEL_INPUT_CHARS,
     _bounded_claims,
@@ -26,6 +28,7 @@ from aisearcharab_api.generated_answers import (
     generate_grounded_answer,
     retrieve_evidence,
 )
+from aisearcharab_api.inference_client import ResponseSizeLimitTransport
 from aisearcharab_api.models import Claim, ContentItem
 from aisearcharab_api.repository import list_indexed_content
 from conftest import csrf_from_client
@@ -63,6 +66,9 @@ class FakeOpenAI:
         model: str | None = "gpt-5.6-terra-2026-08-20",
     ) -> None:
         self.responses = FakeResponses(output_text, status=status, model=model)
+
+    def close(self) -> None:
+        return None
 
 
 def _model_json(*, claim_keys: list[str] | None = None, uncertainty: str = "low", **extra: object) -> str:
@@ -120,12 +126,15 @@ def test_generated_answers_are_disabled_and_require_authentication_and_csrf(
 
 
 def test_feature_flag_fails_closed_without_api_key(settings: Settings) -> None:
-    with pytest.raises(ConfigurationError, match="OPENAI_API_KEY"):
+    with pytest.raises(ConfigurationError, match="GENERATED_ANSWERS_PROVIDER"):
         replace(settings, generated_answers_enabled=True).validate()
+    with pytest.raises(ConfigurationError, match="OPENAI_API_KEY"):
+        replace(settings, generated_answers_enabled=True, generated_answers_provider="openai").validate()
 
     replace(
         settings,
         generated_answers_enabled=True,
+        generated_answers_provider="openai",
         openai_api_key="test-key-not-a-production-secret",
     ).validate()
 
@@ -293,7 +302,7 @@ def test_model_selects_claims_but_server_renders_exact_reviewed_text() -> None:
         "GPT-5",
         _evidence(),
         request_id="req-test-1",
-        api_key="unused-test-key",
+        provider_config=OpenAIProviderConfig(api_key="unused-test-key"),
         model="gpt-5.6-terra",
         timeout_seconds=20,
         max_retries=2,
@@ -328,7 +337,7 @@ def test_model_authored_factual_prose_is_rejected_by_local_schema() -> None:
             "GPT-5",
             _evidence(),
             request_id="req-extra-prose",
-            api_key="unused-test-key",
+            provider_config=OpenAIProviderConfig(api_key="unused-test-key"),
             model="gpt-5.6-terra",
             timeout_seconds=20,
             max_retries=2,
@@ -344,7 +353,7 @@ def test_model_provenance_fails_closed_when_provider_omits_model() -> None:
             "GPT-5",
             _evidence(),
             request_id="req-model-missing",
-            api_key="unused-test-key",
+            provider_config=OpenAIProviderConfig(api_key="unused-test-key"),
             model="gpt-5.6-terra",
             timeout_seconds=20,
             max_retries=2,
@@ -360,7 +369,7 @@ def test_incomplete_provider_response_fails_closed() -> None:
             "GPT-5",
             _evidence(),
             request_id="req-incomplete",
-            api_key="unused-test-key",
+            provider_config=OpenAIProviderConfig(api_key="unused-test-key"),
             model="gpt-5.6-terra",
             timeout_seconds=20,
             max_retries=2,
@@ -426,3 +435,174 @@ def test_source_metadata_is_bounded_and_never_sent_to_model() -> None:
 
     payload = json.loads(_input_payload("GPT-5", _evidence()))
     assert "source_urls" not in payload["evidence"][0]
+
+
+def test_configured_gateway_base_url_is_passed_to_openai_sdk(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: dict[str, object] = {}
+    fake = FakeOpenAI(_model_json())
+
+    def fake_factory(**kwargs: object) -> FakeOpenAI:
+        captured.update(kwargs)
+        return fake
+
+    transport_options: dict[str, object] = {}
+
+    def fake_http_client_factory(**kwargs: object) -> object:
+        transport_options.update(kwargs)
+        return object()
+
+    response_limit_values: list[int] = []
+    monkeypatch.setattr(
+        "aisearcharab_api.generated_answers.ResponseSizeLimitTransport",
+        lambda limit: response_limit_values.append(limit) or ResponseSizeLimitTransport(limit),
+    )
+    monkeypatch.setattr("aisearcharab_api.generated_answers.DefaultHttpx2Client", fake_http_client_factory)
+    monkeypatch.setattr("aisearcharab_api.generated_answers.OpenAI", fake_factory)
+    result = generate_grounded_answer(
+        "GPT-5",
+        _evidence(),
+        request_id="req-private-gateway",
+        provider_config=GatewayProviderConfig(
+            api_key="gateway-token-not-a-production-secret",
+            base_url="https://llm-gateway.internal.example/v1",
+        ),
+        model="gpt-5.6-terra",
+        timeout_seconds=20,
+        max_retries=2,
+        max_output_tokens=1200,
+    )
+
+    assert result.generated is True
+    assert {key: value for key, value in captured.items() if key != "http_client"} == {
+        "api_key": "gateway-token-not-a-production-secret",
+        "timeout": 20,
+        "max_retries": 2,
+        "base_url": "https://llm-gateway.internal.example/v1",
+    }
+    assert "http_client" in captured
+    assert transport_options["follow_redirects"] is False
+    assert transport_options["headers"] == {"Accept-Encoding": "identity"}
+    assert transport_options["trust_env"] is False
+    assert isinstance(transport_options["transport"], ResponseSizeLimitTransport)
+    assert transport_options["transport"]._max_response_bytes == 1_048_576
+    assert response_limit_values == [1_048_576]
+
+
+def test_grounded_endpoint_uses_configured_gateway_base_url(
+    client: TestClient,
+    owner_credentials: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    gateway_url = "https://llm-gateway.internal.example/v1"
+    client.app.state.settings = replace(
+        client.app.state.settings,
+        generated_answers_enabled=True,
+        generated_answers_provider="gateway",
+        openai_gateway_api_key="gateway-token-not-a-production-secret",
+        openai_base_url=gateway_url,
+        openai_gateway_allowed_origins=("https://llm-gateway.internal.example",),
+    )
+    captured: dict[str, object] = {}
+    fake = FakeOpenAI(_model_json())
+
+    def fake_factory(**kwargs: object) -> FakeOpenAI:
+        captured.update(kwargs)
+        return fake
+
+    transport_options: dict[str, object] = {}
+    response_limit_values: list[int] = []
+
+    def fake_http_client_factory(**kwargs: object) -> object:
+        transport_options.update(kwargs)
+        return object()
+
+    monkeypatch.setattr(
+        "aisearcharab_api.generated_answers.ResponseSizeLimitTransport",
+        lambda limit: response_limit_values.append(limit) or ResponseSizeLimitTransport(limit),
+    )
+    monkeypatch.setattr("aisearcharab_api.generated_answers.DefaultHttpx2Client", fake_http_client_factory)
+    monkeypatch.setattr("aisearcharab_api.generated_answers.OpenAI", fake_factory)
+    monkeypatch.setattr(
+        "aisearcharab_api.routes_generated_answers.retrieve_evidence",
+        lambda *args, **kwargs: _evidence(),
+    )
+    monkeypatch.setattr(
+        "aisearcharab_api.routes_generated_answers.revalidate_selected_evidence",
+        lambda *args, **kwargs: True,
+    )
+
+    assert client.post("/v1/auth/login", json=owner_credentials).status_code == 200
+    response = client.post(
+        "/v1/answers/grounded",
+        headers={"X-CSRF-Token": csrf_from_client(client)},
+        json={"query": "GPT-5"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert captured["base_url"] == gateway_url
+    assert captured["api_key"] == "gateway-token-not-a-production-secret"
+    assert transport_options["follow_redirects"] is False
+    assert transport_options["headers"] == {"Accept-Encoding": "identity"}
+    assert transport_options["trust_env"] is False
+    assert isinstance(transport_options["transport"], ResponseSizeLimitTransport)
+    assert response_limit_values == [1_048_576]
+
+
+def test_default_openai_endpoint_is_explicit_when_gateway_is_unset(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, object] = {}
+    transport_options: dict[str, object] = {}
+    fake = FakeOpenAI(_model_json())
+
+    def fake_factory(**kwargs: object) -> FakeOpenAI:
+        captured.update(kwargs)
+        return fake
+
+    def fake_http_client_factory(**kwargs: object) -> object:
+        transport_options.update(kwargs)
+        return object()
+
+    response_limit_values: list[int] = []
+    monkeypatch.setattr(
+        "aisearcharab_api.generated_answers.ResponseSizeLimitTransport",
+        lambda limit: response_limit_values.append(limit) or ResponseSizeLimitTransport(limit),
+    )
+    monkeypatch.setattr("aisearcharab_api.generated_answers.DefaultHttpx2Client", fake_http_client_factory)
+    monkeypatch.setattr("aisearcharab_api.generated_answers.OpenAI", fake_factory)
+    result = generate_grounded_answer(
+        "GPT-5",
+        _evidence(),
+        request_id="req-default-openai-endpoint",
+        provider_config=OpenAIProviderConfig(api_key="test-openai-key-not-a-production-secret"),
+        model="gpt-5.6-terra",
+        timeout_seconds=20,
+        max_retries=2,
+        max_output_tokens=1200,
+    )
+
+    assert result.generated is True
+    assert captured["base_url"] == "https://api.openai.com/v1"
+    assert transport_options["follow_redirects"] is False
+    assert transport_options["headers"] == {"Accept-Encoding": "identity"}
+    assert transport_options["trust_env"] is False
+    assert isinstance(transport_options["transport"], ResponseSizeLimitTransport)
+    assert response_limit_values == [1_048_576]
+
+
+
+def test_provider_configs_reject_empty_credentials_and_gateway_destinations() -> None:
+    with pytest.raises(ValueError, match="non-empty API key"):
+        OpenAIProviderConfig(api_key="   ")
+    with pytest.raises(ValueError, match="non-empty API key"):
+        GatewayProviderConfig(api_key="", base_url="https://gateway.example/v1")
+    with pytest.raises(ValueError, match="non-empty explicit base_url"):
+        GatewayProviderConfig(api_key="gateway-token-not-a-production-secret", base_url=" ")
+
+    openai_config = OpenAIProviderConfig(api_key="openai-secret-not-for-repr")
+    gateway_config = GatewayProviderConfig(
+        api_key="gateway-secret-not-for-repr",
+        base_url="https://gateway.example/v1",
+    )
+    assert "openai-secret-not-for-repr" not in repr(openai_config)
+    assert "gateway-secret-not-for-repr" not in repr(gateway_config)

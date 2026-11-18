@@ -53,14 +53,33 @@ POST /v1/answers/grounded
 - تسجل نتائج generation كـaudit events مع `model`, latency, uncertainty وعدادات الاستخدام العددية (`input_units`, `output_units`, `total_units`) من دون تسجيل نص السؤال أو الأسرار.
 - تُحوّل حالات provider غير المتوقعة إلى أخطاء API محكومة بدلاً من تسريبها كـ500 غير مصنف.
 
+### بوابة OpenAI-compatible داخلية (اختيارية)
+
+يمكن توجيه طلبات Responses API إلى بوابة داخلية متوافقة مع OpenAI، مثل FreeLLMAPI، عبر `OPENAI_BASE_URL`. يبقى التكامل معطلاً ما لم تُضبط الإعدادات صراحةً، ولا يغيّر عقد الإجابة المحكومة أو صلاحيات المستخدمين أو حصصهم المحلية.
+
+- اختر `GENERATED_ANSWERS_PROVIDER=openai` لاستخدام `OPENAI_API_KEY` مع نقطة OpenAI الافتراضية، أو `gateway` لاستخدام `OPENAI_BASE_URL` و`OPENAI_GATEWAY_API_KEY` المنفصلين. يفرض عميل HTTP سقفاً افتراضياً قدره 1 MiB (قابل للضبط بين 16 KiB و16 MiB) على جسم الاستجابة أثناء التدفق وقبل تخزينه في الذاكرة؛ يطلب العميل `identity` ويرفض الاستجابات المضغوطة. القيمة الافتراضية `disabled`؛ لا يبدأ التوليد قبل اختيار مزود صريح. يرفض التطبيق خلط مفاتيح المزودين أو تشغيل البوابة دون عنوانها وسرها.
+- عند استخدام بوابة غير loopback، اضبط `OPENAI_GATEWAY_ALLOWED_ORIGINS` على الأصل الكامل المسموح به حرفياً بصيغة scheme/host/port؛ يتحقق التطبيق من المنفذ أيضاً ويرفض wildcard أو أي أصل آخر. في Staging/Production يلزم HTTPS وقائمة مطابقة. يجب أيضاً فرض قيود خروج شبكية تمنع الوصول إلى الوجهات العامة؛ قائمة التطبيق ليست بديلاً عن جدار الحماية.
+- HTTP مسموح فقط إلى `localhost` أو loopback في التطوير المحلي. لا تضع بيانات اعتماد أو query strings في عنوان URL.
+- عند تشغيل API داخل Docker Compose، لا تستخدم `127.0.0.1` للوصول إلى بوابة على المضيف؛ استخدم اسم خدمة البوابة على الشبكة المشتركة مع TLS موثوق وSAN مطابق.
+- يجب أن تكون FreeLLMAPI على شبكة خاصة، وألا يتصل بها المتصفح أو العملاء مباشرة. يظل FastAPI هو نقطة الدخول الوحيدة وهو المسؤول عن المصادقة وCSRF والحصص وسجل التدقيق.
+- FreeLLMAPI أحادي المستخدم؛ لا تستخدم رمزه الموحد كهوية عميل، ولا تمنح العملاء مفاتيح البوابة. لا تفعّل MCP أو لوحة إدارة FreeLLMAPI على واجهة عامة.
+- ثبّت إصداراً محدداً وصورة Docker ببصمة digest، ولا تستخدم `latest` في Staging/Production. لا تمنح الحاوية Docker Socket.
+- دعم `/v1/responses` وJSON Schema في البوابة لا يضمن أن كل مزود upstream ينفذ القيود الصارمة بالطريقة نفسها؛ يظل تحقق Pydantic المحلي وفشل الاستجابة غير الصالحة إلزاميين.
+- لا يُفترض أن سماح MIT في كود البوابة يمنح حق إعادة بيع خدمات المزودين. افحص شروط كل مزود وسياسة الاحتفاظ بالبيانات قبل أي استخدام تجاري أو إنتاجي.
+
+التفاصيل ومعايير القبول في `docs/FREELLMAPI-INTERNAL-GATEWAY.md`.
+
 ### تفعيلها
 
 ضع القيم عبر بيئة التشغيل/Secret Manager، لا داخل Git:
 
 ```bash
 GENERATED_ANSWERS_ENABLED=true
-OPENAI_API_KEY=<secret-manager-value>
-OPENAI_MODEL=gpt-5.6-terra
+GENERATED_ANSWERS_PROVIDER=gateway
+OPENAI_GATEWAY_API_KEY=<gateway-secret-manager-value>
+OPENAI_BASE_URL=https://freellmapi.internal:3443/v1
+OPENAI_GATEWAY_ALLOWED_ORIGINS=https://freellmapi.internal:3443
+OPENAI_MODEL=<verified-responses-compatible-model>
 GENERATED_ANSWER_MAX_REQUESTS=20
 GENERATED_ANSWER_WINDOW_SECONDS=3600
 ```

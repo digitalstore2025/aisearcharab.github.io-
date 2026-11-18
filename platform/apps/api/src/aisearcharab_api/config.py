@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import ipaddress
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import lru_cache
 from urllib.parse import unquote, urlparse
 
@@ -49,6 +49,55 @@ def _valid_host(value: str) -> bool:
     return all(part and part.replace("-", "").isalnum() for part in candidate.split("."))
 
 
+def _valid_gateway_host(value: str) -> bool:
+    """Accept exact DNS hostnames or IP literals; wildcard gateway destinations are unsafe."""
+    if value != value.strip() or "*" in value:
+        return False
+    try:
+        ipaddress.ip_address(value)
+        return True
+    except ValueError:
+        return _valid_host(value)
+
+
+def _gateway_host_is_loopback(value: str) -> bool:
+    if value.casefold().rstrip(".") == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(value).is_loopback
+    except ValueError:
+        return False
+
+
+def _gateway_origin_key(value: str) -> tuple[str, str, int] | None:
+    """Normalize an exact scheme/host/port origin; paths and wildcards are forbidden."""
+    parsed = urlparse(value)
+    try:
+        port = parsed.port
+    except ValueError:
+        return None
+    if port is not None and not 1 <= port <= 65_535:
+        return None
+    if parsed.netloc.endswith(":"):
+        return None
+    hostname = parsed.hostname
+    if (
+        parsed.scheme not in {"http", "https"}
+        or not hostname
+        or not _valid_gateway_host(hostname)
+        or parsed.username
+        or parsed.password
+        or parsed.path
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+        or any(ord(character) < 32 or character.isspace() for character in value)
+    ):
+        return None
+    scheme = parsed.scheme.lower()
+    return (scheme, hostname.rstrip(".").casefold(), port if port is not None else (443 if scheme == "https" else 80))
+
+
 def _valid_proxy_cidr(value: str) -> bool:
     try:
         network = ipaddress.ip_network(value, strict=False)
@@ -88,12 +137,12 @@ def _database_url_uses_placeholder_credential(value: str) -> bool:
 @dataclass(frozen=True, slots=True)
 class Settings:
     environment: str
-    database_url: str
+    database_url: str = field(repr=False)
     allowed_origins: tuple[str, ...]
     api_prefix: str
     max_search_limit: int
     log_queries: bool
-    query_hash_key: str | None = None
+    query_hash_key: str | None = field(default=None, repr=False)
     allowed_hosts: tuple[str, ...] = ("localhost", "127.0.0.1", "testserver")
     max_request_body_bytes: int = 524_288
     search_candidate_limit: int = 300
@@ -102,7 +151,7 @@ class Settings:
     step_up_ttl_minutes: int = 10
     login_max_failures: int = 5
     login_lock_minutes: int = 15
-    login_throttle_key: str | None = None
+    login_throttle_key: str | None = field(default=None, repr=False)
     login_throttle_max_failures: int = 8
     login_throttle_window_seconds: int = 300
     login_throttle_block_seconds: int = 300
@@ -110,11 +159,11 @@ class Settings:
     password_min_length: int = 14
     enforce_separation_of_duties: bool = False
     require_mfa_for_privileged: bool = False
-    mfa_encryption_key: str | None = None
+    mfa_encryption_key: str | None = field(default=None, repr=False)
     mfa_enrollment_ttl_minutes: int = 10
     mfa_issuer: str = "AISearcharab.com"
     generated_answers_enabled: bool = False
-    openai_api_key: str | None = None
+    openai_api_key: str | None = field(default=None, repr=False)
     openai_model: str = "gpt-5.6-terra"
     openai_timeout_seconds: int = 20
     openai_max_retries: int = 2
@@ -123,6 +172,12 @@ class Settings:
     generated_answer_max_evidence_chars: int = 6000
     generated_answer_max_requests: int = 20
     generated_answer_window_seconds: int = 3600
+    # Appended to preserve the positional order of all pre-existing Settings fields.
+    openai_base_url: str | None = None
+    openai_gateway_allowed_origins: tuple[str, ...] = ()
+    openai_gateway_api_key: str | None = field(default=None, repr=False)
+    generated_answers_provider: str = "disabled"
+    openai_max_response_bytes: int = 1_048_576
 
     @property
     def is_production(self) -> bool:
@@ -201,6 +256,57 @@ class Settings:
             )
         if self.log_queries and (self.query_hash_key is None or len(self.query_hash_key.encode("utf-8")) < 32):
             raise ConfigurationError("QUERY_HASH_KEY must contain at least 32 bytes when query logging is enabled")
+        allowed_gateway_origins = {
+            origin
+            for value in self.openai_gateway_allowed_origins
+            if (origin := _gateway_origin_key(value)) is not None
+        }
+        if len(allowed_gateway_origins) != len(self.openai_gateway_allowed_origins):
+            raise ConfigurationError(
+                "OPENAI_GATEWAY_ALLOWED_ORIGINS must contain exact scheme/host/port origins without paths or wildcards"
+            )
+        if self.openai_base_url is not None:
+            parsed_base_url = urlparse(self.openai_base_url)
+            try:
+                gateway_port = parsed_base_url.port
+            except ValueError as exc:
+                raise ConfigurationError("OPENAI_BASE_URL must contain a valid port") from exc
+            if gateway_port is not None and not 1 <= gateway_port <= 65_535:
+                raise ConfigurationError("OPENAI_BASE_URL port must be between 1 and 65535")
+            allowed_schemes = {"https"} if secure_runtime else {"http", "https"}
+            if (
+                parsed_base_url.scheme not in allowed_schemes
+                or not parsed_base_url.hostname
+                or parsed_base_url.netloc.endswith(":")
+                or parsed_base_url.username
+                or parsed_base_url.password
+                or parsed_base_url.path != "/v1"
+                or parsed_base_url.params
+                or parsed_base_url.query
+                or parsed_base_url.fragment
+                or any(ord(character) < 32 or character.isspace() for character in self.openai_base_url)
+            ):
+                raise ConfigurationError(
+                    "OPENAI_BASE_URL must be an absolute /v1 URL without credentials, query, or fragment; "
+                    "staging and production require HTTPS"
+                )
+            gateway_host = parsed_base_url.hostname
+            is_loopback = _gateway_host_is_loopback(gateway_host)
+            if parsed_base_url.scheme == "http" and not is_loopback:
+                raise ConfigurationError("HTTP OPENAI_BASE_URL is allowed only for loopback hosts; use HTTPS otherwise")
+            gateway_scheme = parsed_base_url.scheme.lower()
+            gateway_origin = (
+                gateway_scheme,
+                gateway_host.rstrip(".").casefold(),
+                gateway_port or (443 if gateway_scheme == "https" else 80),
+            )
+            if (secure_runtime or not is_loopback) and gateway_origin not in allowed_gateway_origins:
+                raise ConfigurationError(
+                    "OPENAI_BASE_URL scheme, host, and port must exactly match an entry in "
+                    "OPENAI_GATEWAY_ALLOWED_ORIGINS"
+                )
+        if not 16_384 <= self.openai_max_response_bytes <= 16_777_216:
+            raise ConfigurationError("OPENAI_MAX_RESPONSE_BYTES must be between 16384 and 16777216")
         if not 5 <= self.openai_timeout_seconds <= 120:
             raise ConfigurationError("OPENAI_TIMEOUT_SECONDS must be between 5 and 120")
         if not 0 <= self.openai_max_retries <= 5:
@@ -217,8 +323,22 @@ class Settings:
             raise ConfigurationError("GENERATED_ANSWER_WINDOW_SECONDS must be between 60 and 86400")
         if not 2 <= len(self.openai_model.strip()) <= 100:
             raise ConfigurationError("OPENAI_MODEL must contain between 2 and 100 characters")
-        if self.generated_answers_enabled and not self.openai_api_key:
-            raise ConfigurationError("OPENAI_API_KEY is required when generated answers are enabled")
+        if self.generated_answers_provider not in {"disabled", "openai", "gateway"}:
+            raise ConfigurationError("GENERATED_ANSWERS_PROVIDER must be disabled, openai, or gateway")
+        if self.openai_gateway_api_key and self.openai_base_url is None:
+            raise ConfigurationError("OPENAI_GATEWAY_API_KEY requires OPENAI_BASE_URL")
+        if self.generated_answers_provider == "gateway" and self.openai_base_url is None:
+            raise ConfigurationError("OPENAI_BASE_URL is required when GENERATED_ANSWERS_PROVIDER=gateway")
+        if self.generated_answers_provider == "openai" and self.openai_base_url is not None:
+            raise ConfigurationError("OPENAI_BASE_URL must be unset when GENERATED_ANSWERS_PROVIDER=openai")
+        if self.generated_answers_provider == "gateway" and self.openai_api_key:
+            raise ConfigurationError("OPENAI_API_KEY must be unset when GENERATED_ANSWERS_PROVIDER=gateway")
+        if self.generated_answers_enabled and self.generated_answers_provider == "disabled":
+            raise ConfigurationError("GENERATED_ANSWERS_PROVIDER must be explicitly selected when generated answers are enabled")
+        if self.generated_answers_enabled and self.generated_answers_provider == "gateway" and not self.openai_gateway_api_key:
+            raise ConfigurationError("OPENAI_GATEWAY_API_KEY is required for the gateway provider")
+        if self.generated_answers_enabled and self.generated_answers_provider == "openai" and not self.openai_api_key:
+            raise ConfigurationError("OPENAI_API_KEY is required for the OpenAI provider")
         if secure_runtime:
             if not self.require_mfa_for_privileged:
                 raise ConfigurationError("REQUIRE_MFA_FOR_PRIVILEGED must be enabled in staging and production")
@@ -274,6 +394,11 @@ def get_settings() -> Settings:
         mfa_issuer=os.getenv("MFA_ISSUER", "AISearcharab.com").strip(),
         generated_answers_enabled=_bool(os.getenv("GENERATED_ANSWERS_ENABLED", "false")),
         openai_api_key=os.getenv("OPENAI_API_KEY") or None,
+        openai_base_url=os.getenv("OPENAI_BASE_URL", "").strip() or None,
+        openai_gateway_allowed_origins=_csv(os.getenv("OPENAI_GATEWAY_ALLOWED_ORIGINS", "")),
+        openai_gateway_api_key=os.getenv("OPENAI_GATEWAY_API_KEY") or None,
+        generated_answers_provider=os.getenv("GENERATED_ANSWERS_PROVIDER", "disabled").strip().lower(),
+        openai_max_response_bytes=_int("OPENAI_MAX_RESPONSE_BYTES", os.getenv("OPENAI_MAX_RESPONSE_BYTES", "1048576")),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-5.6-terra").strip(),
         openai_timeout_seconds=_int("OPENAI_TIMEOUT_SECONDS", os.getenv("OPENAI_TIMEOUT_SECONDS", "20")),
         openai_max_retries=_int("OPENAI_MAX_RETRIES", os.getenv("OPENAI_MAX_RETRIES", "2")),

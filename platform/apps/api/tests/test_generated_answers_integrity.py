@@ -10,6 +10,7 @@ from openai import OpenAI
 from aisearcharab_api.generated_answers import (
     EvidenceClaim,
     EvidenceItem,
+    OpenAIProviderConfig,
     UpstreamInvalidResponseError,
     generate_grounded_answer,
 )
@@ -57,7 +58,7 @@ def _generate(
         "test query",
         evidence,
         request_id="req-integrity",
-        api_key="unused-test-key",
+        provider_config=OpenAIProviderConfig(api_key="unused-test-key"),
         model="gpt-5.6-terra",
         timeout_seconds=20,
         max_retries=2,
@@ -159,7 +160,7 @@ def test_missing_provider_usage_fails_closed(usage: object | None, message: str)
             "test query",
             evidence,
             request_id="req-usage-integrity",
-            api_key="unused-test-key",
+            provider_config=OpenAIProviderConfig(api_key="unused-test-key"),
             model="gpt-5.6-terra",
             timeout_seconds=20,
             max_retries=2,

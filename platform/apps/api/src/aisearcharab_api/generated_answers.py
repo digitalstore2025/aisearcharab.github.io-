@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal
 
-from openai import APIConnectionError, APIError, APITimeoutError, InternalServerError, OpenAI, RateLimitError
+from openai import (
+    APIConnectionError,
+    APIError,
+    APITimeoutError,
+    DefaultHttpx2Client,
+    InternalServerError,
+    OpenAI,
+    RateLimitError,
+)
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -13,6 +21,35 @@ from .arabic import normalize_text, tokenize
 from .models import ContentItem
 from .repository import list_indexed_content
 from .search import rank_items
+from .inference_client import ResponseSizeLimitTransport
+
+
+@dataclass(frozen=True, slots=True)
+class OpenAIProviderConfig:
+    """Credential bound to the public OpenAI endpoint."""
+
+    api_key: str = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if not self.api_key.strip():
+            raise ValueError("OpenAI provider requires a non-empty API key")
+
+
+@dataclass(frozen=True, slots=True)
+class GatewayProviderConfig:
+    """Credential and destination are an indivisible private-gateway configuration."""
+
+    api_key: str = field(repr=False)
+    base_url: str
+
+    def __post_init__(self) -> None:
+        if not self.api_key.strip():
+            raise ValueError("gateway provider requires a non-empty API key")
+        if not self.base_url or not self.base_url.strip():
+            raise ValueError("gateway provider requires a non-empty explicit base_url")
+
+
+InferenceProviderConfig = OpenAIProviderConfig | GatewayProviderConfig
 
 
 class GroundedAnswerRequest(BaseModel):
@@ -413,17 +450,44 @@ def generate_grounded_answer(
     evidence: list[EvidenceItem],
     *,
     request_id: str,
-    api_key: str,
+    provider_config: InferenceProviderConfig,
     model: str,
     timeout_seconds: int,
     max_retries: int,
     max_output_tokens: int,
+    max_response_bytes: int = 1_048_576,
     client: OpenAI | None = None,
 ) -> GroundedAnswerResponse:
     if not evidence:
         raise NoEvidenceError("no indexed evidence with approved claims matched the query")
 
-    openai_client = client or OpenAI(api_key=api_key, timeout=timeout_seconds, max_retries=max_retries)
+    owns_client = client is None
+    if client is not None:
+        openai_client = client
+    else:
+        if isinstance(provider_config, GatewayProviderConfig):
+            api_key = provider_config.api_key
+            base_url = provider_config.base_url
+        elif isinstance(provider_config, OpenAIProviderConfig):
+            api_key = provider_config.api_key
+            base_url = "https://api.openai.com/v1"
+        else:
+            raise TypeError("provider_config must be an OpenAIProviderConfig or GatewayProviderConfig")
+
+        client_options: dict[str, object] = {
+            "api_key": api_key,
+            "timeout": timeout_seconds,
+            "max_retries": max_retries,
+            "base_url": base_url,
+            # Never forward the shared bearer token or evidence through redirects.
+            "http_client": DefaultHttpx2Client(
+                transport=ResponseSizeLimitTransport(max_response_bytes),
+                follow_redirects=False,
+                headers={"Accept-Encoding": "identity"},
+                trust_env=False,
+            ),
+        }
+        openai_client = OpenAI(**client_options)
     try:
         response = openai_client.responses.create(
             model=model,
@@ -444,6 +508,9 @@ def generate_grounded_answer(
         raise UpstreamUnavailableError("OpenAI is temporarily unavailable") from exc
     except APIError as exc:
         raise UpstreamUnavailableError("OpenAI request failed") from exc
+    finally:
+        if owns_client:
+            openai_client.close()
 
     if getattr(response, "status", None) != "completed":
         raise UpstreamInvalidResponseError("OpenAI response did not complete")

@@ -112,6 +112,7 @@ def test_http_generation_quota_blocks_before_second_provider_call(
     runtime_settings = replace(
         settings,
         generated_answers_enabled=True,
+        generated_answers_provider="openai",
         openai_api_key="test-key-not-a-production-secret",
         generated_answer_max_requests=1,
         generated_answer_window_seconds=3600,
