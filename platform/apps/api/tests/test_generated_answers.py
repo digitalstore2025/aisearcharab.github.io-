@@ -67,6 +67,9 @@ class FakeOpenAI:
     ) -> None:
         self.responses = FakeResponses(output_text, status=status, model=model)
 
+    def close(self) -> None:
+        return None
+
 
 def _model_json(*, claim_keys: list[str] | None = None, uncertainty: str = "low", **extra: object) -> str:
     payload: dict[str, object] = {
