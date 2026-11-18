@@ -4,7 +4,15 @@ import json
 from dataclasses import dataclass
 from typing import Literal
 
-from openai import APIConnectionError, APIError, APITimeoutError, InternalServerError, OpenAI, RateLimitError
+from openai import (
+    APIConnectionError,
+    APIError,
+    APITimeoutError,
+    DefaultHttpx2Client,
+    InternalServerError,
+    OpenAI,
+    RateLimitError,
+)
 from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -431,9 +439,12 @@ def generate_grounded_answer(
             "api_key": api_key,
             "timeout": timeout_seconds,
             "max_retries": max_retries,
+            # Pass an explicit default so an empty Compose OPENAI_BASE_URL cannot
+            # override the SDK endpoint through its environment-variable fallback.
+            "base_url": base_url or "https://api.openai.com/v1",
+            # Never forward the shared bearer token or evidence through redirects.
+            "http_client": DefaultHttpx2Client(follow_redirects=False),
         }
-        if base_url is not None:
-            client_options["base_url"] = base_url
         openai_client = OpenAI(**client_options)
     try:
         response = openai_client.responses.create(
