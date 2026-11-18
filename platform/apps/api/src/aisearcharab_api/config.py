@@ -174,11 +174,16 @@ class Settings:
     openai_base_url: str | None = None
     openai_gateway_allowed_origins: tuple[str, ...] = ()
     openai_gateway_api_key: str | None = None
+    generated_answers_provider: str = "disabled"
 
     @property
     def generation_api_key(self) -> str | None:
         """Select credentials strictly by endpoint; never reuse a gateway token for OpenAI."""
-        return self.openai_gateway_api_key if self.openai_base_url is not None else self.openai_api_key
+        if self.generated_answers_provider == "gateway":
+            return self.openai_gateway_api_key
+        if self.generated_answers_provider == "openai":
+            return self.openai_api_key
+        return None
 
     @property
     def is_production(self) -> bool:
@@ -322,12 +327,22 @@ class Settings:
             raise ConfigurationError("GENERATED_ANSWER_WINDOW_SECONDS must be between 60 and 86400")
         if not 2 <= len(self.openai_model.strip()) <= 100:
             raise ConfigurationError("OPENAI_MODEL must contain between 2 and 100 characters")
+        if self.generated_answers_provider not in {"disabled", "openai", "gateway"}:
+            raise ConfigurationError("GENERATED_ANSWERS_PROVIDER must be disabled, openai, or gateway")
         if self.openai_gateway_api_key and self.openai_base_url is None:
             raise ConfigurationError("OPENAI_GATEWAY_API_KEY requires OPENAI_BASE_URL")
-        if self.generated_answers_enabled and self.openai_base_url is not None and not self.openai_gateway_api_key:
-            raise ConfigurationError("OPENAI_GATEWAY_API_KEY is required when a gateway URL is configured")
-        if self.generated_answers_enabled and self.openai_base_url is None and not self.openai_api_key:
-            raise ConfigurationError("OPENAI_API_KEY is required when generated answers use the default OpenAI endpoint")
+        if self.generated_answers_provider == "gateway" and self.openai_base_url is None:
+            raise ConfigurationError("OPENAI_BASE_URL is required when GENERATED_ANSWERS_PROVIDER=gateway")
+        if self.generated_answers_provider == "openai" and self.openai_base_url is not None:
+            raise ConfigurationError("OPENAI_BASE_URL must be unset when GENERATED_ANSWERS_PROVIDER=openai")
+        if self.generated_answers_provider == "gateway" and self.openai_api_key:
+            raise ConfigurationError("OPENAI_API_KEY must be unset when GENERATED_ANSWERS_PROVIDER=gateway")
+        if self.generated_answers_enabled and self.generated_answers_provider == "disabled":
+            raise ConfigurationError("GENERATED_ANSWERS_PROVIDER must be explicitly selected when generated answers are enabled")
+        if self.generated_answers_enabled and self.generated_answers_provider == "gateway" and not self.openai_gateway_api_key:
+            raise ConfigurationError("OPENAI_GATEWAY_API_KEY is required for the gateway provider")
+        if self.generated_answers_enabled and self.generated_answers_provider == "openai" and not self.openai_api_key:
+            raise ConfigurationError("OPENAI_API_KEY is required for the OpenAI provider")
         if secure_runtime:
             if not self.require_mfa_for_privileged:
                 raise ConfigurationError("REQUIRE_MFA_FOR_PRIVILEGED must be enabled in staging and production")
@@ -386,6 +401,7 @@ def get_settings() -> Settings:
         openai_base_url=os.getenv("OPENAI_BASE_URL", "").strip() or None,
         openai_gateway_allowed_origins=_csv(os.getenv("OPENAI_GATEWAY_ALLOWED_ORIGINS", "")),
         openai_gateway_api_key=os.getenv("OPENAI_GATEWAY_API_KEY") or None,
+        generated_answers_provider=os.getenv("GENERATED_ANSWERS_PROVIDER", "disabled").strip().lower(),
         openai_model=os.getenv("OPENAI_MODEL", "gpt-5.6-terra").strip(),        openai_timeout_seconds=_int("OPENAI_TIMEOUT_SECONDS", os.getenv("OPENAI_TIMEOUT_SECONDS", "20")),
         openai_max_retries=_int("OPENAI_MAX_RETRIES", os.getenv("OPENAI_MAX_RETRIES", "2")),
         openai_max_output_tokens=_int("OPENAI_MAX_OUTPUT_TOKENS", os.getenv("OPENAI_MAX_OUTPUT_TOKENS", "1200")),
