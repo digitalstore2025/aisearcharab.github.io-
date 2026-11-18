@@ -35,6 +35,7 @@ def test_openai_base_url_accepts_an_explicit_v1_gateway_in_development(settings:
         "https://gateway.example/v1?token=secret",
         "https://gateway.example/v1#fragment",
         "https://gateway.example:invalid/v1",
+        "https://gateway.example:65536/v1",
     ],
 )
 def test_openai_base_url_rejects_ambiguous_or_credential_bearing_urls(
