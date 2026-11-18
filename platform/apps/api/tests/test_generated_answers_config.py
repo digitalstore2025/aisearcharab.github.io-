@@ -164,3 +164,25 @@ def test_default_openai_credentials_are_selected_only_with_explicit_openai_provi
             openai_base_url="https://gateway.internal.example/v1",
             openai_gateway_allowed_origins=("https://gateway.internal.example",),
         ).validate()
+
+
+def test_settings_repr_redacts_database_and_provider_secrets(settings: Settings) -> None:
+    configured = replace(
+        settings,
+        database_url="postgresql+psycopg://db-user:db-password@db.example/aisearcharab",
+        query_hash_key="query-hash-secret-not-for-logs",
+        login_throttle_key="login-throttle-secret-not-for-logs",
+        mfa_encryption_key="mfa-encryption-secret-not-for-logs",
+        openai_api_key="openai-secret-not-for-logs",
+        openai_gateway_api_key="gateway-secret-not-for-logs",
+    )
+    rendered = repr(configured)
+    for secret in (
+        "db-password",
+        "query-hash-secret-not-for-logs",
+        "login-throttle-secret-not-for-logs",
+        "mfa-encryption-secret-not-for-logs",
+        "openai-secret-not-for-logs",
+        "gateway-secret-not-for-logs",
+    ):
+        assert secret not in rendered
